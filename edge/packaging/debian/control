@@ -1,0 +1,10 @@
+Package: ai-cctv-edge
+Version: 0.3.0
+Section: video
+Priority: optional
+Architecture: arm64
+Maintainer: Eye-O-T contributors
+Depends: python3 (>= 3.11), python3-venv, python3-gi, gir1.2-gstreamer-1.0, gstreamer1.0-tools, gstreamer1.0-libcamera, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav
+Description: AI_CCTV Raspberry Pi camera edge service
+ Captures H.264 camera video, exposes or publishes RTSP, keeps a bounded
+ local MPEG-TS backup and provides authenticated recovery transfer.

@@ -1,0 +1,28 @@
+[Unit]
+Description=AI_CCTV Raspberry Pi edge camera
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-cctv-edge
+Group=ai-cctv-edge
+ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml run
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+RuntimeDirectory=ai-cctv-edge
+StateDirectory=ai-cctv-edge
+LogsDirectory=ai-cctv-edge
+ConfigurationDirectory=ai-cctv-edge
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+# /etc, /usr and boot remain read-only. Other filesystems stay writable so a
+# setup-selected backup mount such as /mnt/cctv can be used by the service.
+ProtectSystem=full
+SupplementaryGroups=video
+
+[Install]
+WantedBy=multi-user.target

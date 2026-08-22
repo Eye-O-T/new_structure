@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+if [ "${1:-}" = "remove" ]; then
+    systemctl disable --now ai-cctv-edge.service || true
+fi
+

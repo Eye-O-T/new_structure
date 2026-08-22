@@ -1,0 +1,4 @@
+# Optional legacy Discord notification adapter only.
+# Copy to .proj_env or set the same operating-system environment variables.
+DISCORD_BOT_TOKEN=replace-me
+DISCORD_CHANNEL_ID=123456789012345678

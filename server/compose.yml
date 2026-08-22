@@ -1,0 +1,275 @@
+name: ${COMPOSE_PROJECT_NAME:-ai-cctv}
+
+x-python-healthcheck: &python-healthcheck
+  test:
+    - CMD
+    - python
+    - -c
+    - >-
+      import urllib.request;
+      urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()
+  interval: 10s
+  timeout: 5s
+  retries: 6
+  start_period: 20s
+
+x-service-logging: &service-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  data:
+    build:
+      context: ..
+      dockerfile: server/services/data/Dockerfile
+    image: ai-cctv-data:${AI_CCTV_VERSION:-0.3.0-dev}
+    user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${SECRETS_FILE:-./secrets/secrets.env}
+    environment:
+      AI_CCTV_CONFIG_FILE: /app/config/config.yaml
+      AI_CCTV_DATABASE_PATH: /data/database/ai_cctv.db
+      RECORDINGS_ROOT: /recordings
+      SNAPSHOTS_ROOT: /snapshots
+      # Compatibility aliases for the current Data Service settings module.
+      DATA_DATABASE_PATH: /data/database/ai_cctv.db
+      DATA_STORAGE_ROOT: /recordings
+      DATA_SNAPSHOT_ROOT: /snapshots
+      DATA_BACKUP_ROOT: /data/database/backups
+      RECOVERED_ROOT: /recovered
+      TZ: UTC
+    expose:
+      - "8000"
+    volumes:
+      - type: bind
+        source: ${CONFIG_FILE:-./config/config.yaml}
+        target: /app/config/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DATABASE_DIR:-./runtime/database}
+        target: /data/database
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RECORDINGS_DIR:-./runtime/recordings}
+        target: /recordings
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SNAPSHOTS_DIR:-./runtime/snapshots}
+        target: /snapshots
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RECOVERED_DIR:-./runtime/recovered}
+        target: /recovered
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck: *python-healthcheck
+    networks:
+      - internal
+    logging: *service-logging
+
+  external:
+    build:
+      context: ..
+      dockerfile: server/services/external/Dockerfile
+    image: ai-cctv-external:${AI_CCTV_VERSION:-0.3.0-dev}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${SECRETS_FILE:-./secrets/secrets.env}
+    environment:
+      AI_CCTV_CONFIG_FILE: /app/config/config.yaml
+      DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
+      DATA_BASE_URL: http://nginx:8080/internal/data/v1
+      DATA_HEALTH_URL: http://nginx:8080/internal/data/health/ready
+      MEDIA_CONTROL_URL: http://nginx:8080/internal/media
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
+      REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
+      ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-604800}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      PUBLIC_HLS_PREFIX: /hls
+      PUBLIC_PLAYBACK_PREFIX: /playback
+      TZ: UTC
+    expose:
+      - "8000"
+    volumes:
+      - type: bind
+        source: ${CONFIG_FILE:-./config/config.yaml}
+        target: /app/config/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      data:
+        condition: service_healthy
+    healthcheck: *python-healthcheck
+    networks:
+      - internal
+    logging: *service-logging
+
+  mediamtx:
+    build:
+      context: ./mediamtx
+      dockerfile: Dockerfile
+      args:
+        MEDIAMTX_UPSTREAM_IMAGE: ${MEDIAMTX_UPSTREAM_IMAGE:-bluenviron/mediamtx:1.9.0}
+        MEDIAMTX_WRAPPER_BASE_IMAGE: ${MEDIAMTX_WRAPPER_BASE_IMAGE:-alpine:3.20.3}
+    image: ai-cctv-mediamtx:1.9.0
+    user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${SECRETS_FILE:-./secrets/secrets.env}
+    environment:
+      TZ: UTC
+    ports:
+      - target: 8554
+        published: ${RTSP_PORT:-8554}
+        host_ip: ${RTSP_BIND_ADDRESS:-127.0.0.1}
+        protocol: tcp
+    expose:
+      - "8888"
+      - "9996"
+      - "9997"
+    volumes:
+      - type: bind
+        source: ./mediamtx/mediamtx.yml
+        target: /etc/mediamtx.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RECORDINGS_DIR:-./runtime/recordings}
+        target: /recordings
+        bind:
+          create_host_path: false
+    depends_on:
+      external:
+        # MediaMTX publish authentication becomes available as External reaches
+        # readiness. Starting it earlier avoids a boot cycle when External's
+        # readiness probe checks Data through the Nginx internal relay.
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - http://127.0.0.1:9997/v3/config/global/get
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - internal
+    logging: *service-logging
+
+  nginx:
+    image: ${NGINX_IMAGE:-nginx:1.27.2-alpine}
+    init: true
+    restart: unless-stopped
+    ports:
+      - target: 80
+        published: ${PUBLIC_HTTP_PORT:-80}
+        host_ip: ${PUBLIC_BIND_ADDRESS:-127.0.0.1}
+        protocol: tcp
+      - target: 443
+        published: ${PUBLIC_HTTPS_PORT:-443}
+        host_ip: ${PUBLIC_BIND_ADDRESS:-127.0.0.1}
+        protocol: tcp
+    expose:
+      - "8080"
+    volumes:
+      - type: bind
+        source: ./nginx/nginx.conf
+        target: /etc/nginx/nginx.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CERTS_DIR:-./runtime/certificates}
+        target: /etc/nginx/certs
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      data:
+        condition: service_healthy
+      external:
+        condition: service_started
+      mediamtx:
+        condition: service_started
+    healthcheck:
+      test: [CMD-SHELL, "wget -q -O - http://127.0.0.1/healthz | grep -q '^ok$'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    networks:
+      - internal
+    logging: *service-logging
+
+  inference:
+    build:
+      context: ..
+      dockerfile: server/services/inference/Dockerfile
+    image: ai-cctv-inference:${AI_CCTV_VERSION:-0.3.0-dev}
+    user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${SECRETS_FILE:-./secrets/secrets.env}
+    environment:
+      AI_CCTV_CONFIG_FILE: /app/config/config.yaml
+      DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
+      MEDIAMTX_RTSP_BASE_URL: rtsp://mediamtx:8554
+      SNAPSHOTS_ROOT: /snapshots
+      MODEL_FILE: ${MODEL_FILE:-default.pt}
+      MODEL_PATH: /models/${MODEL_FILE:-default.pt}
+      TZ: UTC
+    expose:
+      - "8000"
+    volumes:
+      - type: bind
+        source: ${CONFIG_FILE:-./config/config.yaml}
+        target: /app/config/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MODELS_DIR:-./runtime/models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SNAPSHOTS_DIR:-./runtime/snapshots}
+        target: /snapshots
+        bind:
+          create_host_path: false
+    depends_on:
+      mediamtx:
+        condition: service_healthy
+      nginx:
+        condition: service_healthy
+    healthcheck: *python-healthcheck
+    networks:
+      - internal
+    logging: *service-logging
+
+networks:
+  internal:
+    name: ${COMPOSE_PROJECT_NAME:-ai-cctv}_internal
+    driver: bridge

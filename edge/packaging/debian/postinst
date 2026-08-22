@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+if ! getent group ai-cctv-edge >/dev/null; then
+    addgroup --system ai-cctv-edge
+fi
+if ! getent passwd ai-cctv-edge >/dev/null; then
+    adduser --system --ingroup ai-cctv-edge --home /var/lib/ai-cctv-edge \
+        --no-create-home --disabled-login ai-cctv-edge
+fi
+usermod -a -G video ai-cctv-edge || true
+if getent group render >/dev/null; then
+    usermod -a -G render ai-cctv-edge || true
+fi
+
+python3 -m venv --system-site-packages /usr/lib/ai-cctv-edge/venv
+/usr/lib/ai-cctv-edge/venv/bin/pip install --no-index \
+    --find-links /usr/lib/ai-cctv-edge/wheels ai-cctv-edge==0.3.0
+
+install -d -m 0750 -o ai-cctv-edge -g ai-cctv-edge \
+    /var/lib/ai-cctv-edge/recordings /var/lib/ai-cctv-edge/state
+chown root:ai-cctv-edge /etc/ai-cctv-edge
+chmod 0750 /etc/ai-cctv-edge
+systemctl daemon-reload
+systemctl enable ai-cctv-edge.service

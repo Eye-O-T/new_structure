@@ -1,0 +1,32 @@
+schema_version: 1
+
+server:
+  public_http_port: 80
+  public_https_port: 443
+  rtsp_bind_address: 127.0.0.1
+  rtsp_port: 8554
+  timezone: Asia/Seoul
+
+recording:
+  root: /recordings
+  recovery_root: /recovered
+  segment_seconds: 60
+  retention_days: 7
+  warning_free_percent: 15
+  encryption_at_rest: false
+
+inference:
+  enabled: true
+  model_path: /models/default.pt
+  device: auto
+  confidence_threshold: 0.4
+  analysis_fps: 5
+  disappear_seconds: 3
+  event_pre_roll_seconds: 5
+  event_post_roll_seconds: 10
+
+cameras:
+  - camera_id: cam-001
+    name: entrance
+    stream_path: cam-001
+    enabled: true

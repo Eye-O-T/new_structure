@@ -1,0 +1,21 @@
+# Legacy PyQt prototype only. Central containers use service-local locks.
+# Install PyTorch separately for the target CPU/CUDA platform before this file.
+accelerate==1.6.0
+bitsandbytes==0.45.5
+discord.py==2.5.2
+fastapi==0.115.12
+insightface==0.7.3
+matplotlib==3.10.1
+numpy==1.26.4
+onnxruntime==1.21.0
+opencv-python==4.11.0.86
+Pillow==11.1.0
+psutil==7.0.0
+PyQt5==5.15.11
+PyYAML==6.0.2
+qwen-vl-utils==0.0.11
+requests==2.32.3
+scipy==1.15.2
+transformers==4.51.3
+ultralytics==8.3.111
+uvicorn==0.34.2

@@ -1,0 +1,30 @@
+schema_version = 1
+device_id = "edge-001"
+camera_id = "cam-001"
+
+[video]
+width = 1920
+height = 1080
+fps = 30
+bitrate_kbps = 4000
+encoder = "x264enc"
+
+[rtsp]
+mode = "central_publish"
+central_host = "192.0.2.10"
+central_port = 8554
+edge_port = 8554
+username = "cam-001"
+password_file = "/etc/ai-cctv-edge/publish.password"
+mediamtx_binary = "/usr/lib/ai-cctv-edge/mediamtx"
+
+[backup]
+root = "/var/lib/ai-cctv-edge/recordings"
+segment_seconds = 10
+max_bytes = 21474836480
+max_age_hours = 24
+
+[recovery]
+bind_host = "0.0.0.0"
+port = 8002
+token_file = "/etc/ai-cctv-edge/recovery.token"

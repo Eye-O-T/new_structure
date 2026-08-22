@@ -1,0 +1,2 @@
+-e .[test,configurator]
+-e ./edge

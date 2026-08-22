@@ -1,0 +1,30 @@
+# The central Python images are built from the repository root, but they only
+# need the installable package and their service-specific entrypoint files.
+**
+
+!pyproject.toml
+!requirements*.txt
+!uv.lock
+
+!src/
+!src/**
+
+!server/
+server/**
+!server/services/
+!server/services/**
+
+# Never send generated or secret material to a Docker build context.
+**/.env
+**/secrets.env
+**/runtime/
+**/certificates/
+**/*.key
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/build/
+**/dist/
+**/*.egg-info/

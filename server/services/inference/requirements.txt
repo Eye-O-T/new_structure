@@ -1,0 +1,5 @@
+fastapi==0.115.8
+httpx==0.28.1
+opencv-python-headless==4.11.0.86
+ultralytics==8.3.70
+uvicorn==0.34.0

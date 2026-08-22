@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools==75.3.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-cctv-core"
+version = "0.3.0"
+description = "Shared configuration and validation core for AI_CCTV"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "pydantic==2.10.6",
+  "PyYAML==6.0.2",
+]
+
+[project.optional-dependencies]
+configurator = [
+  "argon2-cffi==23.1.0",
+  "PyQt5==5.15.11",
+]
+test = [
+  "argon2-cffi==23.1.0",
+  "fastapi==0.115.8",
+  "httpx==0.28.1",
+  "PyJWT==2.10.1",
+  "pytest==8.3.4",
+  "pytest-asyncio==0.25.3",
+  "python-multipart==0.0.20",
+  "ruff==0.9.5",
+]
+
+[project.scripts]
+ai-cctv-server = "configurator.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src", configurator = "configurator"}
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["ai_cctv_core*", "configurator*"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["src", "edge/src", "."]
+testpaths = ["tests", "edge/tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
