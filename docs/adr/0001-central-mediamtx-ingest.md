@@ -3,6 +3,12 @@
 - 상태: Accepted for the Compose baseline
 - 날짜: 2026-08-22
 
+## 목차
+
+- [결정](#결정)
+- [근거](#근거)
+- [결과](#결과)
+
 ## 결정
 
 중앙 서버는 하나의 MediaMTX를 실행하고, Camera ID와 동일한 RTSP path에

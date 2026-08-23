@@ -3,6 +3,11 @@
 - 상태: Accepted for the first integration baseline
 - 날짜: 2026-08-22
 
+## 목차
+
+- [결정](#결정)
+- [결과](#결과)
+
 ## 결정
 
 검증 기준과 동일한 `bluenviron/mediamtx:1.9.0`을 사용한다. 공식 image는

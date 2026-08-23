@@ -3,6 +3,11 @@
 - 상태: Accepted for the Compose baseline
 - 날짜: 2026-08-22
 
+## 목차
+
+- [결정](#결정)
+- [결과](#결과)
+
 ## 결정
 
 실시간 영상은 일반 fMP4 HLS로 제공한다. 외부 요청은 Nginx의

@@ -3,6 +3,11 @@
 - 상태: Accepted
 - 날짜: 2026-08-22
 
+## 목차
+
+- [결정](#결정)
+- [결과](#결과)
+
 ## 결정
 
 SQLite, 녹화 영상, 복구 영상, snapshot, model과 TLS certificate는

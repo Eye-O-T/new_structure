@@ -5,6 +5,164 @@
 > **구현 상태**
 > 이 작업본은 `develop` 브랜치의 기존 프로토타입을 보존하면서 SRS와 Architecture의 기준 구조를 구현한 v0.3.0 소스 배포본입니다. Docker/Windows/Raspberry Pi 실환경 인수 시험이 필요한 항목은 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)에 구분했습니다.
 
+## 비개발자·설치 담당자 빠른 시작
+
+이 절은 소스 코드를 수정하지 않고 Windows 중앙 서버 한 대와 Raspberry Pi Camera를
+처음 연결하려는 사용자를 위한 안내입니다. 세부 명령과 복구 절차는
+[Windows 설치 프로그램 가이드](docs/operations/windows-installer.md)와
+[Edge 설치·배포 가이드](docs/operations/edge-deployment.md)를 따릅니다.
+
+### 먼저 알아둘 점
+
+- 이 저장소의 **AI CCTV Configurator**는 설치·장치 등록·상태 확인용 관리자
+  프로그램입니다. 실시간 영상 관제, 녹화 재생과 이벤트 검색을 한 화면에서 제공하는
+  소비자용 Web·모바일 앱은 아직 이 저장소에 포함되지 않았습니다.
+- 일반 설치에는 소스 저장소가 아니라 Release 배포물인 Windows Installer와 Raspberry
+  Pi Edge Package가 필요합니다. 배포물이 없다면 개발자가 먼저 빌드해야 합니다.
+- AI 모델은 제품에 포함되지 않습니다. 호환되는 `.pt`, `.onnx` 또는 `.engine` 파일을
+  사용자가 신뢰할 수 있는 배포처에서 내려받아 로컬 경로로 선택해야 합니다.
+- 중앙 서버와 Edge는 인터넷에 공개하지 말고 동일한 신뢰 LAN에서 먼저 설치하십시오.
+  Pairing은 같은 IPv4 Broadcast Domain에서만 자동 검색됩니다.
+
+### 필요한 장비와 파일
+
+| 구분 | 준비 항목 |
+| --- | --- |
+| 중앙 PC | Windows 10/11 x64, 관리자 권한, Docker Desktop과 Docker Compose v2 |
+| Edge | Raspberry Pi OS Bookworm 64-bit, 지원 Camera, 유선 LAN 권장 |
+| 중앙 설치 파일 | `AI_CCTV_Server_Setup_<version>_x64.exe` |
+| Edge 설치 파일 | `ai-cctv-edge_<version>_arm64.deb`와 `.sha256` |
+| AI 모델 | 비어 있지 않은 2GiB 이하 `.pt`, `.onnx` 또는 `.engine` 파일 |
+| HTTPS | PEM 인증서와 암호화되지 않은 PEM 개인키 |
+| 저장 공간 | Camera 수, HD/FHD, 보관 기간을 고려한 여유 공간 |
+
+HD Camera 한 대를 하루 종일 녹화하면 약 21.6GB, FHD는 약 43.2GB가 필요합니다.
+파일시스템과 Container 여유분으로 계산값보다 10~20% 이상 크게 준비하십시오.
+
+### 용어를 먼저 이해하기
+
+| 화면 또는 문서의 용어 | 쉬운 의미 |
+| --- | --- |
+| Central server | 영상, 녹화, AI 추론과 사용자 API를 실행하는 Windows PC |
+| Edge | Camera가 연결된 Raspberry Pi |
+| Camera ID | `cam-001`처럼 Camera를 구분하는 고유 이름 |
+| Edge device ID | `edge-001`처럼 Raspberry Pi를 구분하는 고유 이름 |
+| Pairing Key | 최초 연결과 이후 Edge 관리 인증에 함께 사용하는 32자 이상 비밀값 |
+| RTSP | Edge가 중앙 서버로 실시간 영상을 보내는 내부 통신 방식 |
+| Profile | `hd` 또는 `fhd` 영상 해상도·Bitrate 묶음 |
+| Management URL | 중앙 서버가 Edge 상태와 Profile을 관리하는 주소, 기본 Port 8003 |
+| Recovery URL | 네트워크 장애 중 Edge에 저장된 영상을 회수하는 주소, 기본 Port 8002 |
+
+### 1단계: Windows 중앙 서버 설치
+
+1. Docker Desktop을 설치하고 실행합니다. Docker가 시작을 완료할 때까지 기다립니다.
+2. `AI_CCTV_Server_Setup_<version>_x64.exe`를 실행합니다.
+3. 설치가 끝나면 시작 메뉴에서 **AI CCTV Configurator**를 관리자 권한으로 엽니다.
+4. 다음 항목을 입력하거나 파일 선택 버튼으로 지정합니다.
+
+   - `Storage root`: DB, 녹화 영상과 설정을 보관할 위치
+   - `Administrator`와 `Password`: 중앙 관리자 계정
+   - `Downloaded AI model`: 미리 내려받은 AI 모델
+   - `TLS certificate`와 `TLS private key`: 서로 일치하는 PEM 파일
+   - `Public HTTPS origin`: 사용자가 접속할 `https://...` 주소
+   - `RTSP bind (trusted LAN)`: Raspberry Pi가 접근할 중앙 PC의 LAN IP
+   - `RTSP port`: 특별한 이유가 없으면 `8554`
+
+5. **Validate and create configuration**을 누릅니다.
+6. 오류가 없다면 **Start services**를 누릅니다.
+7. **Show service status**를 눌러 Container가 `running` 또는 `healthy`인지 확인합니다.
+
+Raspberry Pi가 다른 장치라면 `RTSP bind`에 `127.0.0.1`을 사용하면 안 됩니다. 예를 들어
+중앙 PC의 LAN 주소가 `192.168.0.10`이라면 그 주소를 입력하고 Windows Private Network
+방화벽에서 RTSP TCP 8554를 허용합니다.
+
+### 2단계: Raspberry Pi Edge 설치와 Pairing 대기
+
+Raspberry Pi에서 Terminal을 열고 Edge Package가 있는 폴더에서 다음을 실행합니다.
+
+```bash
+sha256sum -c ai-cctv-edge_<version>_arm64.deb.sha256
+sudo apt install ./ai-cctv-edge_<version>_arm64.deb
+sudo ai-cctv-edge pair \
+  --device-id edge-001 \
+  --camera-id cam-001 \
+  --set-pairing-key
+```
+
+마지막 명령은 새 Pairing Key와 확인값을 화면에 표시하지 않는 방식으로 입력받습니다.
+32자 이상의 충분히 긴 Key를 정하고 중앙 Configurator에도 같은 값을 입력합니다. Pairing이
+끝날 때까지 Raspberry Pi Terminal을 닫지 마십시오.
+
+### 3단계: Configurator에서 Edge 연결
+
+중앙 PC의 Configurator에서 다음 순서로 진행합니다.
+
+1. `Management server URL`에 중앙 서버의 HTTPS 주소를 입력합니다.
+2. `Central RTSP host for Edge`에 Raspberry Pi가 접근할 중앙 PC의 LAN IP를 입력합니다.
+3. `Edge pairing / bearer key`에 Raspberry Pi에서 입력한 것과 같은 Key를 입력합니다.
+4. **Discover Edge on trusted LAN**을 누릅니다.
+5. 발견된 `edge-001`을 선택합니다. Device ID, Camera ID, Management URL과 Recovery
+   URL이 자동으로 입력됩니다.
+6. Camera 이름, `Edge backup root`, `hd` 또는 `fhd` Profile을 확인합니다.
+7. **Register Edge and camera**를 누릅니다.
+
+성공하면 중앙 서버가 Camera별 게시 자격증명을 만들고 선택한 Edge에 자동 전달합니다.
+Edge는 설정을 저장하고 Capture, Control, Recovery Service를 시작한 뒤 중앙 MediaMTX에
+영상을 게시합니다. 자동 전달이 실패하면 Configurator가 보호된 JSON Handoff 파일 위치를
+안내하므로 [수동 Handoff 절차](docs/operations/edge-deployment.md#301-대체-수동-handoff)를
+따르십시오.
+
+### 4단계: 설치 성공 확인
+
+Configurator에서 다음 순서로 확인합니다.
+
+1. **Query Edge status**를 누릅니다.
+2. Edge가 Online이고 Camera Input과 Central Connection이 정상인지 확인합니다.
+3. **Query video profile**을 눌러 현재 Profile과 지원 Profile을 확인합니다.
+4. Profile을 변경하려면 `hd` 또는 `fhd`를 선택하고 **Apply selected video profile**을
+   누릅니다.
+5. **Show service status**로 중앙 Container 상태를 다시 확인합니다.
+
+Raspberry Pi에서는 필요할 때 다음 진단 명령을 사용할 수 있습니다.
+
+```bash
+sudo ai-cctv-edge doctor
+sudo ai-cctv-edge status
+```
+
+### 설치 후 할 수 있는 일과 현재 제한
+
+| 기능 | 현재 제공 방식 |
+| --- | --- |
+| Edge 등록과 Camera 연결 | Configurator GUI |
+| Edge 상태·현재 Profile 확인 | Configurator GUI |
+| HD/FHD 변경 | Configurator GUI |
+| 중앙 녹화와 AI 이벤트 생성 | 중앙 서비스가 자동 수행 |
+| 실시간·저장 영상 제공 | 인증된 REST/HLS/Playback API |
+| 일반 소비자 관제 화면 | 현재 저장소에는 없음, 별도 Web·모바일 앱 필요 |
+
+따라서 설치 직후 Configurator에서 Camera 상태를 확인할 수는 있지만, Configurator 자체가
+CCTV 영상을 시청하는 프로그램은 아닙니다. 사용자 애플리케이션 개발자는
+[외부 애플리케이션 연동 문서](docs/external-app-integration.md)의 REST와 보호된
+HLS/Playback 계약을 사용합니다.
+
+### 자주 발생하는 설치 문제
+
+| 증상 | 먼저 확인할 항목 |
+| --- | --- |
+| `Start services` 실패 | Docker Desktop이 실행 중인지, 가상화가 활성화되어 있는지 확인 |
+| 모델 선택 오류 | 지원 확장자, 2GiB 이하, 읽을 수 있는 일반 파일인지 확인 |
+| TLS 설정 오류 | 인증서와 개인키가 한 쌍인지, 개인키가 암호화되지 않은 PEM인지 확인 |
+| Edge가 검색되지 않음 | Pairing 명령 실행 상태, 같은 Key, 같은 LAN, UDP 37020 방화벽, AP Client Isolation 확인 |
+| Edge 등록 후 Offline | 중앙 `RTSP bind`가 LAN IP인지, TCP 8554 방화벽, 중앙·Edge 시각 동기화 확인 |
+| 자동 Pairing 전달 실패 | 안내된 보호 JSON 파일을 사용해 수동 Handoff 수행 |
+| 녹화 중단 또는 저장 오류 | 저장 공간, 폴더 쓰기 권한과 보관 설정 확인 |
+| 원인을 알 수 없는 오류 | Configurator 결과의 오류 코드와 아래 `로그와 장애 진단` 절 확인 |
+
+비밀키, 관리자 비밀번호와 게시 자격증명은 채팅, 스크린샷 또는 일반 로그에 남기지
+마십시오. 해결되지 않으면 [구현·검증 상태](IMPLEMENTATION_STATUS.md)의 미검증 항목과
+[상세 Edge 가이드](docs/operations/edge-deployment.md)를 확인하십시오.
+
 ## 핵심 목표
 
 - Raspberry Pi를 단순한 카메라 입력 장치로 유지
@@ -198,7 +356,7 @@ SQLite는 다음 정보를 저장합니다.
 
 모든 내부 시각은 UTC로 저장하고 UI에서 로컬 시간대로 표시합니다.
 
-## 일반 사용자 설치
+## 상세 설치 절차
 
 ### 중앙 서버
 
@@ -362,6 +520,7 @@ AI_CCTV/
 │   ├── cli.py
 │   └── packaging/
 │
+├── mock_edge/              # MP4 반복 재생 기반 Windows 통합 시험 Edge
 ├── docs/
 └── tests/
 ```
@@ -682,6 +841,11 @@ docker compose --env-file server/.env -f server/compose.yml exec -T \
 ```
 
 ## 테스트
+
+Windows에서 Raspberry Pi 없이 중앙 서버의 Camera 등록, RTSP Publish, Edge 관리 API와
+장애 복구를 시험하려면 [MP4 Mock Edge](mock_edge/README.md)를 사용합니다. 이 도구는
+상위 `mp4_rtsp2_loop_sender`의 MP4 반복 재생 방식을 현재 중앙 Publish 아키텍처에 맞게
+적용하며, Configurator Pairing과 Recovery API도 함께 모사합니다.
 
 최소 테스트 범위:
 

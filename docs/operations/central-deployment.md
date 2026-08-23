@@ -1,5 +1,14 @@
 # 중앙 서버 Compose 배포
 
+## 목차
+
+- [1. 전제 조건](#1-전제-조건)
+- [2. 설정 준비](#2-설정-준비)
+- [3. Network bind 검증](#3-network-bind-검증)
+- [4. 빌드와 시작](#4-빌드와-시작)
+- [5. 정지와 재시작](#5-정지와-재시작)
+- [6. Port 검증](#6-port-검증)
+
 운영 설치에서는 Configurator GUI의 `Public HTTPS origin` 또는 CLI `init --public-base-url https://cctv.example.com`을 사용한다. 이 값은 HTTPS Origin으로 검증되어 Compose `.env`에 기록되므로 직접 파일을 편집할 필요가 없다. 아래 수동 절차의 빈 값은 로컬 개발에서만 허용한다.
 
 이 문서는 현재 저장소에서 중앙 서버를 개발·통합 시험용으로 배포하는 절차를 설명한다. PyQt/CLI Configurator가 같은 초기 설정과 서비스 운영 기능을 제공하며, 아래 명령행 절차는 Headless 환경과 개발·장애 진단을 위한 대안이다. 패키징된 Windows Installer의 실제 환경 인수 시험은 P3 검증 항목으로 남아 있다.
