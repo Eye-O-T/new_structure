@@ -1,4 +1,3 @@
-import hashlib
 import io
 import json
 import os
@@ -12,7 +11,9 @@ import pytest
 
 from ai_cctv_core.config import CameraBootstrap, load_config
 from configurator import cli as configurator_cli
+from configurator import compose_adapter
 from configurator.cli import build_parser
+from configurator.compose_adapter import ComposeAdapter, default_compose_env
 from configurator.config_core import (
     InstallRequest,
     _dotenv,
@@ -20,7 +21,7 @@ from configurator.config_core import (
     initialize,
 )
 from configurator.gui import rotate_publish_credentials_to_file
-from configurator.model_manager import install_from_manifest
+from configurator.model_manager import install_local_model
 from configurator.server_api import (
     ServerApiClient,
     ServerApiError,
@@ -492,46 +493,161 @@ def test_initialize_rejects_missing_or_unsupported_model(tmp_path):
         initialize(InstallRequest(model_path=unsupported, **common))
 
 
-def test_manifest_model_install_verifies_https_hash_and_path(tmp_path, monkeypatch):
-    content = b"verified-model"
+def test_local_model_install_is_atomic_bounded_and_manifest_free(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "downloaded-model.onnx"
+    source.write_bytes(b"locally-downloaded-model")
+    installed = install_local_model(source, tmp_path / "persistent" / "models")
 
-    class Response(io.BytesIO):
-        headers = {"Content-Length": str(len(content))}
+    assert installed.name == "downloaded-model.onnx"
+    assert installed.read_bytes() == source.read_bytes()
+    assert not list(installed.parent.glob(".*.tmp"))
 
-        def geturl(self):
-            return "https://models.example/default.pt"
+    monkeypatch.setattr("configurator.model_manager.MAX_MODEL_BYTES", 4)
+    with pytest.raises(ValueError, match="2 GiB size limit"):
+        install_local_model(source, tmp_path / "other-models")
 
-        def __enter__(self):
-            return self
 
-        def __exit__(self, *_):
-            self.close()
-
-    monkeypatch.setattr(
-        "configurator.model_manager.urlopen",
-        lambda *_args, **_kwargs: Response(content),
-    )
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "name": "default.pt",
-                "version": "1.0.0",
-                "url": "https://models.example/default.pt",
-                "sha256": hashlib.sha256(content).hexdigest(),
-                "license": "approved-test-license",
-            }
-        ),
+def test_initialize_copies_tls_and_compose_env_outside_server_package(
+    tmp_path, monkeypatch
+):
+    server_dir = tmp_path / "read-only-server-package"
+    server_dir.mkdir()
+    model = tmp_path / "model.pt"
+    model.write_bytes(b"model")
+    certificate = tmp_path / "certificate.pem"
+    certificate.write_text(
+        "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n",
         encoding="utf-8",
     )
-    installed = install_from_manifest(manifest, tmp_path / "models")
-    assert installed.read_bytes() == content
+    private_key = tmp_path / "private.key"
+    private_key.write_text(
+        "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+        encoding="utf-8",
+    )
+    data_root = tmp_path / "program-data"
+    compose_env = data_root / "config" / "compose.env"
+    monkeypatch.setattr(
+        "configurator.config_core._validate_certificate_key_match",
+        lambda _certificate, _private_key: None,
+    )
 
-    unsafe = json.loads(manifest.read_text(encoding="utf-8"))
-    unsafe["name"] = "../escape.pt"
-    manifest.write_text(json.dumps(unsafe), encoding="utf-8")
-    with pytest.raises(ValueError, match="name"):
-        install_from_manifest(manifest, tmp_path / "models")
+    result = initialize(
+        InstallRequest(
+            data_root=data_root,
+            server_dir=server_dir,
+            admin_username="admin",
+            admin_password="a-strong-password",
+            model_path=model,
+            cameras=[],
+            compose_env_path=compose_env,
+            tls_certificate_path=certificate,
+            tls_private_key_path=private_key,
+        )
+    )
+
+    assert result.compose_env_path == compose_env.resolve()
+    assert result.tls_certificate_path.read_bytes() == certificate.read_bytes()
+    assert result.tls_private_key_path.read_bytes() == private_key.read_bytes()
+    assert not (server_dir / ".env").exists()
+    assert ComposeAdapter(server_dir, compose_env).env_file == compose_env.resolve()
+
+
+def test_initialize_rejects_incomplete_or_encrypted_tls_pair(tmp_path):
+    model = tmp_path / "model.pt"
+    model.write_bytes(b"model")
+    certificate = tmp_path / "certificate.pem"
+    certificate.write_text(
+        "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n",
+        encoding="utf-8",
+    )
+    encrypted_key = tmp_path / "private.key"
+    encrypted_key.write_text(
+        "-----BEGIN ENCRYPTED PRIVATE KEY-----\ntest\n"
+        "-----END ENCRYPTED PRIVATE KEY-----\n",
+        encoding="utf-8",
+    )
+    common = {
+        "data_root": tmp_path / "data",
+        "server_dir": tmp_path / "server",
+        "admin_username": "admin",
+        "admin_password": "a-strong-password",
+        "model_path": model,
+        "cameras": [],
+        "tls_certificate_path": certificate,
+    }
+
+    with pytest.raises(ValueError, match="must be provided together"):
+        initialize(InstallRequest(**common))
+    with pytest.raises(ValueError, match="unencrypted PEM"):
+        initialize(InstallRequest(tls_private_key_path=encrypted_key, **common))
+
+
+def test_frozen_configurator_discovers_programdata_compose_env(
+    tmp_path, monkeypatch
+):
+    program_data = tmp_path / "ProgramData"
+    expected = program_data / "AI_CCTV" / "config" / "compose.env"
+    expected.parent.mkdir(parents=True)
+    expected.write_text("TEST=1\n", encoding="utf-8")
+    monkeypatch.setenv("PROGRAMDATA", str(program_data))
+    monkeypatch.delenv("AI_CCTV_COMPOSE_ENV_FILE", raising=False)
+    monkeypatch.setattr(compose_adapter.sys, "frozen", True, raising=False)
+
+    assert default_compose_env(tmp_path / "Program Files" / "AI_CCTV") == (
+        expected.resolve()
+    )
+
+
+def test_cli_init_reports_input_error_without_traceback(tmp_path, capsys):
+    password = tmp_path / "admin-password.txt"
+    password.write_text("a-strong-password", encoding="utf-8")
+    result = configurator_cli.main(
+        [
+            "--server-dir",
+            str(tmp_path / "server"),
+            "init",
+            "--data-root",
+            str(tmp_path / "data"),
+            "--admin-password-file",
+            str(password),
+            "--model",
+            str(tmp_path / "missing.pt"),
+        ]
+    )
+
+    assert result == 1
+    output = capsys.readouterr().out
+    assert "[ERROR] INITIALIZATION_FAILED" in output
+    assert "Traceback" not in output
+
+
+def test_gui_and_frozen_cli_expose_consumer_local_model_flow():
+    gui_source = Path("configurator/gui.py").read_text(encoding="utf-8")
+    assert "Choose model manifest" not in gui_source
+    assert "self.cameras = QLineEdit()" in gui_source
+    assert "tls_certificate_path" in gui_source
+    init_help = build_parser()._subparsers._group_actions[0].choices[
+        "init"
+    ].format_help()
+    assert "--model MODEL" in init_help
+    assert "--model-manifest" not in init_help
+    assert build_parser().parse_args(
+        ["--env-file", "before.env", "stop"]
+    ).env_file == Path("before.env")
+    assert build_parser().parse_args(
+        ["stop", "--env-file", "after.env"]
+    ).env_file == Path("after.env")
+    cli_spec = Path("configurator/packaging/ai_cctv_cli.spec").read_text(
+        encoding="utf-8"
+    )
+    assert 'name="AI_CCTV_CLI"' in cli_spec
+    assert "console=True" in cli_spec
+    gui_spec = Path("configurator/packaging/ai_cctv_configurator.spec").read_text(
+        encoding="utf-8"
+    )
+    assert "uac_admin=True" in gui_spec
 
 
 class _JsonResponse(io.BytesIO):

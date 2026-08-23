@@ -14,8 +14,13 @@ if getent group render >/dev/null; then
 fi
 
 python3 -m venv --system-site-packages /usr/lib/ai-cctv-edge/venv
-/usr/lib/ai-cctv-edge/venv/bin/pip install --no-index \
-    --find-links /usr/lib/ai-cctv-edge/wheels ai-cctv-edge==0.3.0
+set -- /usr/lib/ai-cctv-edge/wheels/ai_cctv_edge-*.whl
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+    echo "Expected exactly one bundled ai-cctv-edge wheel." >&2
+    exit 1
+fi
+/usr/lib/ai-cctv-edge/venv/bin/pip install --no-index --force-reinstall \
+    --find-links /usr/lib/ai-cctv-edge/wheels "$1"
 
 install -d -m 0750 -o ai-cctv-edge -g ai-cctv-edge \
     /var/lib/ai-cctv-edge/recordings /var/lib/ai-cctv-edge/state
@@ -23,18 +28,37 @@ chown root:ai-cctv-edge /etc/ai-cctv-edge
 chmod 0750 /etc/ai-cctv-edge
 if [ ! -s /etc/ai-cctv-edge/recovery.token ]; then
     umask 0077
+    token_temp=$(mktemp /etc/ai-cctv-edge/.recovery.token.XXXXXX)
+    trap 'rm -f "$token_temp"' EXIT INT TERM
     python3 -c 'import secrets; print(secrets.token_urlsafe(48))' \
-        > /etc/ai-cctv-edge/recovery.token
+        > "$token_temp"
+    chown root:ai-cctv-edge "$token_temp"
+    chmod 0640 "$token_temp"
+    mv -f "$token_temp" /etc/ai-cctv-edge/recovery.token
+    trap - EXIT INT TERM
 fi
 chown root:ai-cctv-edge /etc/ai-cctv-edge/recovery.token
 chmod 0640 /etc/ai-cctv-edge/recovery.token
+
+# v0.3.0 enabled units during package installation. Preserve already configured
+# upgrades without treating the packaged example config as a completed setup.
+configured_marker=/etc/ai-cctv-edge/.configured
+if [ -n "${2:-}" ] && [ -s /etc/ai-cctv-edge/publish.password ] && \
+    [ ! -e "$configured_marker" ]; then
+    marker_temp=$(mktemp /etc/ai-cctv-edge/.configured.XXXXXX)
+    trap 'rm -f "$marker_temp"' EXIT INT TERM
+    printf 'configured\n' > "$marker_temp"
+    chown root:ai-cctv-edge "$marker_temp"
+    chmod 0644 "$marker_temp"
+    mv -f "$marker_temp" "$configured_marker"
+    trap - EXIT INT TERM
+fi
+
 systemctl daemon-reload
-systemctl enable ai-cctv-edge.service \
-    ai-cctv-edge-control.service ai-cctv-edge-recovery.service
 if [ -n "${2:-}" ]; then
     # Package upgrades replace the wheel and generated virtual environment
-    # while existing processes keep the old code mapped. Restart only units
-    # that were already active; a first install remains setup-first.
+    # while existing processes keep the old code mapped. Existing enablement is
+    # preserved; restart only units that were already active.
     systemctl try-restart ai-cctv-edge.service \
         ai-cctv-edge-control.service ai-cctv-edge-recovery.service
 fi

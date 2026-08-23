@@ -153,7 +153,7 @@ MediaMTX의 현재 검증 기준은 `v1.9.0`이다. 중앙화 과정에서 버�
 - 초기 관리자 계정 설정
 - 카메라 추가, 수정, 비활성화 및 삭제
 - RTSP 연결 시험
-- 모델 선택, 다운로드 또는 사용자 모델 경로 지정
+- 사용자가 다운로드한 로컬 모델 경로 지정
 - 저장 경로와 보관 기간 설정
 - 서비스 시작, 중지, 재시작 및 상태 확인
 - 사용자 계정과 권한 관리
@@ -417,10 +417,10 @@ runtime/
 
 | ID | 요구사항 |
 | --- | --- |
-| FR-MODEL-001 | Configurator는 기본 모델 자동 설치와 사용자 모델 지정 중 하나를 선택할 수 있게 하여야 한다. |
-| FR-MODEL-002 | 기본 모델 다운로드 시 버전, 다운로드 위치, SHA-256을 포함한 Manifest를 사용하여야 한다. |
-| FR-MODEL-003 | 다운로드된 모델은 SHA-256 검증을 통과하여야 한다. |
-| FR-MODEL-004 | 사용자 모델 경로는 파일 존재, 읽기 권한, 지원 형식을 검사하여야 한다. |
+| FR-MODEL-001 | Configurator GUI/CLI는 사용자가 별도로 다운로드한 로컬 모델 파일 경로를 필수로 입력받아야 하며 모델을 포함하거나 자동 다운로드하지 않아야 한다. |
+| FR-MODEL-002 | 모델 경로는 일반 파일 존재, 읽기 권한, 지원 확장자 `.pt`·`.onnx`·`.engine`, 비어 있지 않음과 2GiB 이하 크기를 검사하여야 한다. |
+| FR-MODEL-003 | 모델은 원본과 임시 복사본 및 최종 설치본의 SHA-256이 일치할 때만 관리 모델 디렉터리에 원자적으로 배치하여야 한다. |
+| FR-MODEL-004 | 설치된 모델은 원본 다운로드 경로의 이동·삭제와 무관하게 사용할 수 있도록 관리 모델 디렉터리에 복사하여야 한다. |
 | FR-MODEL-005 | 모델은 Docker Volume을 통해 Inference Service에 읽기 전용으로 마운트하는 것을 권장한다. |
 | FR-MODEL-006 | 모델 변경 시 서비스 재시작 필요 여부를 사용자에게 알려야 한다. |
 | FR-MODEL-007 | GPU가 없는 경우 CPU 모드를 선택할 수 있어야 한다. |
@@ -503,7 +503,7 @@ runtime/
 | FR-UPDATE-002 | Compose Image는 Release Version으로 고정하여야 하며 운영 배포에서 `latest`만 사용하지 않아야 한다. |
 | FR-UPDATE-003 | 업데이트 전 DB와 설정 백업을 수행할 수 있어야 한다. |
 | FR-UPDATE-004 | Migration 실패 시 이전 버전으로 복원할 수 있는 절차를 제공하여야 한다. |
-| FR-UPDATE-005 | 제거 프로그램은 Runtime Data 삭제 여부를 사용자에게 별도로 물어야 한다. |
+| FR-UPDATE-005 | 제거 프로그램은 Runtime Data를 자동 삭제하지 않아야 하며, 완전 삭제는 서비스 중지와 백업 확인 후 관리자가 명시적으로 수행하도록 안내하여야 한다. |
 | FR-UPDATE-006 | Edge 패키지 제거 시 영상 백업 파일과 설정 삭제 여부를 분리하여야 한다. |
 
 ---
@@ -834,7 +834,7 @@ ON events(camera_id, occurred_at, event_type);
 | NFR-UX-001 | 일반 사용자가 코드 파일을 수정하지 않고 설치와 설정을 완료할 수 있어야 한다. |
 | NFR-UX-002 | 오류 메시지는 원인, 영향, 사용자가 취할 조치를 포함하여야 한다. |
 | NFR-UX-003 | 카메라 등록 화면은 저장 전 연결 시험을 제공하여야 한다. |
-| NFR-UX-004 | 모델 기본 자동 설치를 기본 선택으로 제공하여야 한다. |
+| NFR-UX-004 | GUI와 CLI는 모두 로컬 모델 경로 선택 방법과 검증 실패 원인을 명확히 표시하여야 한다. |
 | NFR-UX-005 | GUI 없이도 Headless 서버와 Edge에서 CLI로 동일 작업을 수행할 수 있어야 한다. |
 
 ### 12.6 이식성
@@ -887,7 +887,7 @@ recording:
 
 inference:
   enabled: true
-  model_path: D:/AI_CCTV/models/default.pt
+  model_path: /models/default.pt
   device: auto
   confidence_threshold: 0.4
 
@@ -1015,7 +1015,7 @@ nginx             # 인프라: Reverse Proxy와 HTTPS
 1. Server Configurator GUI/CLI
 2. Windows Installer
 3. Edge `.deb`와 systemd
-4. Model Download Manifest
+4. 로컬 모델 선택·무결성 검증
 5. Doctor와 업데이트/복구 절차
 
 ---
@@ -1034,7 +1034,7 @@ nginx             # 인프라: Reverse Proxy와 HTTPS
 | 저장 영상 Playback | FR-USER-003/005/006, FR-NGINX-004/005 |
 | Nginx | FR-NGINX-001~011 |
 | Docker 배포 | FR-INSTALL-002/008, 제14장 |
-| 일반 사용자 설치 | FR-INSTALL-001~014 |
+| 일반 사용자 설치 | FR-INSTALL-001~025 |
 | Edge 장애 복구 | FR-RECOVERY-001~008 |
 | 저장 암호화 연기 | FR-STORAGE-013, NFR-SEC-010 |
 | Tailscale 미사용 | 제3.2절, 제7.3절 |

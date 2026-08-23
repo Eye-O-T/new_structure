@@ -1,6 +1,7 @@
 import configparser
 import json
 import os
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ai_cctv_edge.config import EdgeConfig
-from ai_cctv_edge.cli import _publish_password_from_file, setup
+from ai_cctv_edge.cli import _publish_password_from_file, export_auth_token, setup
 from ai_cctv_edge.control import (
     ActivationResult,
     CameraMode,
@@ -157,7 +158,50 @@ def test_setup_rejects_credentials_before_replacing_live_config(
     assert config_path.read_text(encoding="utf-8") == "existing-live-config\n"
     assert not (tmp_path / "publish.password").exists()
     assert not (tmp_path / "recovery.token").exists()
+    assert not (tmp_path / ".configured").exists()
     assert not (state_root / "video-profile.json").exists()
+
+
+def test_setup_writes_configured_marker_only_after_valid_credentials(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "config.toml"
+    state_root = tmp_path / "state"
+    monkeypatch.setenv("AI_CCTV_EDGE_STATE_ROOT", str(state_root))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    handoff = tmp_path / "cam-001-publish.json"
+    handoff.write_text(
+        json.dumps(
+            {
+                "camera_id": "cam-001",
+                "username": "cam-001",
+                "password": "p" * 32,
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(handoff, 0o600)
+
+    assert setup(config_path, handoff) == 0
+    assert (tmp_path / ".configured").read_text(encoding="utf-8") == "configured\n"
+    assert EdgeConfig.load(config_path).camera_id == "cam-001"
+
+
+def test_export_auth_token_creates_private_one_time_handoff(tmp_path, capsys):
+    config_path = tmp_path / "config.toml"
+    write_config(config_path)
+    token = "t" * 48
+    (tmp_path / "recovery.token").write_text(token + "\n", encoding="utf-8")
+    output = tmp_path / "handoff" / "edge-001-control.token"
+
+    assert export_auth_token(config_path, output) == 0
+    assert output.read_text(encoding="utf-8") == token + "\n"
+    if os.name != "nt":
+        assert output.stat().st_mode & 0o777 == 0o600
+    assert token not in capsys.readouterr().out
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        export_auth_token(config_path, output)
 
 
 def test_central_publish_uses_shared_memory_so_backup_does_not_block(tmp_path):
@@ -838,6 +882,10 @@ def test_systemd_units_separate_capture_control_and_recovery_lifecycles():
         assert {"Unit", "Service", "Install"}.issubset(parser.sections())
         assert command_suffix in parser["Service"]["ExecStart"]
         assert "network-online.target" not in parser["Unit"].get("After", "")
+        assert (
+            parser["Unit"]["ConditionPathExists"]
+            == "/etc/ai-cctv-edge/.configured"
+        )
 
     runner_source = (edge_root / "src/ai_cctv_edge/runner.py").read_text(
         encoding="utf-8"
@@ -849,6 +897,58 @@ def test_systemd_units_separate_capture_control_and_recovery_lifecycles():
         encoding="utf-8"
     )
     assert "python3 (>= 3.11), python3 (<< 3.12)" in package_control
+    assert "gstreamer1.0-rtsp" in package_control
     postinst = (edge_root / "packaging/debian/postinst").read_text(encoding="utf-8")
     assert 'if [ -n "${2:-}" ]' in postinst
     assert "systemctl try-restart" in postinst
+    assert "systemctl enable" not in postinst
+
+
+def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
+    edge_root = Path(__file__).parents[1]
+    with (edge_root / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    package_version = project["version"]
+    control = (edge_root / "packaging/debian/control").read_text(encoding="utf-8")
+    assert f"Version: {package_version}\n" in control
+    assert "Architecture: arm64" in control
+    assert "rpicam-apps" in control
+
+    build_script = (edge_root / "packaging/build_deb.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "SOURCE_DATE_EPOCH" in build_script
+    assert "constraints.txt" in build_script
+    assert "verify_deb.sh" in build_script
+    assert "ai-cctv-edge_0.3.0_arm64" not in build_script
+
+    postinst = (edge_root / "packaging/debian/postinst").read_text(encoding="utf-8")
+    assert "ai-cctv-edge==0.3.0" not in postinst
+    assert "--force-reinstall" in postinst
+
+    constraints = {
+        line.strip()
+        for line in (edge_root / "packaging/constraints.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    assert set(project["dependencies"]).issubset(constraints)
+    assert "sniffio==1.3.1" in constraints
+
+    deployment_doc = (
+        edge_root.parent / "docs/operations/edge-deployment.md"
+    ).read_text(encoding="utf-8")
+    assert "AI_CCTV_CLI.exe edge-register" in deployment_doc
+    assert "ai-cctv-server" not in deployment_doc
+
+    root_readme = (edge_root.parent / "README.md").read_text(encoding="utf-8")
+    handoff_steps = [
+        "export-auth-token",
+        "AI_CCTV_CLI.exe edge-register",
+        "--publish-credentials-file",
+    ]
+    positions = [root_readme.find(step) for step in handoff_steps]
+    assert all(position >= 0 for position in positions)
+    assert positions == sorted(positions)
+    assert "(docs/operations/edge-deployment.md)" in root_readme

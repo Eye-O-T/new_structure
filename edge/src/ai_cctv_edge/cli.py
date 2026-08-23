@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover - Windows development hosts only
     pwd = None  # type: ignore[assignment]
 
 DEFAULT_CONFIG = Path("/etc/ai-cctv-edge/config.toml")
+CONFIGURED_MARKER_NAME = ".configured"
 SYSTEMD_UNITS = (
     "ai-cctv-edge.service",
     "ai-cctv-edge-control.service",
@@ -68,6 +69,54 @@ def _publish_password_from_file(path: Path, camera_id: str) -> str:
     ):
         raise ValueError("publish credentials contain an invalid password")
     return password
+
+
+def export_auth_token(config_path: Path, output_path: Path) -> int:
+    """Copy the Edge bearer token to a new private handoff file without printing it."""
+
+    config = EdgeConfig.load(config_path)
+    source = config.control.token_file.expanduser().resolve()
+    target = output_path.expanduser().resolve()
+    if target == source:
+        raise ValueError("auth token output must differ from the live token file")
+    if target.exists():
+        raise FileExistsError("auth token output already exists")
+    try:
+        if not source.is_file() or source.stat().st_size > 8192:
+            raise ValueError("Edge auth token file is missing or unexpectedly large")
+        raw_token = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("Edge auth token cannot be read as UTF-8") from exc
+    token = raw_token.rstrip("\r\n")
+    if (
+        len(token) < 32
+        or token != token.strip()
+        or raw_token not in {token, token + "\n", token + "\r\n"}
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in token)
+    ):
+        raise ValueError("Edge auth token is invalid")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(target, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(token + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(target, 0o600)
+        sudo_uid = os.environ.get("SUDO_UID")
+        sudo_gid = os.environ.get("SUDO_GID")
+        if os.name != "nt" and sudo_uid and sudo_gid:
+            os.chown(target, int(sudo_uid), int(sudo_gid))
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    print(f"Edge auth token handoff written: {target}")
+    print("Transfer it securely to the central Configurator, then remove this copy.")
+    return 0
 
 
 def setup(path: Path, publish_credentials_file: Path | None = None) -> int:
@@ -148,6 +197,9 @@ def setup(path: Path, publish_credentials_file: Path | None = None) -> int:
         for target in (path, password_file, recovery_token_file):
             if target.exists():
                 shutil.chown(target, user=account.pw_uid, group=account.pw_gid)
+    # This is the final persistent setup write. systemd units refuse to start
+    # from the packaged example config until this marker exists.
+    write_atomic(path.parent / CONFIGURED_MARKER_NAME, "configured\n", mode=0o644)
     print(f"Configuration written: {path}")
     print(f"Camera stream path: {camera_id}")
     print(
@@ -196,6 +248,11 @@ def main(argv: list[str] | None = None) -> int:
             type=Path,
             help="Configurator JSON handoff file for this camera",
         )
+    export_token = sub.add_parser(
+        "export-auth-token",
+        help="copy the Edge bearer token to a new mode-0600 handoff file",
+    )
+    export_token.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -208,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
             systemctl("enable")
             return systemctl("restart")
         return result
+    if args.command == "export-auth-token":
+        return export_auth_token(args.config, args.output)
     if args.command in {"start", "stop", "restart"}:
         return systemctl(args.command)
     if args.command == "logs":

@@ -1,4 +1,5 @@
-# Build on Windows with: pyinstaller configurator/packaging/ai_cctv_configurator.spec
+# Build on Windows with:
+# pyinstaller configurator/packaging/ai_cctv_cli.spec
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
@@ -7,7 +8,7 @@ repository_root = Path(SPECPATH).resolve().parents[1]
 hiddenimports = collect_submodules("pydantic")
 
 a = Analysis(
-    [str(repository_root / "configurator" / "gui_entry.py")],
+    [str(repository_root / "configurator" / "cli_entry.py")],
     pathex=[str(repository_root), str(repository_root / "src")],
     binaries=[],
     datas=[],
@@ -20,7 +21,6 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="AI_CCTV_Configurator",
-    console=False,
-    uac_admin=True,
+    name="AI_CCTV_CLI",
+    console=True,
 )

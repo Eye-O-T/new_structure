@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import shutil
+import ssl
 from dataclasses import dataclass
 from ipaddress import ip_address
 from pathlib import Path, PurePosixPath
@@ -15,7 +16,7 @@ from argon2 import PasswordHasher
 
 from ai_cctv_core.config import AppConfig, CameraBootstrap, write_config_atomic
 
-from .model_manager import validate_custom_model
+from .model_manager import install_local_model, sha256_file, validate_custom_model
 from .private_files import restrict_private_file
 
 SAFE_ENV = re.compile(r"^[A-Za-z0-9_./:@+-]+$")
@@ -36,6 +37,9 @@ class InstallRequest:
     rtsp_bind_address: str = "127.0.0.1"
     rtsp_port: int = 8554
     timezone: str = "Asia/Seoul"
+    compose_env_path: Path | None = None
+    tls_certificate_path: Path | None = None
+    tls_private_key_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,8 @@ class InstallResult:
     media_secrets_path: Path
     compose_env_path: Path
     camera_credentials_path: Path
+    tls_certificate_path: Path
+    tls_private_key_path: Path
     camera_credentials: dict[str, dict[str, str]]
 
 
@@ -148,6 +154,59 @@ def _validate_public_base_url(value: str) -> str:
     return f"https://{parsed.netloc}"
 
 
+def _validate_certificate_key_match(certificate: Path, private_key: Path) -> None:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    try:
+        context.load_cert_chain(certfile=certificate, keyfile=private_key)
+    except (OSError, ssl.SSLError) as exc:
+        raise ValueError(
+            "TLS certificate/private key are invalid or do not match"
+        ) from exc
+
+
+def _validate_tls_files(certificate: Path, private_key: Path) -> tuple[Path, Path]:
+    certificate = certificate.expanduser()
+    private_key = private_key.expanduser()
+    for path, label in (
+        (certificate, "TLS certificate"),
+        (private_key, "TLS private key"),
+    ):
+        if not path.is_file():
+            raise ValueError(f"{label} does not exist or is not a file: {path}")
+        if path.stat().st_size == 0:
+            raise ValueError(f"{label} is empty")
+        if path.stat().st_size > 10 * 1024 * 1024:
+            raise ValueError(f"{label} exceeds the 10 MiB size limit")
+    certificate = certificate.resolve()
+    private_key = private_key.resolve()
+    if certificate == private_key:
+        raise ValueError("TLS certificate and private key must be different files")
+    certificate_header = certificate.read_bytes()[:8192]
+    private_key_header = private_key.read_bytes()[:8192]
+    if b"-----BEGIN CERTIFICATE-----" not in certificate_header:
+        raise ValueError("TLS certificate is not a PEM certificate")
+    if b"ENCRYPTED" in private_key_header or not (
+        b"-----BEGIN PRIVATE KEY-----" in private_key_header
+        or b"-----BEGIN RSA PRIVATE KEY-----" in private_key_header
+        or b"-----BEGIN EC PRIVATE KEY-----" in private_key_header
+    ):
+        raise ValueError(
+            "TLS private key must be an unencrypted PEM private key supported by Nginx"
+        )
+    _validate_certificate_key_match(certificate, private_key)
+    return certificate, private_key
+
+
+def _validate_tls_pair(request: InstallRequest) -> tuple[Path, Path] | None:
+    certificate = request.tls_certificate_path
+    private_key = request.tls_private_key_path
+    if (certificate is None) != (private_key is None):
+        raise ValueError("TLS certificate and private key must be provided together")
+    if certificate is None or private_key is None:
+        return None
+    return _validate_tls_files(certificate, private_key)
+
+
 def _validate_request(request: InstallRequest) -> Path:
     if not re.fullmatch(r"[A-Za-z0-9_.@-]{3,64}", request.admin_username):
         raise ValueError("administrator username contains unsupported characters")
@@ -159,6 +218,7 @@ def _validate_request(request: InstallRequest) -> Path:
     ip_address(request.rtsp_bind_address)
     model_source = request.model_path.expanduser()
     validate_custom_model(model_source)
+    _validate_tls_pair(request)
     return model_source.resolve()
 
 
@@ -218,9 +278,32 @@ def initialize(request: InstallRequest) -> InstallResult:
                 if (stat.st_uid, stat.st_gid) != runtime_identity:
                     os.chown(directories[name], *runtime_identity)
 
+    certificate_path = directories["certs"] / "tls.crt"
+    private_key_path = directories["certs"] / "tls.key"
+    tls_pair = _validate_tls_pair(request)
+    if tls_pair is None and (
+        certificate_path.exists() or private_key_path.exists()
+    ):
+        if not (certificate_path.is_file() and private_key_path.is_file()):
+            raise ValueError(
+                "persistent TLS certificate/private key are incomplete; select both"
+            )
+        _validate_tls_files(certificate_path, private_key_path)
+    if tls_pair is not None:
+        certificate_source, private_key_source = tls_pair
+        for source, target, private in (
+            (certificate_source, certificate_path, False),
+            (private_key_source, private_key_path, True),
+        ):
+            expected_digest = sha256_file(source)
+            _backup_existing(target, private=private)
+            _copy_atomic(source, target, mode=0o600 if private else 0o644)
+            if sha256_file(target) != expected_digest:
+                raise OSError(f"installed TLS file verification failed: {target.name}")
+
     installed_model = directories["models"] / model_source.name
     _backup_existing(installed_model)
-    _copy_atomic(model_source, installed_model)
+    installed_model = install_local_model(model_source, directories["models"])
     container_model_path = PurePosixPath("/models") / installed_model.name
 
     config = AppConfig(
@@ -332,7 +415,11 @@ def initialize(request: InstallRequest) -> InstallResult:
     if runtime_identity is not None:
         compose_values["AI_CCTV_UID"] = runtime_identity[0]
         compose_values["AI_CCTV_GID"] = runtime_identity[1]
-    compose_env_path = request.server_dir.resolve() / ".env"
+    compose_env_path = (
+        request.compose_env_path.expanduser().resolve()
+        if request.compose_env_path is not None
+        else request.server_dir.resolve() / ".env"
+    )
     _backup_existing(compose_env_path, private=True)
     compose_payload = "".join(
         f"{key}={_dotenv(value)}\n" for key, value in compose_values.items()
@@ -346,5 +433,7 @@ def initialize(request: InstallRequest) -> InstallResult:
         media_secrets_path=media_secrets_path,
         compose_env_path=compose_env_path,
         camera_credentials_path=camera_credentials_path,
+        tls_certificate_path=certificate_path,
+        tls_private_key_path=private_key_path,
         camera_credentials=credentials,
     )

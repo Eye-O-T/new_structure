@@ -8,10 +8,15 @@ from typing import Any
 
 from ai_cctv_core.config import CameraBootstrap, load_config
 
-from .compose_adapter import ComposeAdapter, default_server_dir
+from .compose_adapter import (
+    ComposeAdapter,
+    default_data_root,
+    default_server_dir,
+    installation_prerequisites,
+)
 from .config_core import InstallRequest, initialize
 from .doctor import checks
-from .model_manager import install_from_manifest, validate_custom_model
+from .model_manager import validate_custom_model
 from .server_api import (
     ServerApiClient,
     ServerApiError,
@@ -29,30 +34,45 @@ def _camera(value: str) -> CameraBootstrap:
 
 
 def _init(args: argparse.Namespace) -> int:
-    password = args.admin_password or getpass.getpass("Administrator password: ")
-    if args.model_manifest is not None:
-        model = install_from_manifest(
-            args.model_manifest.resolve(), args.data_root.resolve() / "model-downloads"
-        )
-    else:
+    try:
+        if args.admin_password_file is not None:
+            password = _secret_from_file(
+                args.admin_password_file, "administrator password"
+            )
+        else:
+            password = args.admin_password or getpass.getpass(
+                "Administrator password: "
+            )
         model = args.model.resolve()
         validate_custom_model(model)
-    result = initialize(
-        InstallRequest(
-            data_root=args.data_root,
-            server_dir=args.server_dir,
-            admin_username=args.admin_username,
-            admin_password=password,
-            model_path=model,
-            cameras=args.camera,
-            public_http_port=args.http_port,
-            public_https_port=args.https_port,
-            public_bind_address=args.public_bind,
-            public_base_url=args.public_base_url,
-            rtsp_bind_address=args.rtsp_bind,
-            rtsp_port=args.rtsp_port,
+        compose_env_path = (
+            args.compose_env.expanduser().resolve()
+            if args.compose_env is not None
+            else args.data_root.expanduser().resolve() / "config" / "compose.env"
         )
-    )
+        result = initialize(
+            InstallRequest(
+                data_root=args.data_root,
+                server_dir=args.server_dir,
+                admin_username=args.admin_username,
+                admin_password=password,
+                model_path=model,
+                cameras=args.camera,
+                compose_env_path=compose_env_path,
+                tls_certificate_path=args.tls_certificate,
+                tls_private_key_path=args.tls_private_key,
+                public_http_port=args.http_port,
+                public_https_port=args.https_port,
+                public_bind_address=args.public_bind,
+                public_base_url=args.public_base_url,
+                rtsp_bind_address=args.rtsp_bind,
+                rtsp_port=args.rtsp_port,
+            )
+        )
+    except (EOFError, OSError, ValueError) as exc:
+        print(f"[ERROR] INITIALIZATION_FAILED: {exc}")
+        print("No service was started. Correct the input and run the command again.")
+        return 1
     print(f"Configuration: {result.config_path}")
     print(f"Data service secrets: {result.secrets_path}")
     print(f"External service secrets: {result.external_secrets_path}")
@@ -60,11 +80,75 @@ def _init(args: argparse.Namespace) -> int:
     print(f"Media service secrets: {result.media_secrets_path}")
     print(f"Camera credentials: {result.camera_credentials_path}")
     print(f"Compose environment: {result.compose_env_path}")
+    print(f"Installed model: {args.data_root.resolve() / 'models' / model.name}")
+    if result.tls_certificate_path.is_file():
+        print(f"TLS certificate: {result.tls_certificate_path}")
+        print(f"TLS private key: {result.tls_private_key_path}")
+    else:
+        print(
+            "[WARN] TLS certificate/key are not installed. Provide --tls-certificate "
+            "and --tls-private-key before starting services."
+        )
     if result.camera_credentials:
         print(
             "Camera publish credentials were written to the protected credentials "
             "file and are not printed."
         )
+    return 0
+
+
+def _preflight(server_dir: Path) -> int:
+    results = installation_prerequisites(server_dir)
+    for result in results:
+        print(f"[{'OK' if result.ok else 'ERROR'}] {result.name}: {result.message}")
+    return 0 if all(item.ok for item in results) else 1
+
+
+def _print_failed_prerequisites(adapter: ComposeAdapter) -> bool:
+    failed = [item for item in adapter.deployment_prerequisites() if not item.ok]
+    for item in failed:
+        print(f"[ERROR] {item.name}: {item.message}")
+    return bool(failed)
+
+
+def _install(args: argparse.Namespace) -> int:
+    if _preflight(args.server_dir) != 0:
+        print("[ERROR] INSTALLATION_BLOCKED: satisfy the prerequisites and retry.")
+        return 1
+    certificate = args.data_root.expanduser().resolve() / "certs" / "tls.crt"
+    private_key = args.data_root.expanduser().resolve() / "certs" / "tls.key"
+    supplied_pair = (
+        args.tls_certificate is not None and args.tls_private_key is not None
+    )
+    if not supplied_pair and not (certificate.is_file() and private_key.is_file()):
+        print(
+            "[ERROR] TLS_REQUIRED: install requires --tls-certificate and "
+            "--tls-private-key (or an existing pair in the data root)."
+        )
+        return 1
+    if _init(args) != 0:
+        return 1
+    env_file = (
+        args.compose_env
+        if args.compose_env is not None
+        else args.data_root.expanduser().resolve() / "config" / "compose.env"
+    )
+    try:
+        adapter = ComposeAdapter(args.server_dir, env_file)
+        if _print_failed_prerequisites(adapter):
+            print("[ERROR] SERVICE_START_BLOCKED: correct the files above and retry.")
+            return 1
+        return_code = adapter.start()
+    except OSError as exc:
+        print(f"[ERROR] SERVICE_START_FAILED: {exc}")
+        return 1
+    if return_code != 0:
+        print(
+            "[ERROR] SERVICE_START_FAILED: Docker Compose returned "
+            f"exit code {return_code}. Run doctor for details."
+        )
+        return return_code
+    print("[OK] AI CCTV services are running.")
     return 0
 
 
@@ -160,28 +244,49 @@ def _add_api_auth(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ai-cctv-server")
-    parser.add_argument("--server-dir", type=Path, default=default_server_dir())
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    init = sub.add_parser("init")
-    init.add_argument("--data-root", type=Path, required=True)
-    init.add_argument("--admin-username", default="admin")
-    init.add_argument("--admin-password", help=argparse.SUPPRESS)
-    model = init.add_mutually_exclusive_group(required=True)
-    model.add_argument("--model", type=Path)
-    model.add_argument("--model-manifest", type=Path)
-    init.add_argument("--camera", action="append", type=_camera, default=[])
-    init.add_argument("--http-port", type=int, default=80)
-    init.add_argument("--https-port", type=int, default=443)
-    init.add_argument("--public-bind", default="127.0.0.1")
-    init.add_argument(
-        "--public-base-url",
+def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=default_data_root(),
+        help="persistent data directory (default: platform ProgramData directory)",
+    )
+    parser.add_argument("--compose-env", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--admin-username", default="admin")
+    password = parser.add_mutually_exclusive_group()
+    password.add_argument("--admin-password", help=argparse.SUPPRESS)
+    password.add_argument(
+        "--admin-password-file",
+        type=Path,
+        help="read the administrator password from a protected UTF-8 file",
+    )
+    parser.add_argument(
+        "--model",
+        type=Path,
         required=True,
+        help="path to an already-downloaded .pt, .onnx, or .engine model",
+    )
+    tls = parser.add_argument_group("TLS files")
+    tls.add_argument(
+        "--tls-certificate",
+        type=Path,
+        help="local PEM certificate copied to protected persistent storage",
+    )
+    tls.add_argument(
+        "--tls-private-key",
+        type=Path,
+        help="matching local PEM private key; must be supplied with the certificate",
+    )
+    parser.add_argument("--camera", action="append", type=_camera, default=[])
+    parser.add_argument("--http-port", type=int, default=80)
+    parser.add_argument("--https-port", type=int, default=443)
+    parser.add_argument("--public-bind", default="127.0.0.1")
+    parser.add_argument(
+        "--public-base-url",
+        default="https://127.0.0.1",
         help="public HTTPS origin returned in Live and Playback URLs",
     )
-    init.add_argument(
+    parser.add_argument(
         "--rtsp-bind",
         default="127.0.0.1",
         help=(
@@ -189,14 +294,47 @@ def build_parser() -> argparse.ArgumentParser:
             "central server's trusted-LAN IP to accept remote Edge publishers"
         ),
     )
-    init.add_argument("--rtsp-port", type=int, default=8554)
+    parser.add_argument("--rtsp-port", type=int, default=8554)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="ai-cctv-server")
+    parser.add_argument("--server-dir", type=Path, default=default_server_dir())
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="Compose environment file (accepted before or after service commands)",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    init = sub.add_parser(
+        "init",
+        help="create configuration, scoped secrets, and Compose environment",
+        description=(
+            "Create persistent deployment files. On Windows, run this command "
+            "from an Administrator terminal when using the default ProgramData path."
+        ),
+    )
+    _add_initialization_arguments(init)
+    install = sub.add_parser(
+        "install",
+        help="check prerequisites, initialize, and start all services",
+        description=(
+            "Perform first-time setup and start services. On Windows, run from "
+            "an Administrator terminal."
+        ),
+    )
+    _add_initialization_arguments(install)
+    sub.add_parser("preflight", help="check Docker and installed server package")
 
     validate = sub.add_parser("validate")
     validate.add_argument("config", type=Path)
     doctor = sub.add_parser("doctor")
     doctor.add_argument("config", type=Path)
+    doctor.add_argument("--env-file", type=Path, default=argparse.SUPPRESS)
     for command in ("start", "stop", "restart", "status", "logs"):
-        sub.add_parser(command)
+        service = sub.add_parser(command)
+        service.add_argument("--env-file", type=Path, default=argparse.SUPPRESS)
 
     edge_register = sub.add_parser("edge-register")
     _add_api_auth(edge_register)
@@ -254,12 +392,21 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "init":
         return _init(args)
+    if args.command == "install":
+        return _install(args)
+    if args.command == "preflight":
+        return _preflight(args.server_dir)
     if args.command == "validate":
-        config = load_config(args.config)
-        print(f"valid schema_version={config.schema_version}")
-        return 0
+        try:
+            config = load_config(args.config)
+        except (OSError, ValueError) as exc:
+            print(f"[ERROR] CONFIGURATION_INVALID: {exc}")
+            return 1
+        else:
+            print(f"valid schema_version={config.schema_version}")
+            return 0
     if args.command == "doctor":
-        results = checks(args.server_dir, args.config)
+        results = checks(args.server_dir, args.config, env_file=args.env_file)
         for result in results:
             print(f"[{result.status}] {result.name}: {result.message}")
         return 1 if any(result.status == "ERROR" for result in results) else 0
@@ -274,17 +421,27 @@ def main(argv: list[str] | None = None) -> int:
     }:
         return _api_command(args)
 
-    adapter = ComposeAdapter(args.server_dir)
-    if args.command == "start":
-        return adapter.start()
-    if args.command == "stop":
-        return adapter.stop()
-    if args.command == "restart":
-        return adapter.restart()
-    if args.command == "status":
-        return adapter.run("ps").returncode
-    if args.command == "logs":
-        return adapter.run("logs", "--tail=200", "-f").returncode
+    adapter = ComposeAdapter(args.server_dir, args.env_file)
+    try:
+        if args.command == "start":
+            if _print_failed_prerequisites(adapter):
+                print(
+                    "[ERROR] SERVICE_START_BLOCKED: initialize the deployment or "
+                    "correct the files above."
+                )
+                return 1
+            return adapter.start()
+        if args.command == "stop":
+            return adapter.stop()
+        if args.command == "restart":
+            return adapter.restart()
+        if args.command == "status":
+            return adapter.run("ps").returncode
+        if args.command == "logs":
+            return adapter.run("logs", "--tail=200", "-f").returncode
+    except OSError as exc:
+        print(f"[ERROR] DOCKER_COMMAND_FAILED: {exc}")
+        return 1
     return 2
 
 

@@ -21,7 +21,9 @@
 | 공개 계약 | `/api/v1/openapi.json`, `/api/v1/docs`, `PUBLIC_BASE_URL` 기반 Absolute HTTPS Live/Playback URL, UTC RFC 3339, `Range`/`If-Range`, 안정된 Edge 오류 코드 |
 | HLS 인증 | Browser/HLS는 HttpOnly Secure Access Cookie, REST는 Bearer, Manifest와 모든 Segment에 Nginx `auth_request`, 모호한 원본 URI 선차단 적용 |
 | 내부 인증 | External·Inference·Media·Recovery별 상호 구별 Token과 Route allowlist, 내부 HTTP 환경 Proxy·Redirect 차단 |
-| Configurator | 초기 설치·Compose 운영 외에 Edge 등록/수정, 상태 조회, Profile 조회·HD/FHD 변경, 게시 자격증명 안전 재발급과 오류 사유 표시를 GUI/CLI에 제공 |
+| Configurator | GUI/CLI 공통 Config Core, 로컬 모델 경로 검증·SHA-256 원자 복사, TLS 인증서/개인키 검증·보호 복사, Docker·설정·Secret·모델 사전 점검, 초기 설치·Compose 운영과 Edge 관리 제공 |
+| Windows 설치 프로그램 | PyInstaller GUI/CLI 실행 파일과 Inno Setup 정의·빌드 스크립트 제공, Program Files 코드와 ProgramData 운영 데이터 분리, 선택적 바탕 화면·PATH 등록, 업그레이드·제거 시 운영 데이터 보존 |
+| Edge 설치 패키지 | ARM64 `.deb` 재현 빌드·검증 스크립트, 고정 의존성, 세 systemd Service, 인증 Token 안전 반출과 중앙 등록 절차 제공 |
 | UI 범위 | Configurator는 설치·운영 설정 전용, 기존 PyQt 관제 UI는 Legacy, 모바일/Web 사용자 앱은 별도 프로젝트 |
 
 ## Edge 등록 계약
@@ -58,14 +60,17 @@ ai-cctv-server edge-rotate-credentials cam-001 \
 
 2026-08-23 현재 합쳐진 작업 트리에서 다음 자동 검증을 완료했다.
 
-- `.venv\Scripts\python.exe -m pytest -q`: **167 passed**
+- `.venv\Scripts\python.exe -m pytest -q`: **181 passed**
 - `.venv\Scripts\python.exe -m ruff check .`: 통과
 - Python `compileall`: 통과
 - `server/compose.yml`, `server/mediamtx/mediamtx.yml`, `server/config/config.example.yaml` YAML 파싱: 통과
 - Edge·MediaMTX 관련 셸 스크립트 `bash -n`: 통과
+- PyInstaller GUI/CLI 번들 및 Inno Setup 6.7.3 컴파일: 통과
+- 패키지된 `AI_CCTV_CLI.exe --help`, GUI 번들의 PyQt 포함 여부와 Installer SHA-256 재검산: 통과
 - `git diff --check`: 오류 없음(Windows CRLF 변환 안내만 출력)
 
 현재 최종 검증 환경에는 Docker가 없다. 따라서 `docker compose config`, 실제 컨테이너 기동과 Nginx·MediaMTX 실행 검증은 수행하지 않았으며 아래 P3 운영환경 인수시험에 포함한다.
+Windows `AI_CCTV_Server_Setup_0.3.0_x64.exe`와 `.sha256` 파일은 실제 생성했지만 코드 서명과 깨끗한 Windows VM 설치·업그레이드·제거 시험은 아직 수행하지 않았다. ARM64 Edge `.deb`도 빌드 정의와 정적 검증까지 완료했으며 Raspberry Pi/ARM64 빌드는 P3에 남긴다.
 
 자동 검증은 다음 경계를 포함한다.
 
@@ -93,7 +98,7 @@ ai-cctv-server edge-rotate-credentials cam-001 \
 6. 장애 구간 자동 Recovery Job이 `detected → waiting_for_recovery → downloading → indexing → completed/failed`로 전이하고 재시도·SHA-256·중복 방지가 동작하는지 검증한다.
 7. FHD 미지원 장치, Encoder 부재, Pipeline 시작 실패와 Rollback 실패를 주입해 기존 HD 유지와 Configurator 오류 표시를 확인한다.
 8. 실제 HLS Player에서 로그인 Cookie, Manifest/Segment ACL, Access Token 만료 중 Refresh와 재생 복구를 검증한다.
-9. Windows에서 PyInstaller/Inno Setup 설치·업데이트·제거와 신뢰 TLS 인증서를 적용한 Configurator HTTPS 연결을 검증한다.
+9. 생성된 Windows Installer를 깨끗한 Windows VM에서 설치·업데이트·제거하고 신뢰 TLS 인증서를 적용한 Configurator HTTPS 연결을 검증한다.
 10. ARM64 Raspberry Pi에서 `.deb`, 세 systemd Service, 권한, 재부팅 자동 시작과 Capture 장애 중 Recovery API 지속을 검증한다.
 11. 운영 저장장치에서 4대 HD/FHD 연속 녹화량, 10~20% 여유, 보관·삭제·Storage Warning/Critical을 장시간 검증한다.
 12. 운영 DNS·TLS·방화벽 환경에서 외부 REST/HLS/Playback, OpenAPI, Camera ACL과 내부 Port 비노출을 보안 시험한다.

@@ -51,7 +51,7 @@
 | Reverse Proxy | Nginx |
 | 중앙 배포 | Docker Compose v2 |
 | 서버 설치 UI | PyQt 기반 Configurator + PyInstaller 번들 |
-| Windows Installer | Inno Setup 또는 동등 도구 |
+| Windows Installer | Inno Setup 6 |
 | Edge 서비스 | systemd |
 
 ## 시스템 구성
@@ -205,20 +205,23 @@ SQLite는 다음 정보를 저장합니다.
 Windows 빌드 절차로 생성하는 배포물:
 
 ```text
-AI_CCTV_Server_Setup_<version>.exe
+AI_CCTV_Server_Setup_<version>_x64.exe
 ```
+
+설치 프로그램은 GUI Configurator와 동일 기능의 CLI를 함께 설치합니다. 화면을 사용할 수 없는 환경에서는 관리자 PowerShell에서 `AI_CCTV_CLI.exe`를 사용할 수 있습니다. 빌드·설치·업그레이드·제거 절차는 [Windows 설치 프로그램 가이드](docs/operations/windows-installer.md)를 따릅니다.
 
 설치 흐름:
 
 1. Installer 실행
-2. Docker Engine과 Docker Compose 상태 검사
+2. Docker Desktop과 Docker Compose v2 설치·실행 상태 검사
 3. 데이터 저장 위치 선택
-4. 기본 AI 모델 자동 설치 또는 사용자 모델 선택
-5. 관리자 계정 생성
-6. 포트, 외부 접속 여부와 공개 HTTPS Origin 설정
-7. 설정 검증
-8. Docker image pull 및 Compose 시작
-9. 서비스 상태와 접속 주소 표시
+4. 사용자가 별도로 다운로드한 AI 모델 파일 선택
+5. 운영 TLS 인증서와 개인키 선택
+6. 관리자 계정 생성
+7. 포트, 외부 접속 여부와 공개 HTTPS Origin 설정
+8. 설정 검증 및 관리 경로로 모델·인증서 복사
+9. Docker image build/pull 및 Compose 시작
+10. 서비스 상태와 접속 주소 표시
 
 사용자는 기본 설치에서 다음 파일을 직접 수정하지 않습니다.
 
@@ -241,8 +244,35 @@ ai-cctv-edge_<version>_arm64.deb
 
 ```bash
 sudo apt install ./ai-cctv-edge_<version>_arm64.deb
-sudo ai-cctv-edge setup
+sudo ai-cctv-edge export-auth-token --output "$HOME/edge-001-control.token"
 ```
+
+생성한 인증 토큰을 안전한 경로로 중앙 Windows PC에 전달한 뒤, 중앙 설치의
+`AI_CCTV_CLI.exe`로 Edge를 등록하고 일회성 송출 자격증명 파일을 만듭니다.
+
+```powershell
+AI_CCTV_CLI.exe edge-register cam-001 `
+  --server-url https://cctv.example.com `
+  --name Entrance `
+  --edge-device-id edge-001 `
+  --management-url http://192.0.2.41:8003 `
+  --recovery-url http://192.0.2.41:8002 `
+  --edge-auth-token-file 'C:\Secure\edge-001-control.token' `
+  --publish-credentials-output 'C:\Secure\cam-001-publish.json'
+```
+
+생성된 JSON을 같은 Edge 장치로 안전하게 되돌려 보낸 뒤 설정을 완료합니다.
+
+```bash
+chmod 600 "$HOME/cam-001-publish.json"
+sudo ai-cctv-edge setup \
+  --publish-credentials-file "$HOME/cam-001-publish.json"
+rm "$HOME/cam-001-publish.json" "$HOME/edge-001-control.token"
+```
+
+성공 후 중앙 PC에 남은 임시 토큰과 자격증명 파일도 삭제하고, 비밀값을 화면이나
+로그에 출력하지 마십시오. 전체 절차는 [Edge 설치·배포 가이드](docs/operations/edge-deployment.md)를
+참조하십시오.
 
 설정 항목:
 
@@ -349,11 +379,11 @@ python server/scripts/generate_dev_cert.py
 ```
 
 개발 환경에서는 Configurator 대신 예제 설정을 사용할 수 있습니다. 실제 secret은 Git에 커밋하지 않습니다.
-`server/runtime/models/default.pt`에는 검증할 YOLO 모델을 배치합니다. 운영 설치에서는 Configurator가 선택한 모델을 원자적으로 복사하고 `.env`의 `MODEL_FILE`을 생성합니다.
+`server/runtime/models/default.pt`에는 검증할 YOLO 모델을 배치합니다. 운영 설치에서는 Configurator가 선택한 모델을 원자적으로 복사하고 `C:\ProgramData\AI_CCTV\config\compose.env`의 `MODEL_FILE`을 생성합니다.
 
-Configurator는 `--model <custom.pt>`와 `--model-manifest <manifest.json>` 중 하나를 받습니다. Manifest 다운로드는 HTTPS·버전·라이선스·SHA-256·최대 크기를 검증합니다. 저장소의 example Manifest는 배포 모델의 URL·hash·license가 확정되기 전까지 의도적으로 활성화되지 않습니다.
+Configurator는 사용자가 미리 다운로드한 로컬 파일만 `--model <model.pt|model.onnx|model.engine>`로 받으며 모델을 포함하거나 자동 다운로드하지 않습니다. 파일 존재·읽기 가능 여부·확장자·비어 있지 않음·2GiB 상한을 검사하고, 복사 전후 SHA-256을 대조한 뒤 운영 모델 디렉터리에 원자적으로 배치합니다. GUI에서도 같은 검증 규칙으로 **Model path**를 선택합니다.
 
-운영 설치에서는 GUI의 `Public HTTPS origin` 또는 CLI의 필수 `--public-base-url https://cctv.example.com`으로 외부 앱에 반환할 Origin을 지정합니다. Configurator는 HTTPS Origin만 허용하고 경로·Query·Fragment·내장 자격증명을 거부한 뒤 Compose `.env`의 `PUBLIC_BASE_URL`을 생성합니다. 빈 값과 상대 Media URL은 Configurator를 사용하지 않는 로컬 개발 구성에서만 허용합니다.
+운영 설치에서는 GUI의 `Public HTTPS origin` 또는 CLI의 `--public-base-url https://cctv.example.com`으로 외부 앱에 반환할 Origin을 명시하는 것을 권장합니다. 생략 시 로컬 기본값은 `https://127.0.0.1`입니다. Configurator는 HTTPS Origin만 허용하고 경로·Query·Fragment·내장 자격증명을 거부한 뒤 Compose 환경 파일의 `PUBLIC_BASE_URL`을 생성합니다. 빈 값과 상대 Media URL은 Configurator를 사용하지 않는 로컬 개발 구성에서만 허용합니다.
 
 RTSP Host bind의 Configurator/CLI 기본값은 `127.0.0.1`입니다. 원격 Raspberry Pi Edge의 게시를 받아야 할 때만 `--rtsp-bind <central-trusted-lan-ip>` 또는 GUI의 `RTSP bind`에 중앙 서버의 신뢰 LAN IP를 명시합니다. `0.0.0.0`이나 Internet-facing 주소를 편의상 사용하지 말고 OS 방화벽에서도 Edge 대역만 허용합니다.
 
@@ -386,6 +416,7 @@ docker compose -f server/compose.yml down
 ```text
 C:\ProgramData\AI_CCTV\
 ├── config\config.yaml
+├── config\compose.env
 ├── secrets\data.env
 ├── secrets\external.env
 ├── secrets\inference.env
@@ -396,7 +427,10 @@ C:\ProgramData\AI_CCTV\
 ├── recordings\
 ├── recovered\
 ├── snapshots\
-└── logs\
+├── logs\
+└── certs\
+    ├── tls.crt
+    └── tls.key
 ```
 
 `config.yaml` 예시:
@@ -561,7 +595,7 @@ ai-cctv-server start
 ai-cctv-server stop
 ai-cctv-server restart
 ai-cctv-server status
-ai-cctv-server doctor
+ai-cctv-server doctor C:\ProgramData\AI_CCTV\config\config.yaml
 ai-cctv-server logs
 ```
 
@@ -723,9 +757,9 @@ error_code
 
 ### v1.0 인수·배포 단계
 
-- Windows Installer와 ARM64 `.deb`를 목표 운영체제에서 빌드
+- 생성된 Windows Installer를 깨끗한 Windows VM에서 설치·업그레이드·제거 시험하고 ARM64 `.deb`를 Raspberry Pi에서 빌드·설치
 - 실제 Raspberry Pi 카메라와 1~4개 동시 스트림 인수 시험
-- CPU/GPU별 모델 성능 측정과 배포 Manifest·라이선스 확정
+- CPU/GPU별 모델 성능과 지원 모델 형식·버전을 측정
 - 신뢰 TLS 인증서와 방화벽을 적용한 운영 인수 시험
 
 ## 기여
@@ -752,8 +786,11 @@ error_code
 - 설치 프로그램에 포함하거나 자동 다운로드하는 제3자 구성 요소
 
 라이선스가 확정되기 전에는 README에 특정 라이선스를 단정적으로 표시하지 않습니다.
+현재 설치 프로그램은 AI 모델 weight를 포함하거나 자동 다운로드하지 않고 사용자가 준비한 로컬 파일만 받으므로, 모델 배포 정책 확정은 이번 설치 프로그램 구현의 선행 조건이 아닙니다.
 
 ## 문서
 
 - [SRS.md](SRS.md): 검증 가능한 기능·비기능 요구사항
 - [ARCHITECTURE.md](ARCHITECTURE.md): 서비스 경계, 데이터 흐름, 저장·보안·배포 구조
+- [Windows 설치 프로그램 가이드](docs/operations/windows-installer.md): 일반 사용자 설치, GUI/CLI 설정, 빌드·업그레이드·제거
+- [Edge 배포 가이드](docs/operations/edge-deployment.md): ARM64 패키지 빌드, 설치와 중앙 등록

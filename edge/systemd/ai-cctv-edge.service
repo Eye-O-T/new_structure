@@ -2,6 +2,7 @@
 Description=AI_CCTV Raspberry Pi edge camera
 After=network.target
 Wants=ai-cctv-edge-control.service ai-cctv-edge-recovery.service
+ConditionPathExists=/etc/ai-cctv-edge/.configured
 
 [Service]
 Type=simple

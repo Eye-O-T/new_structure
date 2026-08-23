@@ -1191,7 +1191,7 @@ Windows Docker Desktop에서 LAN 전용 binding이 의도대로 적용되는지 
 - 사용자 설정과 secret
 - 필요한 운영 로그
 
-`docker compose down`은 데이터를 제거하지 않아야 한다. `down -v`, uninstall, storage reset은 별도 확인 절차를 둔다.
+`docker compose down`과 Windows uninstall은 데이터를 제거하지 않아야 한다. `down -v` 또는 수동 storage reset처럼 Runtime Data를 지우는 작업은 백업 확인과 별도 명시 절차를 둔다.
 
 ---
 
@@ -1202,6 +1202,7 @@ Windows Docker Desktop에서 LAN 전용 binding이 의도대로 적용되는지 
 ```text
 C:\ProgramData\AI_CCTV\
 ├── config\config.yaml
+├── config\compose.env
 ├── secrets\data.env
 ├── secrets\external.env
 ├── secrets\inference.env
@@ -1212,10 +1213,14 @@ C:\ProgramData\AI_CCTV\
 ├── recordings\
 ├── recovered\
 ├── snapshots\
-└── logs\
+├── logs\
+└── certs\
+    ├── tls.crt
+    └── tls.key
 ```
 
 - `config.yaml`: 일반 설정
+- `compose.env`: Compose가 읽는 절대 운영 경로와 Port·모델 파일명
 - `data.env`: 상호 구별된 External/Inference/Media/Recovery Data Token과 초기 관리자 Hash
 - `external.env`: `DATA_EXTERNAL_TOKEN`, JWT Secret, Bootstrap RTSP publish credential, Inference 전용 RTSP reader 쌍
 - `inference.env`: `DATA_INFERENCE_TOKEN`과 External에 일치하는 Inference 전용 RTSP reader 쌍
@@ -1261,19 +1266,22 @@ Config Core는 다음을 보장한다.
 
 ### 13.3 모델 관리
 
-기본 모델 설치 절차:
+운영 모델 설치 절차:
 
 ```text
-manifest 조회
-  -> URL/version/license/SHA-256 확인
-  -> 임시 파일 다운로드
-  -> SHA-256 검증
-  -> models/<version>/로 원자 이동
-  -> active model 설정 변경
+운영자가 모델 파일을 별도로 다운로드
+  -> GUI/CLI에서 로컬 경로 선택
+  -> 일반 파일/읽기 권한/확장자/크기 검증
+  -> 원본 SHA-256 계산
+  -> 관리 models 디렉터리에 임시 복사
+  -> 임시 복사본과 원본 SHA-256 대조
+  -> 최종 경로로 원자 교체 후 SHA-256 재확인
+  -> Compose MODEL_FILE 설정 변경
+  -> Inference에 models 디렉터리를 읽기 전용 마운트
   -> Inference restart
 ```
 
-Custom model은 존재 여부, 확장자, load test를 통과한 뒤 활성화한다.
+설치 프로그램은 모델 weight를 포함하거나 네트워크에서 자동 다운로드하지 않는다. 현재 지원 입력은 `.pt`, `.onnx`, `.engine`이며 비어 있지 않은 2GiB 이하의 로컬 일반 파일이어야 한다. GUI와 CLI는 동일한 Config Core 검증과 복사 절차를 사용한다.
 
 ---
 
@@ -1535,7 +1543,7 @@ analysis_fps  = configurable, e.g. 5~15 fps
 - PyInstaller build
 - Installer
 - Edge `.deb`와 systemd
-- model manifest/download
+- 로컬 모델 선택·무결성 검증
 - doctor와 upgrade/uninstall
 
 ---
@@ -1550,7 +1558,7 @@ analysis_fps  = configurable, e.g. 5~15 fps
 - Event-Segment 연결
 - JWT 발급·만료·권한
 - retention/reconciliation
-- 모델 manifest와 checksum
+- 로컬 모델 검증·원자 복사·checksum 일치
 
 ### 19.2 통합 테스트
 

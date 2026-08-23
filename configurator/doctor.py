@@ -53,7 +53,9 @@ class Check:
     message: str
 
 
-def checks(server_dir: Path, config_path: Path) -> list[Check]:
+def checks(
+    server_dir: Path, config_path: Path, *, env_file: Path | None = None
+) -> list[Check]:
     results: list[Check] = []
     docker = shutil.which("docker")
     if not docker:
@@ -93,7 +95,8 @@ def checks(server_dir: Path, config_path: Path) -> list[Check]:
     try:
         config = load_config(config_path)
         results.append(Check("OK", "Configuration", f"schema={config.schema_version}"))
-        environment = _deployment_env(server_dir / ".env")
+        adapter = ComposeAdapter(server_dir, env_file)
+        environment = _deployment_env(adapter.env_file)
         runtime_uid = environment.get("AI_CCTV_UID")
         results.append(
             Check(
@@ -132,7 +135,7 @@ def checks(server_dir: Path, config_path: Path) -> list[Check]:
         )
     except Exception as exc:
         results.append(Check("ERROR", "Configuration", str(exc)))
-    adapter = ComposeAdapter(server_dir)
+    adapter = ComposeAdapter(server_dir, env_file)
     if adapter.env_file.exists() and adapter.compose_file.exists():
         compose = adapter.run("config", "--quiet", capture=True)
         results.append(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -9,8 +8,11 @@ from typing import Any, Callable
 from ai_cctv_core.config import CameraBootstrap
 
 from .config_core import InstallRequest, initialize
-from .compose_adapter import ComposeAdapter, default_server_dir
-from .model_manager import install_from_manifest
+from .compose_adapter import (
+    ComposeAdapter,
+    default_data_root,
+    default_server_dir,
+)
 from .server_api import (
     ServerApiClient,
     ServerApiError,
@@ -69,7 +71,7 @@ def run() -> int:
             form = QFormLayout(content)
             scroll.setWidget(content)
             outer.addWidget(scroll)
-            default_root = Path(os.getenv("PROGRAMDATA", str(Path.home()))) / "AI_CCTV"
+            default_root = default_data_root()
             self.storage = QLineEdit(str(default_root))
             choose = QPushButton("Choose storage")
             choose.clicked.connect(self.choose_storage)
@@ -79,10 +81,16 @@ def run() -> int:
             self.model = QLineEdit()
             choose_model = QPushButton("Choose model")
             choose_model.clicked.connect(self.choose_model)
-            self.manifest = QLineEdit()
-            choose_manifest = QPushButton("Choose model manifest")
-            choose_manifest.clicked.connect(self.choose_manifest)
-            self.cameras = QLineEdit("cam-001:Entrance")
+            self.tls_certificate = QLineEdit()
+            choose_tls_certificate = QPushButton("Choose TLS certificate")
+            choose_tls_certificate.clicked.connect(self.choose_tls_certificate)
+            self.tls_private_key = QLineEdit()
+            choose_tls_private_key = QPushButton("Choose TLS private key")
+            choose_tls_private_key.clicked.connect(self.choose_tls_private_key)
+            self.cameras = QLineEdit()
+            self.cameras.setPlaceholderText(
+                "Optional bootstrap only; normally register Edge after startup"
+            )
             self.http = QSpinBox()
             self.http.setRange(1, 65535)
             self.http.setValue(80)
@@ -149,11 +157,13 @@ def run() -> int:
             form.addRow("", choose)
             form.addRow("Administrator", self.username)
             form.addRow("Password", self.password)
-            form.addRow("Model path", self.model)
+            form.addRow("Downloaded AI model", self.model)
             form.addRow("", choose_model)
-            form.addRow("Or model manifest", self.manifest)
-            form.addRow("", choose_manifest)
-            form.addRow("Cameras (id:name, comma separated)", self.cameras)
+            form.addRow("TLS certificate (PEM)", self.tls_certificate)
+            form.addRow("", choose_tls_certificate)
+            form.addRow("TLS private key (PEM)", self.tls_private_key)
+            form.addRow("", choose_tls_private_key)
+            form.addRow("Bootstrap cameras (optional)", self.cameras)
             form.addRow("HTTP port", self.http)
             form.addRow("HTTPS port", self.https)
             form.addRow("Web bind address", self.public_bind)
@@ -184,7 +194,10 @@ def run() -> int:
             form.addRow("Management result", self.api_result)
 
         def service_action(self, action: str):
-            adapter = ComposeAdapter(default_server_dir())
+            data_root = Path(self.storage.text()).expanduser().resolve()
+            adapter = ComposeAdapter(
+                default_server_dir(), data_root / "config" / "compose.env"
+            )
             arguments = {
                 "start": ("up", "-d", "--build", "--wait"),
                 "stop": ("down",),
@@ -192,9 +205,23 @@ def run() -> int:
                 "status": ("ps",),
             }[action]
             try:
+                if action == "start":
+                    failed = [
+                        item
+                        for item in adapter.deployment_prerequisites()
+                        if not item.ok
+                    ]
+                    if failed:
+                        raise ValueError(
+                            "; ".join(f"{item.name}: {item.message}" for item in failed)
+                        )
                 result = adapter.run(*arguments, capture=True)
-            except OSError as exc:
-                QMessageBox.critical(self, "Service action failed", str(exc))
+            except (OSError, ValueError) as exc:
+                QMessageBox.critical(
+                    self,
+                    "Service action failed",
+                    f"Cause: {exc}\nAction: correct the prerequisite and retry.",
+                )
                 return
             output = (result.stdout or result.stderr or "No output").strip()
             if result.returncode == 0:
@@ -217,12 +244,19 @@ def run() -> int:
             if selected:
                 self.model.setText(selected)
 
-        def choose_manifest(self):
+        def choose_tls_certificate(self):
             selected, _filter = QFileDialog.getOpenFileName(
-                self, "Select model manifest", "", "JSON manifest (*.json)"
+                self, "Select TLS certificate", "", "PEM certificate (*.crt *.pem)"
             )
             if selected:
-                self.manifest.setText(selected)
+                self.tls_certificate.setText(selected)
+
+        def choose_tls_private_key(self):
+            selected, _filter = QFileDialog.getOpenFileName(
+                self, "Select TLS private key", "", "PEM private key (*.key *.pem)"
+            )
+            if selected:
+                self.tls_private_key.setText(selected)
 
         def choose_publish_credentials_output(self):
             selected, _filter = QFileDialog.getSaveFileName(
@@ -373,16 +407,16 @@ def run() -> int:
 
         def submit(self):
             try:
-                if bool(self.model.text().strip()) == bool(
-                    self.manifest.text().strip()
-                ):
-                    raise ValueError("select exactly one model file or model manifest")
+                if not self.model.text().strip():
+                    raise ValueError("select an already-downloaded AI model file")
                 model_path = Path(self.model.text())
-                if self.manifest.text().strip():
-                    model_path = install_from_manifest(
-                        Path(self.manifest.text()),
-                        Path(self.storage.text()) / "model-downloads",
+                certificate_text = self.tls_certificate.text().strip()
+                private_key_text = self.tls_private_key.text().strip()
+                if bool(certificate_text) != bool(private_key_text):
+                    raise ValueError(
+                        "select both the TLS certificate and its private key"
                     )
+                data_root = Path(self.storage.text())
                 cameras = []
                 for item in filter(
                     None, map(str.strip, self.cameras.text().split(","))
@@ -393,12 +427,23 @@ def run() -> int:
                     )
                 result = initialize(
                     InstallRequest(
-                        data_root=Path(self.storage.text()),
+                        data_root=data_root,
                         server_dir=default_server_dir(),
                         admin_username=self.username.text(),
                         admin_password=self.password.text(),
                         model_path=model_path,
                         cameras=cameras,
+                        compose_env_path=(
+                            data_root.expanduser().resolve()
+                            / "config"
+                            / "compose.env"
+                        ),
+                        tls_certificate_path=(
+                            Path(certificate_text) if certificate_text else None
+                        ),
+                        tls_private_key_path=(
+                            Path(private_key_text) if private_key_text else None
+                        ),
                         public_http_port=self.http.value(),
                         public_https_port=self.https.value(),
                         public_bind_address=self.public_bind.text(),
@@ -414,6 +459,13 @@ def run() -> int:
                     f"Cause: {exc}\nImpact: services were not changed.\nAction: correct the highlighted values and retry.",
                 )
                 return
+            tls_note = (
+                "TLS files are installed; use the service controls to start "
+                "AI_CCTV."
+                if result.tls_certificate_path.is_file()
+                else "TLS files are not installed yet; select both files and run "
+                "initialization again before starting services."
+            )
             QMessageBox.information(
                 self,
                 "Configuration complete",
@@ -423,7 +475,10 @@ def run() -> int:
                 f"Inference secrets: {result.inference_secrets_path}\n"
                 f"Media secrets: {result.media_secrets_path}\n"
                 f"Camera credentials: {result.camera_credentials_path}\n"
-                "Transfer each credential to its Edge setup, then use the service controls to start AI_CCTV.",
+                f"Compose environment: {result.compose_env_path}\n"
+                f"{tls_note}\n"
+                "Register each Edge after startup and transfer its one-time "
+                "credential file to that Edge.",
             )
 
     app = QApplication(sys.argv)

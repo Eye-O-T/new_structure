@@ -1,6 +1,7 @@
 [Unit]
 Description=AI_CCTV edge recording recovery API
 After=network.target
+ConditionPathExists=/etc/ai-cctv-edge/.configured
 
 [Service]
 Type=simple
