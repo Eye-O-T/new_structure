@@ -244,11 +244,27 @@ ai-cctv-edge_<version>_arm64.deb
 
 ```bash
 sudo apt install ./ai-cctv-edge_<version>_arm64.deb
-sudo ai-cctv-edge export-auth-token --output "$HOME/edge-001-control.token"
+sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 \
+  --set-pairing-key
 ```
 
-생성한 인증 토큰을 안전한 경로로 중앙 Windows PC에 전달한 뒤, 중앙 설치의
-`AI_CCTV_CLI.exe`로 Edge를 등록하고 일회성 송출 자격증명 파일을 만듭니다.
+숨김 Prompt에 32자 이상의 같은 Pairing Key를 두 번 입력한 뒤 중앙 Configurator에서
+그 Key를 `Edge pairing / bearer key`에 입력하고 `Discover Edge on trusted LAN`을
+누릅니다. 발견된 장치를 선택하고 Camera 이름, 중앙 RTSP LAN 주소와 Profile을 확인한
+뒤 `Register Edge and camera`를 누르면 Camera 등록, 일회성 게시 자격증명 전달과 Edge
+설정이 자동으로 끝납니다. Pairing API는 한 번 성공하면 종료되고 세 Edge Service가
+시작됩니다.
+
+자동 발견은 UDP 37020과 동일 IPv4 Broadcast Domain을 사용하므로 신뢰 LAN에서만
+실행합니다. Windows 방화벽에는 Configurator의 Private Network UDP 37020 수신을
+허용해야 합니다. 광고는 Key 자체를 전송하지 않고 HMAC-SHA256으로 서명하며, 수신
+주소를 Edge 주소로 사용합니다.
+
+Broadcast가 차단된 환경에서는 기존 수동 자격증명 전달 절차를 사용합니다.
+
+```bash
+sudo ai-cctv-edge export-auth-token --output "$HOME/edge-001-control.token"
+```
 
 ```powershell
 AI_CCTV_CLI.exe edge-register cam-001 `
@@ -506,6 +522,12 @@ DATA_MEDIA_TOKEN=<same-media-data-token>
 카메라 설정은 Data Service의 `cameras` 테이블과 Configurator/API에서 관리합니다. 동시에 활성화할 수 있는 카메라는 최대 4대이며, 이력을 보존한 비활성 카메라는 이 한도에 포함하지 않습니다. API로 카메라를 추가하면 publish credential을 응답에서 한 번 반환하고 Argon2 hash만 Data Service에 저장합니다.
 
 Edge 등록에는 상태·제어·이벤트용 관리 URL(기본 `http://<edge>:8003`)과 복구 전용 URL(기본 `http://<edge>:8002`)을 별도로 입력합니다. 한 URL에서 다른 Port를 추론하지 않습니다. 두 API는 Edge Bearer Token을 공유하지만 Token과 두 내부 URL은 일반 사용자 Camera/상태/Profile 응답에 포함하지 않습니다. Configurator의 신규 Edge 등록은 Device ID, 두 URL과 32자 이상 Token을 모두 요구합니다. 기존 DB의 불완전 Metadata는 읽되 제어·복구를 `CAPABILITY_UNKNOWN` 또는 `failed`로 표시하므로 `edge-update`로 완성해야 합니다.
+
+권장 등록은 Configurator의 인증된 LAN 발견이다. Edge `pair` 모드는 장치·Camera ID,
+관리/복구 Port와 지원 Profile을 서명된 UDP 광고로 보내며 Configurator는 사용자가 입력한
+동일 Key로 서명을 검증한 장치만 목록에 표시한다. 선택 후 기존 관리자 Camera 등록 API를
+호출하고 반환된 일회성 게시 자격증명을 임시 Pairing API에 즉시 전달한다. 자동 전달이
+실패하면 자격증명을 지정한 제한 권한 Handoff 파일에 저장하여 기존 수동 setup으로 복구한다.
 
 예시:
 

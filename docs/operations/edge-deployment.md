@@ -57,7 +57,51 @@ sudo apt install ./ai-cctv-edge_0.3.0_arm64.deb
 
 ## 3. 중앙–Edge 자격증명 교환
 
-자격증명은 다음 방향으로 한 번씩 이동한다.
+### 3.0 권장: Configurator LAN Pairing
+
+Raspberry Pi와 중앙 Windows PC를 신뢰할 수 있는 동일 IPv4 LAN에 연결한다. Edge에서
+다음 명령을 실행하고 숨김 Prompt에 임의의 32자 이상 Key를 두 번 입력한다. Key를
+명령행 인자, 채팅, 스크린샷이나 로그에 넣지 않는다.
+
+```bash
+sudo ai-cctv-edge pair \
+  --device-id edge-001 \
+  --camera-id cam-001 \
+  --set-pairing-key
+```
+
+이 명령은 구성 완료 Marker가 없는 Edge에서만 실행된다. UDP 37020으로 HMAC-SHA256
+서명 광고를 보내고 Port 8003에 임시 Pairing API를 연다. 중앙 Configurator에서 다음
+순서로 진행한다.
+
+1. `Edge pairing / bearer key`에 Edge와 같은 Key를 입력한다.
+2. `Discover Edge on trusted LAN`을 누른다.
+3. 발견 목록에서 `edge-001`을 선택한다. 실제 UDP Peer 주소로 관리 8003과 복구 8002
+   URL이 자동 입력되는지 확인한다.
+4. `Central RTSP host for Edge`에 Edge에서 접근 가능한 중앙 LAN IP를 입력하고
+   `Edge backup root`를 확인한다.
+5. Camera 이름과 `hd`/`fhd` Profile을 확인하고 `Register Edge and camera`를 누른다.
+
+정상 완료 시 Configurator가 관리자 HTTPS API로 Camera를 등록하고, 한 번 반환된 RTSP
+게시 자격증명을 선택된 Edge의 임시 Pairing API에 즉시 전달한다. Edge는 Device/Camera
+ID, Profile과 중앙 주소를 검증한 뒤 설정, 게시 비밀번호와 `.configured` Marker를 원자
+저장하고 Pairing Listener를 종료한다. 이어서 Capture, Control, Recovery Service가
+시작된다. 정상 경로에는 Token 또는 게시 자격증명 전달 파일이 생기지 않는다.
+
+자동 전달에 실패하면 Configurator는 게시 자격증명을 `Publish credential handoff`에
+지정된 보호 파일로 저장한다. 아래 수동 절차의 3.3부터 계속한다. 검색 자체가 실패하면
+Windows Private Network 방화벽의 UDP 37020, 같은 Broadcast Domain, AP Client
+Isolation과 입력 Key를 확인한다.
+
+Pairing 광고에는 Secret이나 IP 주소가 없다. Configurator는 실제 UDP 발신 주소를
+사용하고 잘못된 Key, 변조된 서명과 10초보다 오래된 광고를 무시한다. Pairing API는
+Bearer Key로 보호되지만 신뢰 LAN의 임시 HTTP Bootstrap이므로 공용 Wi-Fi나 인터넷에
+노출하지 않는다.
+
+### 3.0.1 대체: 수동 Handoff
+
+Broadcast가 차단되거나 GUI를 사용할 수 없으면 자격증명을 다음 방향으로 한 번씩
+이동한다.
 
 ```text
 Edge recovery.token

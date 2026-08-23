@@ -278,6 +278,12 @@ flowchart LR
 | FR-INSTALL-023 | Configurator는 저장한 게시 자격증명 파일을 일치하는 Edge setup으로 전달하도록 관리자에게 안내하여야 한다. |
 | FR-INSTALL-024 | Configurator GUI/CLI는 운영 공개 HTTPS Origin을 입력·검증하여 `PUBLIC_BASE_URL`을 생성하고, 운영자가 `.env`를 직접 편집하지 않아도 Live/Playback Absolute URL을 설정할 수 있어야 한다. |
 | FR-INSTALL-025 | Configurator GUI/CLI는 관리자 API를 통해 Camera 게시 자격증명을 안전하게 재발급하고 새 전달 파일 위치만 표시할 수 있어야 한다. |
+| FR-INSTALL-026 | 설정 전 Edge는 사용자가 설정한 32자 이상 Pairing Key로 서명한 UDP 광고를 동일 IPv4 Broadcast Domain에 전송할 수 있어야 하며 Key 자체나 장기 자격증명을 광고에 포함하지 않아야 한다. |
+| FR-INSTALL-027 | Configurator GUI는 UDP 37020에서 유효한 Edge 광고를 일정 시간 수집하여 여러 장치를 표시하고, 선택한 광고의 실제 UDP Peer 주소와 명시된 관리·복구 Port로 등록 입력을 채워야 한다. |
+| FR-INSTALL-028 | Edge 광고는 Protocol Version, UUID v4 Message ID, Timestamp, Device ID, Camera ID, 관리·복구 Port, 지원 Profile과 HMAC-SHA256 서명을 포함하여야 한다. |
+| FR-INSTALL-029 | Configurator는 잘못된 Key, 변조된 서명, 허용 시간 밖 Timestamp, 잘못된 Schema와 비정상 Port/Profile 광고를 무시하여야 한다. |
+| FR-INSTALL-030 | 선택한 Edge와 Camera의 중앙 등록 성공 후 Configurator는 한 번 반환된 RTSP 게시 자격증명을 동일 Bearer Key로 보호된 임시 Pairing API에 전달하고, 실패하면 기존 제한 권한 Handoff 파일로 복구하여야 한다. |
+| FR-INSTALL-031 | Edge Pairing API는 미설정 상태에서만 동작하고 Device ID와 Camera ID 일치를 검사하며 성공 후 설정·비밀번호·구성 완료 Marker를 원자 저장하고 Pairing Listener를 종료하여야 한다. |
 
 ### 9.2 Edge 영상 취득 및 RTSP 제공
 

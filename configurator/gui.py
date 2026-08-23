@@ -13,6 +13,8 @@ from .compose_adapter import (
     default_data_root,
     default_server_dir,
 )
+from .edge_discovery import DiscoveredEdge, discover_edges
+from .edge_pairing import EdgePairingError, complete_edge_pairing
 from .server_api import (
     ServerApiClient,
     ServerApiError,
@@ -119,6 +121,11 @@ def run() -> int:
             status.clicked.connect(lambda: self.service_action("status"))
 
             self.server_url = QLineEdit("https://127.0.0.1")
+            self.central_rtsp_host = QLineEdit("192.0.2.10")
+            self.central_rtsp_host.setPlaceholderText(
+                "LAN address reachable from the Edge"
+            )
+            self.edge_backup_root = QLineEdit("/var/lib/ai-cctv-edge/recordings")
             self.edge_camera_id = QLineEdit("cam-001")
             self.edge_name = QLineEdit("Entrance")
             self.edge_device_id = QLineEdit("edge-001")
@@ -126,7 +133,17 @@ def run() -> int:
             self.edge_recovery_url = QLineEdit("http://192.0.2.41:8002")
             self.edge_auth_token = QLineEdit()
             self.edge_auth_token.setEchoMode(QLineEdit.Password)
-            self.edge_auth_token.setPlaceholderText("minimum 32 characters")
+            self.edge_auth_token.setPlaceholderText(
+                "same 32+ character key used by Edge pairing"
+            )
+            self.discovered_edge_items = QComboBox()
+            self.discovered_edge_items.setPlaceholderText("No discovered Edge")
+            self.discovered_edge_items.currentIndexChanged.connect(
+                self.select_discovered_edge
+            )
+            self.discovered_edges: list[DiscoveredEdge] = []
+            discover_edge = QPushButton("Discover Edge on trusted LAN")
+            discover_edge.clicked.connect(self.discover_edge_devices)
             self.publish_credentials_output = QLineEdit(
                 str(default_root / "secrets" / "cam-001-publish-credentials.json")
             )
@@ -176,12 +193,16 @@ def run() -> int:
             form.addRow("", restart)
             form.addRow("", status)
             form.addRow("Management server URL", self.server_url)
+            form.addRow("Central RTSP host for Edge", self.central_rtsp_host)
+            form.addRow("Edge backup root", self.edge_backup_root)
+            form.addRow("Discovered Edge", self.discovered_edge_items)
+            form.addRow("", discover_edge)
             form.addRow("Managed camera ID", self.edge_camera_id)
             form.addRow("Managed camera name", self.edge_name)
             form.addRow("Edge device ID", self.edge_device_id)
             form.addRow("Edge management URL", self.edge_management_url)
             form.addRow("Edge recovery URL", self.edge_recovery_url)
-            form.addRow("Edge bearer token", self.edge_auth_token)
+            form.addRow("Edge pairing / bearer key", self.edge_auth_token)
             form.addRow("Publish credential handoff", self.publish_credentials_output)
             form.addRow("", choose_publish_output)
             form.addRow("Video profile", self.video_profile)
@@ -294,6 +315,75 @@ def run() -> int:
             self.api_result.setPlainText(json.dumps(safe, ensure_ascii=False, indent=2))
             return result
 
+        def discover_edge_devices(self):
+            pairing_key = self.edge_auth_token.text()
+            try:
+                devices = discover_edges(pairing_key, timeout=3.0)
+            except (OSError, ValueError) as exc:
+                message = f"[ERROR] EDGE_DISCOVERY: {exc}"
+                self.api_result.setPlainText(message)
+                QMessageBox.critical(self, "Edge discovery failed", message)
+                return
+            self.discovered_edges = devices
+            self.discovered_edge_items.clear()
+            for edge in devices:
+                profiles = ",".join(edge.supported_profiles)
+                self.discovered_edge_items.addItem(
+                    f"{edge.device_id} | {edge.address} | {profiles}"
+                )
+            if not devices:
+                self.api_result.setPlainText(
+                    "[WARN] EDGE_NOT_FOUND: Start pairing mode on the Edge and "
+                    "check the key, Windows firewall, and trusted-LAN connection."
+                )
+                return
+            self.discovered_edge_items.setCurrentIndex(0)
+            self.select_discovered_edge(0)
+            self.api_result.setPlainText(
+                json.dumps(
+                    {
+                        "discovered": len(devices),
+                        "selected_device_id": devices[0].device_id,
+                        "address": devices[0].address,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+
+        def select_discovered_edge(self, index: int):
+            if index < 0 or index >= len(self.discovered_edges):
+                return
+            edge = self.discovered_edges[index]
+            self.edge_device_id.setText(edge.device_id)
+            self.edge_camera_id.setText(edge.camera_id)
+            self.edge_management_url.setText(edge.management_url)
+            self.edge_recovery_url.setText(edge.recovery_url)
+            supported = [
+                item for item in edge.supported_profiles if item in {"hd", "fhd"}
+            ]
+            if supported:
+                current = self.video_profile.currentText()
+                self.video_profile.clear()
+                self.video_profile.addItems(supported)
+                selected = self.video_profile.findText(current)
+                if selected >= 0:
+                    self.video_profile.setCurrentIndex(selected)
+
+        def selected_discovered_edge(self) -> DiscoveredEdge | None:
+            index = self.discovered_edge_items.currentIndex()
+            if index < 0 or index >= len(self.discovered_edges):
+                return None
+            edge = self.discovered_edges[index]
+            if (
+                edge.device_id != self.edge_device_id.text().strip()
+                or edge.camera_id != self.edge_camera_id.text().strip()
+                or edge.management_url != self.edge_management_url.text().strip()
+                or edge.recovery_url != self.edge_recovery_url.text().strip()
+            ):
+                return None
+            return edge
+
         def register_edge(self):
             token = self.edge_auth_token.text()
             if not token:
@@ -309,6 +399,8 @@ def run() -> int:
                 self.api_result.setPlainText(f"[ERROR] CREDENTIAL_HANDOFF: {exc}")
                 return
 
+            discovered_edge = self.selected_discovered_edge()
+
             def register_and_save(client: ServerApiClient) -> dict[str, Any]:
                 result = client.register_edge(
                     camera_id=self.edge_camera_id.text(),
@@ -318,23 +410,54 @@ def run() -> int:
                     edge_recovery_url=self.edge_recovery_url.text(),
                     edge_auth_token=token,
                 )
-                write_publish_credentials(
-                    result, self.edge_camera_id.text(), handoff_path
-                )
                 result = dict(result)
-                result["handoff_file"] = str(handoff_path)
+                if discovered_edge is not None:
+                    try:
+                        pairing_result = complete_edge_pairing(
+                            discovered_edge,
+                            pairing_key=token,
+                            server_response=result,
+                            central_host=self.central_rtsp_host.text(),
+                            central_port=self.rtsp_port.value(),
+                            video_profile=self.video_profile.currentText(),
+                            backup_root=self.edge_backup_root.text(),
+                        )
+                    except EdgePairingError as exc:
+                        write_publish_credentials(
+                            result, self.edge_camera_id.text(), handoff_path
+                        )
+                        result["pairing_status"] = "handoff_required"
+                        result["pairing_error"] = str(exc)
+                        result["handoff_file"] = str(handoff_path)
+                    else:
+                        result["pairing_status"] = "completed"
+                        result["edge_pairing"] = pairing_result
+                else:
+                    write_publish_credentials(
+                        result, self.edge_camera_id.text(), handoff_path
+                    )
+                    result["pairing_status"] = "manual_handoff"
+                    result["handoff_file"] = str(handoff_path)
                 return result
 
             result = self._management_call(register_and_save)
             if result is not None:
-                QMessageBox.information(
-                    self,
-                    "Edge registration complete",
-                    "The one-time RTSP publish credential was saved to the "
-                    f"protected file:\n{handoff_path}\n"
-                    "Transfer that file to the matching Edge setup, then remove "
-                    "unneeded copies.",
-                )
+                if result.get("pairing_status") == "completed":
+                    QMessageBox.information(
+                        self,
+                        "Edge pairing complete",
+                        "The Edge and camera were registered and the one-time "
+                        "RTSP publish credential was delivered automatically.",
+                    )
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Edge registration complete",
+                        "Automatic pairing was not completed. The one-time RTSP "
+                        "publish credential was saved to the protected fallback "
+                        f"file:\n{handoff_path}\nTransfer it to the matching Edge "
+                        "setup, then remove unneeded copies.",
+                    )
 
         def rotate_publish_credentials(self):
             camera_id = self.edge_camera_id.text().strip()

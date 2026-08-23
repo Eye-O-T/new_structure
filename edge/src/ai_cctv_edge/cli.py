@@ -9,6 +9,8 @@ import secrets
 import shutil
 import stat
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from .config import (
@@ -23,6 +25,13 @@ from .config import (
 )
 from .control import create_control_app
 from .doctor import run_checks
+from .pairing import (
+    DISCOVERY_PORT,
+    PairingSession,
+    advertise_until_stopped,
+    create_pairing_app,
+    load_pairing_key,
+)
 from .recovery import create_app
 from .runner import EdgeRunner
 from .state import ProfileSelectionStore, default_state_root
@@ -212,6 +221,102 @@ def systemctl(action: str) -> int:
     return subprocess.run(["systemctl", action, *SYSTEMD_UNITS], check=False).returncode
 
 
+def pair(
+    path: Path,
+    *,
+    device_id: str,
+    camera_id: str,
+    pairing_key_file: Path,
+    bind_host: str,
+    management_port: int,
+    recovery_port: int,
+    discovery_port: int,
+    supported_profiles: tuple[str, ...],
+    set_pairing_key: bool = False,
+) -> int:
+    """Advertise an unconfigured Edge and accept one authenticated setup."""
+
+    session = PairingSession(
+        config_path=path.expanduser().resolve(),
+        pairing_key_file=pairing_key_file.expanduser().resolve(),
+        device_id=device_id,
+        camera_id=camera_id,
+        management_port=management_port,
+        recovery_port=recovery_port,
+    )
+    if session.marker_path.exists():
+        raise ValueError("Edge is already configured; pairing mode is first-setup only")
+    if set_pairing_key:
+        entered = getpass.getpass("New Edge pairing key (minimum 32 characters): ")
+        confirmed = getpass.getpass("Confirm Edge pairing key: ")
+        if entered != confirmed:
+            raise ValueError("pairing key confirmation does not match")
+        if len(entered) < 32 or entered != entered.strip() or any(
+            ord(character) < 0x20 or ord(character) == 0x7F
+            for character in entered
+        ):
+            raise ValueError(
+                "pairing key must contain at least 32 printable characters"
+            )
+        write_atomic(session.pairing_key_file, entered + "\n", mode=0o640)
+    pairing_key = load_pairing_key(session.pairing_key_file)
+
+    import uvicorn
+
+    stopped = threading.Event()
+    advertiser = threading.Thread(
+        target=advertise_until_stopped,
+        kwargs={
+            "stop": stopped,
+            "device_id": device_id,
+            "camera_id": camera_id,
+            "management_port": management_port,
+            "recovery_port": recovery_port,
+            "supported_profiles": supported_profiles,
+            "pairing_key": pairing_key,
+            "discovery_port": discovery_port,
+        },
+        name="edge-pairing-advertiser",
+        daemon=True,
+    )
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_pairing_app(session),
+            host=bind_host,
+            port=management_port,
+            log_config=None,
+        )
+    )
+
+    def stop_after_completion() -> None:
+        session.completed.wait()
+        if session.completed.is_set():
+            time.sleep(0.25)
+            server.should_exit = True
+
+    watcher = threading.Thread(
+        target=stop_after_completion,
+        name="edge-pairing-completion",
+        daemon=True,
+    )
+    advertiser.start()
+    watcher.start()
+    print(
+        f"Pairing mode: device={device_id} camera={camera_id} "
+        f"discovery=UDP/{discovery_port} management={bind_host}:{management_port}"
+    )
+    print("Open the central Configurator, enter the same Edge key, and scan the LAN.")
+    try:
+        server.run()
+    finally:
+        stopped.set()
+        advertiser.join(timeout=2)
+    if not session.completed.is_set():
+        return 1
+    print(f"Pairing complete: {session.config_path}")
+    return 0
+
+
 def show_status(path: Path) -> int:
     subprocess.run(
         ["systemctl", "--no-pager", "--full", "status", *SYSTEMD_UNITS],
@@ -253,6 +358,27 @@ def main(argv: list[str] | None = None) -> int:
         help="copy the Edge bearer token to a new mode-0600 handoff file",
     )
     export_token.add_argument("--output", type=Path, required=True)
+    pairing = sub.add_parser(
+        "pair",
+        help="advertise this unconfigured Edge and accept central provisioning",
+    )
+    pairing.add_argument("--device-id", default="edge-001")
+    pairing.add_argument("--camera-id", default="cam-001")
+    pairing.add_argument(
+        "--pairing-key-file",
+        type=Path,
+        default=DEFAULT_CONFIG.parent / "recovery.token",
+    )
+    pairing.add_argument("--bind-host", default="0.0.0.0")
+    pairing.add_argument("--management-port", type=int, default=8003)
+    pairing.add_argument("--recovery-port", type=int, default=8002)
+    pairing.add_argument("--discovery-port", type=int, default=DISCOVERY_PORT)
+    pairing.add_argument("--supported-profiles", default="hd,fhd")
+    pairing.add_argument(
+        "--set-pairing-key",
+        action="store_true",
+        help="replace the unconfigured Edge key from a hidden confirmation prompt",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -267,6 +393,28 @@ def main(argv: list[str] | None = None) -> int:
         return result
     if args.command == "export-auth-token":
         return export_auth_token(args.config, args.output)
+    if args.command == "pair":
+        supported_profiles = tuple(
+            item.strip().lower()
+            for item in args.supported_profiles.split(",")
+            if item.strip()
+        )
+        result = pair(
+            args.config,
+            device_id=args.device_id,
+            camera_id=args.camera_id,
+            pairing_key_file=args.pairing_key_file,
+            bind_host=args.bind_host,
+            management_port=args.management_port,
+            recovery_port=args.recovery_port,
+            discovery_port=args.discovery_port,
+            supported_profiles=supported_profiles,
+            set_pairing_key=args.set_pairing_key,
+        )
+        if result == 0 and args.config == DEFAULT_CONFIG:
+            systemctl("enable")
+            return systemctl("restart")
+        return result
     if args.command in {"start", "stop", "restart"}:
         return systemctl(args.command)
     if args.command == "logs":

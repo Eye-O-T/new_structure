@@ -12,6 +12,7 @@
 | Edge 이벤트 | `camera_input_lost/restored`, `central_connection_lost/restored`, `external_power_lost/restored`, `battery_low/critical`, Profile 변경 성공·실패 Journal |
 | Edge 서비스 분리 | Capture, 상태·제어 API, Recovery API를 별도 systemd Service로 분리하여 Capture 장애 중에도 상태·복구 경로 유지 |
 | Edge HTTP | 상태·Capability·Profile·Event는 인증된 관리 API 8003, Manifest/File 복구는 인증된 Recovery API 8002 |
+| Edge 페어링 | 설정 전 Edge의 HMAC-SHA256 UDP 광고, Configurator 다중 장치 발견·자동 입력, 임시 Bearer Pairing API를 통한 Camera별 게시 자격증명 자동 전달과 수동 Handoff Fallback |
 | 중앙 상태 | 주기적 Status Collector, Camera/Edge Runtime 상태 저장, 전원·입력·연결·저장장치 전이 Event 생성 |
 | 중앙 Profile 제어 | 현재·요청·지원 Profile 분리 저장, Edge Capability 확인, 적용 성공 후 현재값 확정, 오류 코드와 실패 Event 저장 |
 | 자동 복구 | 중앙 연결 중단·복구 구간을 Recovery Job으로 저장하고 제한된 재시도, SHA-256 검증, 원자 이동, `edge_recovery` 중복 방지 인덱싱 수행 |
@@ -37,6 +38,13 @@ Configurator의 신규 `edge-register`는 다음 값을 모두 요구한다.
 
 두 URL은 서로 독립적이며 Port를 추론하지 않는다. Token은 명령행 값으로 직접 전달하지 않고 숨김 입력 또는 권한이 제한된 `--edge-auth-token-file`을 사용한다.
 
+GUI 권장 흐름에서는 Edge에서 `ai-cctv-edge pair --set-pairing-key`를 실행하고 중앙
+Configurator에 동일한 32자 이상 Key를 숨김 입력한다. UDP 37020 광고는 Key를 포함하지
+않고 UUID v4, Unix Timestamp와 장치 Metadata를 HMAC-SHA256으로 서명한다. Configurator는
+실제 UDP Peer 주소로 관리·복구 URL을 만들며 잘못된 Key, 변조, 만료 광고를 무시한다.
+선택한 Edge의 등록 성공 후 임시 Pairing API가 일회성 RTSP 게시 자격증명을 받아 설정을
+원자 저장하고 종료한다. 자동 전달 실패 시에만 기존 제한 권한 JSON Handoff를 남긴다.
+
 ```bash
 ai-cctv-server edge-register cam-001 \
   --server-url https://cctv.example.com \
@@ -60,7 +68,7 @@ ai-cctv-server edge-rotate-credentials cam-001 \
 
 2026-08-23 현재 합쳐진 작업 트리에서 다음 자동 검증을 완료했다.
 
-- `.venv\Scripts\python.exe -m pytest -q`: **181 passed**
+- `.venv\Scripts\python.exe -m pytest -q`: **185 passed**
 - `.venv\Scripts\python.exe -m ruff check .`: 통과
 - Python `compileall`: 통과
 - `server/compose.yml`, `server/mediamtx/mediamtx.yml`, `server/config/config.example.yaml` YAML 파싱: 통과
@@ -80,6 +88,7 @@ Windows `AI_CCTV_Server_Setup_0.3.0_x64.exe`와 `.sha256` 파일은 실제 생�
 - Status Collector, Runtime 상태, Event와 Recovery Job 저장
 - Profile 성공 확정, 실패 오류 코드와 Rollback 유지
 - Configurator의 별도 관리/복구 URL, 32자 이상 Token, Secret 마스킹
+- 서명된 LAN Edge 발견, 잘못된 Key·변조·Replay 거부와 일회성 Pairing 설정
 - OpenAPI 공개 경로, `PUBLIC_BASE_URL`, JWT Cookie/Bearer, HLS ACL
 - 서비스별 Data Token Scope, 내부 Proxy/Redirect 차단, URI 정규화 우회 거부
 - 게시 자격증명 재발급·재등록과 Camera Lifecycle fail-closed 동작

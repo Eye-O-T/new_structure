@@ -350,7 +350,29 @@ GUI와 CLI는 동일한 Config Core를 호출한다.
 - CLI: 같은 Edge 관리 작업의 자동화, 장애 진단, 개발자 운영
 - Installer: 파일 배치, Configurator 설치, 최초 실행
 
-Configurator의 Edge 관리 Client는 Nginx 공개 HTTPS Origin에 관리자 JWT로 접속한다. `POST/PATCH /api/v1/cameras`, `GET /status`, `GET/PATCH /video-profile`, `POST /publish-credentials/rotate`만 알고 Edge 내부 API 형식이나 Data Service를 직접 알지 않는다. 최초 설정의 공개 HTTPS Origin은 GUI 입력 또는 CLI의 `--public-base-url`로 받고 HTTPS Origin 형식만 허용하여 Compose `PUBLIC_BASE_URL`을 생성한다. 등록 시 상태·제어·이벤트용 `edge_management_url`(기본 8003)과 `/v1/recovery`용 `edge_recovery_url`(기본 8002)을 별도로 받고 Port를 추론하지 않는다. 32자 이상의 Edge Bearer Token은 두 Edge API가 공유하되 등록·수정 요청에서만 전달하고 서버 응답, GUI 결과, CLI 출력과 로그에는 표시하지 않는다. 등록·재발급 응답의 일회성 RTSP 게시 자격증명은 API 호출 전에 검증한 경로에 해당 Camera만 포함한 제한 권한 파일로 원자 저장하고, 관리자에게 Edge setup으로 안전하게 전달하도록 안내한다.
+Configurator의 운영 Edge 관리 Client는 Nginx 공개 HTTPS Origin에 관리자 JWT로 접속한다. `POST/PATCH /api/v1/cameras`, `GET /status`, `GET/PATCH /video-profile`, `POST /publish-credentials/rotate`만 알고 Data Service를 직접 알지 않는다. 최초 Pairing에 한해 Windows Host의 Configurator가 LAN UDP 광고와 선택된 Edge의 임시 `/internal/v1/pairing/complete`를 직접 사용한다. 최초 설정의 공개 HTTPS Origin은 GUI 입력 또는 CLI의 `--public-base-url`로 받고 HTTPS Origin 형식만 허용하여 Compose `PUBLIC_BASE_URL`을 생성한다. 등록 시 상태·제어·이벤트용 `edge_management_url`(기본 8003)과 `/v1/recovery`용 `edge_recovery_url`(기본 8002)을 별도로 받고 Port를 추론하지 않는다. 32자 이상의 Edge Pairing Key는 등록 후 두 Edge API의 Bearer Token으로 사용하되 서버 응답, GUI 결과, CLI 출력과 로그에는 표시하지 않는다. 등록·재발급 응답의 일회성 RTSP 게시 자격증명은 인증된 Pairing이 선택되면 Edge에 즉시 전달하고, 자동 전달 실패 또는 수동 등록에서는 사전 검증한 제한 권한 파일로 원자 저장한다.
+
+### 6.4 LAN Edge 발견과 최초 Pairing
+
+```text
+Unconfigured Edge                         Windows Configurator
+  |-- signed ADVERTISE, UDP/37020 ------->|
+  |   device/camera/ports/profiles         |-- HMAC/UUID/time 검증
+  |                                        |-- 관리자 Camera 등록
+  |<-- PUT pairing/complete + Bearer ------|
+  |    central RTSP + publish credential   |
+  |-- atomic config + marker               |
+  |-- pairing listener stop                |
+  `-- RTSP/1.0 publish -------------------> Central MediaMTX
+```
+
+광고는 `255.255.255.255:37020`으로 전송하며 Secret을 포함하지 않는다. JSON의
+서명 대상은 Protocol Version, UUID v4, Unix Timestamp, Device/Camera ID, 관리·복구
+Port와 지원 Profile이고 HMAC-SHA256 Key는 사용자가 양쪽에 숨김 입력한 32자 이상
+Pairing Key다. Configurator는 광고에 IP를 싣거나 신뢰하지 않고 실제 UDP Peer 주소를
+사용한다. 잘못된 서명, 10초보다 오래된 광고, 중복 Device ID의 이전 광고를 버린다.
+Pairing API는 미설정 Edge에서만 열리고 한 번 성공하면 종료한다. 이 Bootstrap은 신뢰
+LAN용이며 다른 Subnet 자동 탐색, 인터넷 Discovery와 상시 장비 Registry를 제공하지 않는다.
 
 UI 책임은 다음처럼 고정한다.
 
@@ -1332,6 +1354,7 @@ ai-cctv-edge_<version>_arm64.deb
 ```bash
 sudo ai-cctv-edge setup
 sudo ai-cctv-edge configure
+sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-key
 sudo ai-cctv-edge start
 sudo ai-cctv-edge stop
 sudo ai-cctv-edge status

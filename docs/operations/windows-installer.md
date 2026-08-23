@@ -68,8 +68,10 @@ AI_CCTV_CLI.exe stop
 입력으로 받는다. 운영 환경에서는 이 방식을 사용한다.
 
 기본 설치에서는 Bootstrap 카메라를 만들지 않는다. 중앙 서비스를 시작한 다음 GUI의
-**Register Edge and camera**를 사용하거나 CLI의 `edge-register`로 Edge와 카메라를 함께
-등록하고, 생성된 일회성 게시 자격증명 파일을 해당 Edge 설치에 전달한다. `install
+**Discover Edge on trusted LAN**으로 Pairing 중인 Edge를 선택하고 **Register Edge and
+camera**를 사용한다. Configurator는 성공 시 일회성 게시 자격증명을 Edge에 자동 전달하고,
+자동 전달 실패 또는 수동 등록에서는 보호된 Handoff 파일을 만든다. GUI를 사용할 수
+없으면 CLI의 `edge-register`로 Edge와 카메라를 함께 등록한다. `install
 --camera <id:name>`은 Edge 관리 Metadata 없이 기존 Bootstrap을 복원해야 할 때만 쓰는
 고급 호환 옵션이다.
 
