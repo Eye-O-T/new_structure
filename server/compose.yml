@@ -24,7 +24,7 @@ services:
     build:
       context: ..
       dockerfile: server/services/data/Dockerfile
-    image: ai-cctv-data:${AI_CCTV_VERSION:-0.3.0-dev}
+    image: ai-cctv-data:${AI_CCTV_VERSION:-0.3.0}
     user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
     init: true
     restart: unless-stopped
@@ -46,7 +46,7 @@ services:
       RECOVERY_RETRY_BASE_SECONDS: ${RECOVERY_RETRY_BASE_SECONDS:-30}
       RECOVERY_SETTLE_SECONDS: ${RECOVERY_SETTLE_SECONDS:-15}
       RECOVERY_TIMEOUT_SECONDS: ${RECOVERY_TIMEOUT_SECONDS:-30}
-      CENTRAL_RECORDING_SEGMENT_SECONDS: ${CENTRAL_RECORDING_SEGMENT_SECONDS:-60}
+      CENTRAL_RECORDING_SEGMENT_SECONDS: ${RECORDING_SEGMENT_SECONDS:-60}
       TZ: UTC
     expose:
       - "8000"
@@ -88,7 +88,7 @@ services:
     build:
       context: ..
       dockerfile: server/services/external/Dockerfile
-    image: ai-cctv-external:${AI_CCTV_VERSION:-0.3.0-dev}
+    image: ai-cctv-external:${AI_CCTV_VERSION:-0.3.0}
     init: true
     restart: unless-stopped
     env_file:
@@ -150,6 +150,9 @@ services:
       - ${MEDIA_SECRETS_FILE:-./secrets/media.env}
     environment:
       TZ: UTC
+      # MediaMTX environment overrides use the same setting that Data uses to
+      # infer completed segment bounds during hook reconciliation.
+      MTX_PATHDEFAULTS_RECORDSEGMENTDURATION: ${RECORDING_SEGMENT_SECONDS:-60}s
     ports:
       - target: 8554
         published: ${RTSP_PORT:-8554}
@@ -242,7 +245,7 @@ services:
     build:
       context: ..
       dockerfile: server/services/inference/Dockerfile
-    image: ai-cctv-inference:${AI_CCTV_VERSION:-0.3.0-dev}
+    image: ai-cctv-inference:${AI_CCTV_VERSION:-0.3.0}
     user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
     init: true
     restart: unless-stopped

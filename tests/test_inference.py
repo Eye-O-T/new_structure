@@ -214,6 +214,12 @@ def test_inference_requires_dedicated_rtsp_read_credentials(tmp_path):
             media_read_password="short",
             **common,
         ).validate()
+    with pytest.raises(ValueError, match="INFERENCE_DEVICE"):
+        Settings(
+            media_read_username=MEDIA_READ_USERNAME,
+            media_read_password=MEDIA_READ_PASSWORD,
+            **{**common, "device": "gpu-zero"},
+        ).validate()
 
 
 def test_internal_inference_and_media_calls_ignore_environment_proxies():

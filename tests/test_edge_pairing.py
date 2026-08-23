@@ -10,7 +10,7 @@ from ai_cctv_edge.pairing import (
     create_pairing_app,
 )
 from configurator.edge_discovery import parse_advertisement
-from configurator.edge_pairing import complete_edge_pairing
+from configurator.edge_pairing import complete_edge_pairing, probe_edge_connection
 
 
 PAIRING_KEY = "p" * 48
@@ -175,3 +175,28 @@ def test_configurator_delivers_one_time_publish_credential_without_url_secret(
     assert body["publish_password"] == "s" * 48
     assert body["central_host"] == "192.0.2.10"
     assert body["backup_root"] == "/srv/ai-cctv-edge/recordings"
+
+
+def test_configurator_probes_discovered_edge_identity_before_registration(monkeypatch):
+    opener = _Opener()
+    monkeypatch.setattr("configurator.edge_pairing.build_opener", lambda *_: opener)
+    edge = parse_advertisement(
+        _advertisement(),
+        "192.0.2.41",
+        PAIRING_KEY,
+        now=1_700_000_001,
+    )
+
+    class HealthResponse(_Response):
+        def read(self, _limit):
+            return (
+                b'{"status":"pairing","device_id":"edge-001",'
+                b'"camera_id":"cam-001"}'
+            )
+
+    opener.open = lambda request, timeout: HealthResponse()
+    result = probe_edge_connection(edge)
+
+    assert result["status"] == "pairing"
+    assert result["management_url"] == "http://192.0.2.41:8003"
+    assert result["supported_profiles"] == ["hd", "fhd"]

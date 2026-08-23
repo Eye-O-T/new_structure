@@ -58,6 +58,7 @@ py -3.11 server/scripts/doctor.py
 - `CERTS_DIR`: `tls.crt`, `tls.key`가 있는 경로
 - Linux의 `AI_CCTV_UID`, `AI_CCTV_GID`: Runtime Directory를 소유한 Host 사용자
 - `PUBLIC_BASE_URL`: 운영 환경의 공개 HTTPS Origin. 설정하면 Live와 Playback API가 Absolute HTTPS URL을 반환
+- `RECORDING_SEGMENT_SECONDS`: 10~300초. MediaMTX 녹화와 Data Reconciliation이 함께 사용하는 Segment 길이
 - `DATA_SECRETS_FILE`, `EXTERNAL_SECRETS_FILE`, `INFERENCE_SECRETS_FILE`, `MEDIA_SECRETS_FILE`: 서비스별 최소권한 Secret 파일. 네 경로는 서로 달라야 한다.
 
 Profile 적용 시간 제한의 기본 연쇄는 Edge apply/rollback 최대 60초, External `EDGE_CONTROL_TIMEOUT_SECONDS=75`, Nginx 공개 API 85초, Configurator 90초다. Edge의 `apply_timeout_seconds`를 늘리면 모든 상위 제한도 같은 순서로 더 크게 조정하여 Client가 결과를 모른 채 재시도하지 않게 한다. 상태 Poll은 별도 `EDGE_STATUS_TIMEOUT_SECONDS=5`를 사용한다.

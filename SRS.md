@@ -881,7 +881,8 @@ ON events(camera_id, occurred_at, event_type);
 ```text
 AI_CCTV/
 ├── config/
-│   └── config.yaml
+│   ├── config.yaml
+│   └── release-manifest.json
 ├── secrets/
 │   ├── data.env
 │   ├── external.env
@@ -938,6 +939,11 @@ cameras:
 신규 설치는 단일 `secrets.env`를 모든 Container에 공유하지 않는다. 네 Data Token은 32자 이상이고 상호 달라야 하며 Data API는 Token별 허용 Route를 강제하여야 한다. RTSP reader username/password는 External과 Inference에만 동일하게 저장하고 Data/Media에는 없어야 하며 password는 32자 이상이어야 한다. Compose와 `doctor`는 기존 결합 파일, 서비스 allowlist 위반, reader 쌍 누락·불일치를 운영 입력으로 허용하지 않고, `INTERNAL_SERVICE_TOKEN` 호환 처리는 Compose 밖의 직접 개발·테스트에만 유지한다. 실제 Secret 값은 Git에 Commit하지 않아야 하며 POSIX `0600` 또는 Windows에서 상속을 제거한 명시적 DACL로 보호하여야 한다.
 
 `cameras` 목록은 최초 설치 또는 복구 시 사용하는 Bootstrap 입력으로 본다. 운영 중 카메라 정보의 최종 Source of Truth는 Data Service의 `cameras` 테이블이며, Configurator와 관리자 API가 이를 갱신하여야 한다.
+
+Configurator는 `recording.segment_seconds`, `retention_days`와 저장공간 경고 기준을
+GUI/CLI에서 입력받아 공통 Config와 MediaMTX/Data Runtime에 같은 값으로 전달하여야
+한다. `release-manifest.json`에는 Schema Version, Application Version, 고정 Image Tag와
+설치된 Model 파일명·SHA-256을 기록하여야 한다.
 
 ---
 
@@ -1052,17 +1058,17 @@ nginx             # 인프라: Reverse Proxy와 HTTPS
 | 목표 | 주요 요구사항 |
 | --- | --- |
 | 멀티카메라 | FR-EDGE-003~005, FR-MEDIA-002~004 |
-| 중앙 MediaMTX | FR-MEDIA-001~012 |
+| 중앙 MediaMTX | FR-MEDIA-001~013 |
 | 영상 저장과 검색 | FR-STORAGE-001~013, FR-DATA-001~012 |
 | AI 이벤트 | FR-AI-001~013 |
 | 외부 로그인 | FR-AUTH-001~015 |
 | Live/저장/이벤트 조회 | FR-USER-001~010 |
 | 실시간 HLS | FR-MEDIA-006, FR-USER-002, FR-NGINX-003/005 |
 | 저장 영상 Playback | FR-USER-003/005/006, FR-NGINX-004/005 |
-| Nginx | FR-NGINX-001~011 |
+| Nginx | FR-NGINX-001~012 |
 | Docker 배포 | FR-INSTALL-002/008, 제14장 |
-| 일반 사용자 설치 | FR-INSTALL-001~025 |
-| Edge 장애 복구 | FR-RECOVERY-001~008 |
+| 일반 사용자 설치 | FR-INSTALL-001~031 |
+| Edge 장애 복구 | FR-RECOVERY-001~013 |
 | 저장 암호화 연기 | FR-STORAGE-013, NFR-SEC-010 |
 | Tailscale 미사용 | 제3.2절, 제7.3절 |
 

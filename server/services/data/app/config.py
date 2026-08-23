@@ -149,7 +149,10 @@ class Settings:
                 os.getenv("RECOVERY_TIMEOUT_SECONDS", "30")
             ),
             central_recording_segment_seconds=int(
-                os.getenv("CENTRAL_RECORDING_SEGMENT_SECONDS", "60")
+                os.getenv(
+                    "CENTRAL_RECORDING_SEGMENT_SECONDS",
+                    str(shared_config.recording.segment_seconds if shared_config else 60),
+                )
             ),
             recovery_data_base_url=os.getenv(
                 "RECOVERY_DATA_BASE_URL",
@@ -221,8 +224,10 @@ class Settings:
             raise ValueError("RECOVERY_SETTLE_SECONDS cannot be negative")
         if self.recovery_timeout_seconds <= 0:
             raise ValueError("RECOVERY_TIMEOUT_SECONDS must be greater than zero")
-        if self.central_recording_segment_seconds < 1:
-            raise ValueError("CENTRAL_RECORDING_SEGMENT_SECONDS must be at least 1")
+        if not 10 <= self.central_recording_segment_seconds <= 300:
+            raise ValueError(
+                "CENTRAL_RECORDING_SEGMENT_SECONDS must be in range 10..300"
+            )
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.storage_root.mkdir(parents=True, exist_ok=True)
         self.snapshot_root.mkdir(parents=True, exist_ok=True)

@@ -155,8 +155,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8003/internal/v1/events?limit=100" -Hea
 - `central_connection_lost`, `central_connection_restored`
 - `camera_input_lost`, `camera_input_restored`
 - `battery_low`, `battery_critical`
-- `power_disconnected`, `power_restored`
-- `storage_warning`
+- `external_power_lost`, `external_power_restored`
+- `storage_warning`, `storage_critical`
 
 복구 Manifest는 UTC ISO 8601 시간 범위로 조회합니다. 최대 범위는 24시간입니다.
 

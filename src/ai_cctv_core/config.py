@@ -52,7 +52,7 @@ class RecordingConfig(StrictModel):
 class InferenceConfig(StrictModel):
     enabled: bool = True
     model_path: str = "./models/default.pt"
-    device: str = "auto"
+    device: str = Field(default="auto", pattern=r"^(?:auto|cpu|cuda(?::[0-9]+)?)$")
     confidence_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
     analysis_fps: float = Field(default=5.0, gt=0.0, le=30.0)
     disappear_seconds: float = Field(default=3.0, gt=0.0)

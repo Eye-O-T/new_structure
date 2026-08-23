@@ -24,6 +24,50 @@ class EdgePairingError(RuntimeError):
         return self.message
 
 
+def probe_edge_connection(
+    edge: DiscoveredEdge, *, timeout: float = 5.0
+) -> dict[str, Any]:
+    """Verify the selected HMAC-discovered Edge before central registration."""
+
+    if timeout <= 0:
+        raise ValueError("Edge probe timeout must be positive")
+    request = Request(
+        edge.management_url.rstrip("/") + "/health/live",
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    opener = build_opener(ProxyHandler({}), _NoRedirectHandler())
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            if response.status != 200:
+                raise EdgePairingError(f"Edge health probe returned HTTP {response.status}")
+            raw = response.read(65_537)
+    except HTTPError as exc:
+        raise EdgePairingError(f"Edge health probe returned HTTP {exc.code}") from exc
+    except (URLError, OSError, TimeoutError) as exc:
+        raise EdgePairingError(f"Edge health probe failed: {exc}") from exc
+    if len(raw) > 65_536:
+        raise EdgePairingError("Edge health response is too large")
+    try:
+        result = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise EdgePairingError("Edge health response is not UTF-8 JSON") from exc
+    if (
+        not isinstance(result, dict)
+        or result.get("device_id") != edge.device_id
+        or result.get("camera_id") != edge.camera_id
+        or result.get("status") not in {"pairing", "alive"}
+    ):
+        raise EdgePairingError("Edge health identity does not match the advertisement")
+    return {
+        "status": result["status"],
+        "device_id": edge.device_id,
+        "camera_id": edge.camera_id,
+        "management_url": edge.management_url,
+        "supported_profiles": list(edge.supported_profiles),
+    }
+
+
 def complete_edge_pairing(
     edge: DiscoveredEdge,
     *,

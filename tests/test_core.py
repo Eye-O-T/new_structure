@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from ai_cctv_core.config import AppConfig, CameraBootstrap, RecordingConfig, load_config
+from ai_cctv_core.config import (
+    AppConfig,
+    CameraBootstrap,
+    InferenceConfig,
+    RecordingConfig,
+    load_config,
+)
 from ai_cctv_core.identifiers import safe_storage_path, validate_camera_id
 from ai_cctv_core.time import format_utc, parse_utc
 
@@ -63,6 +69,13 @@ def test_recording_segment_range():
     assert RecordingConfig(segment_seconds=10).segment_seconds == 10
     with pytest.raises(ValueError):
         RecordingConfig(segment_seconds=9)
+
+
+def test_inference_device_contract_supports_explicit_cpu_and_cuda_selection():
+    assert InferenceConfig(device="cpu").device == "cpu"
+    assert InferenceConfig(device="cuda:0").device == "cuda:0"
+    with pytest.raises(ValueError):
+        InferenceConfig(device="gpu-zero")
 
 
 def test_storage_path_rejects_traversal(tmp_path):

@@ -67,6 +67,10 @@ def _init(args: argparse.Namespace) -> int:
                 public_base_url=args.public_base_url,
                 rtsp_bind_address=args.rtsp_bind,
                 rtsp_port=args.rtsp_port,
+                recording_segment_seconds=args.recording_segment_seconds,
+                retention_days=args.retention_days,
+                storage_warning_free_percent=args.storage_warning_free_percent,
+                inference_device=args.inference_device,
             )
         )
     except (EOFError, OSError, ValueError) as exc:
@@ -79,6 +83,7 @@ def _init(args: argparse.Namespace) -> int:
     print(f"Inference service secrets: {result.inference_secrets_path}")
     print(f"Media service secrets: {result.media_secrets_path}")
     print(f"Camera credentials: {result.camera_credentials_path}")
+    print(f"Release manifest: {result.release_manifest_path}")
     print(f"Compose environment: {result.compose_env_path}")
     print(f"Installed model: {args.data_root.resolve() / 'models' / model.name}")
     if result.tls_certificate_path.is_file():
@@ -266,6 +271,11 @@ def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="path to an already-downloaded .pt, .onnx, or .engine model",
     )
+    parser.add_argument(
+        "--inference-device",
+        default="auto",
+        help="inference device: auto, cpu, cuda, or cuda:<index> (default: auto)",
+    )
     tls = parser.add_argument_group("TLS files")
     tls.add_argument(
         "--tls-certificate",
@@ -295,6 +305,29 @@ def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument("--rtsp-port", type=int, default=8554)
+    recording = parser.add_argument_group("recording and retention")
+    recording.add_argument(
+        "--recording-segment-seconds",
+        type=int,
+        choices=range(10, 301),
+        default=60,
+        metavar="10..300",
+        help="central MediaMTX recording segment length (default: 60)",
+    )
+    recording.add_argument(
+        "--retention-days",
+        type=int,
+        default=7,
+        help="central recording retention in days (default: 7)",
+    )
+    recording.add_argument(
+        "--storage-warning-free-percent",
+        type=int,
+        choices=range(1, 100),
+        default=15,
+        metavar="1..99",
+        help="warn when free recording storage falls below this percent",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

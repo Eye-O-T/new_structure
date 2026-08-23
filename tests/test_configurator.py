@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -82,11 +83,19 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
             model_path=model_source,
             cameras=[CameraBootstrap(camera_id="cam-001", name="Entrance")],
             public_base_url="https://cctv.example.com/",
+            recording_segment_seconds=45,
+            retention_days=14,
+            storage_warning_free_percent=20,
+            inference_device="cpu",
         )
     )
     config = load_config(result.config_path)
     assert config.cameras[0].stream_path == "cam-001"
     assert config.inference.model_path == "/models/selected-model.pt"
+    assert config.inference.device == "cpu"
+    assert config.recording.segment_seconds == 45
+    assert config.recording.retention_days == 14
+    assert config.recording.warning_free_percent == 20
     assert (tmp_path / "data" / "models" / "selected-model.pt").read_bytes() == (
         b"model-content"
     )
@@ -154,6 +163,8 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
     )
 
     compose_text = result.compose_env_path.read_text(encoding="utf-8")
+    assert "AI_CCTV_VERSION=0.3.0\n" in compose_text
+    assert "RECORDING_SEGMENT_SECONDS=45\n" in compose_text
     assert "MODEL_FILE=selected-model.pt\n" in compose_text
     assert "RTSP_BIND_ADDRESS=127.0.0.1\n" in compose_text
     assert "PUBLIC_BASE_URL=https://cctv.example.com\n" in compose_text
@@ -164,6 +175,14 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
     assert "\nSECRETS_FILE=" not in compose_text
     expected_models_dir = _dotenv(str(tmp_path / "data" / "models"))
     assert f"MODELS_DIR={expected_models_dir}\n" in compose_text
+    manifest = json.loads(result.release_manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["application_version"] == "0.3.0"
+    assert manifest["images"]["mediamtx"] == "ai-cctv-mediamtx:1.9.0"
+    assert manifest["model"] == {
+        "filename": "selected-model.pt",
+        "sha256": hashlib.sha256(b"model-content").hexdigest(),
+    }
 
 
 def test_generated_media_credentials_are_valid_json_in_memory(tmp_path):
@@ -315,6 +334,18 @@ def test_manual_secret_generator_splits_service_privileges(
     assert "${MEDIA_SECRETS_FILE:-./secrets/media.env}" in compose
     assert "${SECRETS_FILE" not in compose
     assert "INTERNAL_CLIENT_SECRETS_FILE" not in compose
+    assert (
+        "CENTRAL_RECORDING_SEGMENT_SECONDS: "
+        "${RECORDING_SEGMENT_SECONDS:-60}" in compose
+    )
+    assert (
+        "MTX_PATHDEFAULTS_RECORDSEGMENTDURATION: "
+        "${RECORDING_SEGMENT_SECONDS:-60}s" in compose
+    )
+
+    env_example = Path("server/.env.example").read_text(encoding="utf-8")
+    assert "AI_CCTV_VERSION=0.3.0\n" in env_example
+    assert "RECORDING_SEGMENT_SECONDS=60\n" in env_example
 
 
 def _prepare_doctor_deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -450,11 +481,16 @@ def test_configurator_rtsp_bind_defaults_to_loopback_and_requires_explicit_lan_i
         ]
     )
     assert args.rtsp_bind == "127.0.0.1"
+    assert args.recording_segment_seconds == 60
+    assert args.retention_days == 7
+    assert args.storage_warning_free_percent == 15
+    assert args.inference_device == "auto"
     help_text = (
         build_parser().format_help()
         + build_parser()._subparsers._group_actions[0].choices["init"].format_help()
     )
     assert "trusted-LAN IP" in help_text
+    assert "recording segment length" in help_text
     gui_source = Path("configurator/gui.py").read_text(encoding="utf-8")
     assert 'self.rtsp_bind = QLineEdit("127.0.0.1")' in gui_source
 
@@ -491,6 +527,39 @@ def test_initialize_rejects_missing_or_unsupported_model(tmp_path):
     unsupported.write_bytes(b"model-content")
     with pytest.raises(ValueError, match="supported model formats"):
         initialize(InstallRequest(model_path=unsupported, **common))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("recording_segment_seconds", 9, "segment seconds"),
+        ("recording_segment_seconds", 301, "segment seconds"),
+        ("retention_days", 0, "retention days"),
+        ("storage_warning_free_percent", 0, "warning free percent"),
+        ("inference_device", "gpu-zero", "inference device"),
+        ("public_http_port", 0, "ports must be"),
+        ("public_https_port", 8554, "ports must be distinct"),
+    ),
+)
+def test_initialize_rejects_invalid_runtime_settings_before_writing(
+    tmp_path, field, value, message
+):
+    model = tmp_path / "model.pt"
+    model.write_bytes(b"model")
+    values = {
+        "data_root": tmp_path / "data",
+        "server_dir": tmp_path / "server",
+        "admin_username": "admin",
+        "admin_password": "another-strong-password",
+        "model_path": model,
+        "cameras": [],
+        field: value,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        initialize(InstallRequest(**values))
+
+    assert not (tmp_path / "data").exists()
 
 
 def test_local_model_install_is_atomic_bounded_and_manifest_free(

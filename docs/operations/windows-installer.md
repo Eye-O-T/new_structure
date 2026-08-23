@@ -22,7 +22,8 @@ Docker Compose v2를 설치할 수 있지만, Docker가 아직 없어도 AI CCTV
 4. 운영 HTTPS 인증서와 암호화되지 않은 PEM 개인키를 준비하고 **TLS certificate**와
    **TLS private key**에서 두 로컬 파일을 함께 선택한다. 개인키는 화면이나 로그에
    출력되지 않고 제한된 DACL로 ProgramData에 복사된다.
-5. 저장 경로, 관리자 계정, 공개 HTTPS Origin과 RTSP bind를 입력하고
+5. 저장 경로, 관리자 계정, 공개 HTTPS Origin, RTSP bind, 추론 장치와 중앙 녹화
+   Segment(10~300초)·보관 일수·저장공간 경고 기준을 입력하고
    **Validate and create configuration**을 누른다.
 6. Docker Desktop을 실행한 뒤 **Start services**를 누른다.
 7. **Show service status**로 서비스 상태를 확인한다.
@@ -32,6 +33,9 @@ Docker Compose v2를 설치할 수 있지만, Docker가 아직 없어도 AI CCTV
 ```text
 C:\ProgramData\AI_CCTV\
 ├── config\
+│   ├── config.yaml
+│   ├── compose.env
+│   └── release-manifest.json
 ├── secrets\
 ├── models\
 ├── database\
@@ -43,7 +47,9 @@ C:\ProgramData\AI_CCTV\
 ```
 
 모델은 선택된 원본 경로에서 `models` 디렉터리로 원자적으로 복사된다. 이후 원본
-다운로드 파일을 이동해도 실행 중인 서버에는 영향을 주지 않는다.
+다운로드 파일을 이동해도 실행 중인 서버에는 영향을 주지 않는다. Release Manifest에는
+Application/Image Version과 설치 Model SHA-256이 기록되므로 인수 시험과 Upgrade 전에
+함께 보관한다.
 
 ## CLI 대체 경로
 
@@ -61,6 +67,10 @@ AI_CCTV_CLI.exe install `
   --tls-certificate 'D:\Certificates\cctv.crt' `
   --tls-private-key 'D:\Certificates\cctv.key' `
   --admin-username admin `
+  --inference-device cpu `
+  --recording-segment-seconds 60 `
+  --retention-days 7 `
+  --storage-warning-free-percent 15 `
   --public-base-url 'https://cctv.example.com'
 
 AI_CCTV_CLI.exe doctor `
@@ -75,8 +85,9 @@ AI_CCTV_CLI.exe stop
 입력으로 받는다. 운영 환경에서는 이 방식을 사용한다.
 
 기본 설치에서는 Bootstrap 카메라를 만들지 않는다. 중앙 서비스를 시작한 다음 GUI의
-**Discover Edge on trusted LAN**으로 Pairing 중인 Edge를 선택하고 **Register Edge and
-camera**를 사용한다. Configurator는 성공 시 일회성 게시 자격증명을 Edge에 자동 전달하고,
+**Discover Edge on trusted LAN**으로 Pairing 중인 Edge를 선택하고 **Test selected Edge
+connection**으로 광고 Identity와 관리 Endpoint를 확인한 뒤 **Register Edge and camera**를
+사용한다. Configurator는 성공 시 일회성 게시 자격증명을 Edge에 자동 전달하고,
 자동 전달 실패 또는 수동 등록에서는 보호된 Handoff 파일을 만든다. GUI를 사용할 수
 없으면 CLI의 `edge-register`로 Edge와 카메라를 함께 등록한다. `install
 --camera <id:name>`은 Edge 관리 Metadata 없이 기존 Bootstrap을 복원해야 할 때만 쓰는

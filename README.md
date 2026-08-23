@@ -3,7 +3,7 @@
 다중 Raspberry Pi 카메라의 RTSP 영상을 중앙 서버에 수집하고, 객체 탐지·추적·이벤트 생성·영상 저장·검색·외부 조회를 제공하는 저비용 지능형 CCTV 프로젝트입니다.
 
 > **구현 상태**
-> 이 작업본은 `develop` 브랜치의 기존 프로토타입을 보존하면서 SRS와 Architecture의 기준 구조를 구현한 v0.3.0 소스 배포본입니다. Docker/Windows/Raspberry Pi 실환경 인수 시험이 필요한 항목은 [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)에 구분했습니다.
+> 이 작업본은 `develop` 브랜치의 기존 프로토타입을 보존하면서 SRS와 Architecture의 기준 구조를 구현한 v0.3.0 소스 배포본입니다. Docker/Windows/Raspberry Pi 실환경 인수 시험이 필요한 항목은 [SRS 구현 정합성 점검](docs/srs-compliance-audit.md)에 구분했습니다.
 
 ## 비개발자·설치 담당자 빠른 시작
 
@@ -63,10 +63,14 @@ HD Camera 한 대를 하루 종일 녹화하면 약 21.6GB, FHD는 약 43.2GB가
    - `Storage root`: DB, 녹화 영상과 설정을 보관할 위치
    - `Administrator`와 `Password`: 중앙 관리자 계정
    - `Downloaded AI model`: 미리 내려받은 AI 모델
+   - `Inference device`: 자동 선택, CPU 또는 CUDA 장치
    - `TLS certificate`와 `TLS private key`: 서로 일치하는 PEM 파일
    - `Public HTTPS origin`: 사용자가 접속할 `https://...` 주소
    - `RTSP bind (trusted LAN)`: Raspberry Pi가 접근할 중앙 PC의 LAN IP
    - `RTSP port`: 특별한 이유가 없으면 `8554`
+   - `Recording segment`: 10~300초, 기본값 60초
+   - `Recording retention`: 중앙 녹화 보관 일수
+   - `Storage warning`: 남은 저장공간 경고 기준
 
 5. **Validate and create configuration**을 누릅니다.
 6. 오류가 없다면 **Start services**를 누릅니다.
@@ -101,10 +105,11 @@ sudo ai-cctv-edge pair \
 2. `Central RTSP host for Edge`에 Raspberry Pi가 접근할 중앙 PC의 LAN IP를 입력합니다.
 3. `Edge pairing / bearer key`에 Raspberry Pi에서 입력한 것과 같은 Key를 입력합니다.
 4. **Discover Edge on trusted LAN**을 누릅니다.
-5. 발견된 `edge-001`을 선택합니다. Device ID, Camera ID, Management URL과 Recovery
+5. 발견된 `edge-001`을 선택하고 **Test selected Edge connection**을 누릅니다.
+6. Device ID, Camera ID, Management URL과 Recovery
    URL이 자동으로 입력됩니다.
-6. Camera 이름, `Edge backup root`, `hd` 또는 `fhd` Profile을 확인합니다.
-7. **Register Edge and camera**를 누릅니다.
+7. Camera 이름, `Edge backup root`, `hd` 또는 `fhd` Profile을 확인합니다.
+8. **Register Edge and camera**를 누릅니다.
 
 성공하면 중앙 서버가 Camera별 게시 자격증명을 만들고 선택한 Edge에 자동 전달합니다.
 Edge는 설정을 저장하고 Capture, Control, Recovery Service를 시작한 뒤 중앙 MediaMTX에
@@ -160,7 +165,7 @@ HLS/Playback 계약을 사용합니다.
 | 원인을 알 수 없는 오류 | Configurator 결과의 오류 코드와 아래 `로그와 장애 진단` 절 확인 |
 
 비밀키, 관리자 비밀번호와 게시 자격증명은 채팅, 스크린샷 또는 일반 로그에 남기지
-마십시오. 해결되지 않으면 [구현·검증 상태](IMPLEMENTATION_STATUS.md)의 미검증 항목과
+마십시오. 해결되지 않으면 [SRS 구현 정합성 점검](docs/srs-compliance-audit.md)의 미검증 항목과
 [상세 Edge 가이드](docs/operations/edge-deployment.md)를 확인하십시오.
 
 ## 핵심 목표
@@ -978,5 +983,6 @@ error_code
 
 - [SRS.md](SRS.md): 검증 가능한 기능·비기능 요구사항
 - [ARCHITECTURE.md](ARCHITECTURE.md): 서비스 경계, 데이터 흐름, 저장·보안·배포 구조
+- [SRS 구현 정합성 점검](docs/srs-compliance-audit.md): 요구사항별 자동 검증과 실환경 인수 시험 잔여 항목
 - [Windows 설치 프로그램 가이드](docs/operations/windows-installer.md): 일반 사용자 설치, GUI/CLI 설정, 빌드·업그레이드·제거
 - [Edge 배포 가이드](docs/operations/edge-deployment.md): ARM64 패키지 빌드, 설치와 중앙 등록

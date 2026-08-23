@@ -20,6 +20,15 @@ from .model_manager import install_local_model, sha256_file, validate_custom_mod
 from .private_files import restrict_private_file
 
 SAFE_ENV = re.compile(r"^[A-Za-z0-9_./:@+-]+$")
+AI_CCTV_VERSION = "0.3.0"
+RELEASE_IMAGES = {
+    "data": f"ai-cctv-data:{AI_CCTV_VERSION}",
+    "external": f"ai-cctv-external:{AI_CCTV_VERSION}",
+    "inference": f"ai-cctv-inference:{AI_CCTV_VERSION}",
+    "mediamtx": "ai-cctv-mediamtx:1.9.0",
+    "mediamtx_upstream": "bluenviron/mediamtx:1.9.0",
+    "nginx": "nginx:1.27.2-alpine",
+}
 
 
 @dataclass(frozen=True)
@@ -36,6 +45,10 @@ class InstallRequest:
     public_base_url: str = ""
     rtsp_bind_address: str = "127.0.0.1"
     rtsp_port: int = 8554
+    recording_segment_seconds: int = 60
+    retention_days: int = 7
+    storage_warning_free_percent: int = 15
+    inference_device: str = "auto"
     timezone: str = "Asia/Seoul"
     compose_env_path: Path | None = None
     tls_certificate_path: Path | None = None
@@ -52,6 +65,7 @@ class InstallResult:
     media_secrets_path: Path
     compose_env_path: Path
     camera_credentials_path: Path
+    release_manifest_path: Path
     tls_certificate_path: Path
     tls_private_key_path: Path
     camera_credentials: dict[str, dict[str, str]]
@@ -214,6 +228,25 @@ def _validate_request(request: InstallRequest) -> Path:
         raise ValueError("administrator password must contain at least 12 characters")
     if len(request.cameras) > 4:
         raise ValueError("at most four bootstrap cameras are supported")
+    ports = (
+        request.public_http_port,
+        request.public_https_port,
+        request.rtsp_port,
+    )
+    if any(isinstance(port, bool) or not 1 <= port <= 65_535 for port in ports):
+        raise ValueError("HTTP, HTTPS and RTSP ports must be in range 1..65535")
+    if len(set(ports)) != len(ports):
+        raise ValueError("HTTP, HTTPS and RTSP ports must be distinct")
+    if not 10 <= request.recording_segment_seconds <= 300:
+        raise ValueError("recording segment seconds must be in range 10..300")
+    if request.retention_days < 1:
+        raise ValueError("recording retention days must be at least 1")
+    if not 1 <= request.storage_warning_free_percent <= 99:
+        raise ValueError("storage warning free percent must be in range 1..99")
+    if re.fullmatch(r"(?:auto|cpu|cuda(?::[0-9]+)?)", request.inference_device) is None:
+        raise ValueError(
+            "inference device must be auto, cpu, cuda, or cuda:<non-negative index>"
+        )
     ip_address(request.public_bind_address)
     ip_address(request.rtsp_bind_address)
     model_source = request.model_path.expanduser()
@@ -317,8 +350,14 @@ def initialize(request: InstallRequest) -> InstallResult:
         recording={
             "root": "/recordings",
             "recovery_root": "/recordings/recovered",
+            "segment_seconds": request.recording_segment_seconds,
+            "retention_days": request.retention_days,
+            "warning_free_percent": request.storage_warning_free_percent,
         },
-        inference={"model_path": str(container_model_path)},
+        inference={
+            "model_path": str(container_model_path),
+            "device": request.inference_device,
+        },
         cameras=request.cameras,
     )
     config_path = directories["config"] / "config.yaml"
@@ -327,6 +366,26 @@ def initialize(request: InstallRequest) -> InstallResult:
     os.chmod(config_path, 0o640)
     if runtime_identity is not None and os.geteuid() == 0:
         os.chown(config_path, *runtime_identity)
+
+    release_manifest_path = directories["config"] / "release-manifest.json"
+    _backup_existing(release_manifest_path)
+    release_manifest = {
+        "schema_version": 1,
+        "application_version": AI_CCTV_VERSION,
+        "python_version": "3.11.9",
+        "images": RELEASE_IMAGES,
+        "model": {
+            "filename": installed_model.name,
+            "sha256": sha256_file(installed_model),
+        },
+    }
+    _write_atomic(
+        release_manifest_path,
+        json.dumps(release_manifest, ensure_ascii=False, indent=2) + "\n",
+        0o640,
+    )
+    if runtime_identity is not None and os.geteuid() == 0:
+        os.chown(release_manifest_path, *runtime_identity)
 
     password_hash = PasswordHasher().hash(request.admin_password)
     credentials = {
@@ -392,6 +451,7 @@ def initialize(request: InstallRequest) -> InstallResult:
     )
 
     compose_values = {
+        "AI_CCTV_VERSION": AI_CCTV_VERSION,
         "CONFIG_FILE": config_path,
         "DATA_SECRETS_FILE": secrets_path,
         "EXTERNAL_SECRETS_FILE": external_secrets_path,
@@ -411,6 +471,7 @@ def initialize(request: InstallRequest) -> InstallResult:
         "PUBLIC_BASE_URL": public_base_url,
         "RTSP_BIND_ADDRESS": request.rtsp_bind_address,
         "RTSP_PORT": request.rtsp_port,
+        "RECORDING_SEGMENT_SECONDS": request.recording_segment_seconds,
     }
     if runtime_identity is not None:
         compose_values["AI_CCTV_UID"] = runtime_identity[0]
@@ -433,6 +494,7 @@ def initialize(request: InstallRequest) -> InstallResult:
         media_secrets_path=media_secrets_path,
         compose_env_path=compose_env_path,
         camera_credentials_path=camera_credentials_path,
+        release_manifest_path=release_manifest_path,
         tls_certificate_path=certificate_path,
         tls_private_key_path=private_key_path,
         camera_credentials=credentials,

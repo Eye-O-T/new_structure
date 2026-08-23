@@ -188,6 +188,7 @@ def test_pairing_management_profile_and_event_contract(tmp_path: Path) -> None:
     assert status["camera_input_status"] == "online"
     assert status["central_connection_status"] == "online"
     assert status["current_video_profile"] == "hd"
+    assert status["power_source"] == "external"
     capabilities = client.get(
         "/internal/v1/capabilities/video", headers=AUTH
     ).json()
@@ -227,6 +228,23 @@ def test_pairing_management_profile_and_event_contract(tmp_path: Path) -> None:
     )
     assert simulated.status_code == 200
     assert simulated.json()["edge"]["camera_input_status"] == "offline"
+    power = client.post(
+        "/mock/v1/simulate",
+        headers=AUTH,
+        json={"action": "external_power_lost", "battery_percent": 0},
+    )
+    assert power.status_code == 200
+    assert power.json()["edge"]["power_source"] == "battery"
+    assert power.json()["edge"]["battery_percent"] == 0
+    storage = client.post(
+        "/mock/v1/simulate",
+        headers=AUTH,
+        json={"action": "storage_critical", "storage_percent": 97},
+    )
+    assert storage.status_code == 200
+    events = client.get("/internal/v1/events", headers=AUTH).json()["items"]
+    assert any(item["event_type"] == "external_power_lost" for item in events)
+    assert any(item["event_type"] == "storage_critical" for item in events)
 
 
 def test_recovery_manifest_hash_download_and_open_segment_guard(tmp_path: Path) -> None:

@@ -146,6 +146,23 @@ def test_partial_scoped_tokens_cannot_fall_back_to_legacy(tmp_path: Path) -> Non
         settings.prepare_directories()
 
 
+@pytest.mark.parametrize("seconds", (9, 301))
+def test_data_settings_reject_segment_duration_outside_srs_range(
+    tmp_path: Path, seconds: int
+) -> None:
+    settings = Settings(
+        database_path=tmp_path / "database" / "ai_cctv.db",
+        storage_root=tmp_path / "recordings",
+        snapshot_root=tmp_path / "snapshots",
+        backup_root=tmp_path / "backups",
+        internal_token=TOKEN,
+        central_recording_segment_seconds=seconds,
+    )
+
+    with pytest.raises(ValueError, match="range 10..300"):
+        settings.prepare_directories()
+
+
 def test_data_settings_preserve_legacy_runtime_token_fallback(monkeypatch) -> None:
     for name in (
         "DATA_EXTERNAL_TOKEN",

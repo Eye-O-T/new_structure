@@ -14,7 +14,11 @@ from .compose_adapter import (
     default_server_dir,
 )
 from .edge_discovery import DiscoveredEdge, discover_edges
-from .edge_pairing import EdgePairingError, complete_edge_pairing
+from .edge_pairing import (
+    EdgePairingError,
+    complete_edge_pairing,
+    probe_edge_connection,
+)
 from .server_api import (
     ServerApiClient,
     ServerApiError,
@@ -83,6 +87,8 @@ def run() -> int:
             self.model = QLineEdit()
             choose_model = QPushButton("Choose model")
             choose_model.clicked.connect(self.choose_model)
+            self.inference_device = QComboBox()
+            self.inference_device.addItems(["auto", "cpu", "cuda:0"])
             self.tls_certificate = QLineEdit()
             choose_tls_certificate = QPushButton("Choose TLS certificate")
             choose_tls_certificate.clicked.connect(self.choose_tls_certificate)
@@ -109,6 +115,15 @@ def run() -> int:
             self.rtsp_port = QSpinBox()
             self.rtsp_port.setRange(1, 65535)
             self.rtsp_port.setValue(8554)
+            self.recording_segment_seconds = QSpinBox()
+            self.recording_segment_seconds.setRange(10, 300)
+            self.recording_segment_seconds.setValue(60)
+            self.retention_days = QSpinBox()
+            self.retention_days.setRange(1, 36500)
+            self.retention_days.setValue(7)
+            self.storage_warning_free_percent = QSpinBox()
+            self.storage_warning_free_percent.setRange(1, 99)
+            self.storage_warning_free_percent.setValue(15)
             submit = QPushButton("Validate and create configuration")
             submit.clicked.connect(self.submit)
             start = QPushButton("Start services")
@@ -144,6 +159,8 @@ def run() -> int:
             self.discovered_edges: list[DiscoveredEdge] = []
             discover_edge = QPushButton("Discover Edge on trusted LAN")
             discover_edge.clicked.connect(self.discover_edge_devices)
+            test_edge = QPushButton("Test selected Edge connection")
+            test_edge.clicked.connect(self.test_selected_edge_connection)
             self.publish_credentials_output = QLineEdit(
                 str(default_root / "secrets" / "cam-001-publish-credentials.json")
             )
@@ -176,6 +193,7 @@ def run() -> int:
             form.addRow("Password", self.password)
             form.addRow("Downloaded AI model", self.model)
             form.addRow("", choose_model)
+            form.addRow("Inference device", self.inference_device)
             form.addRow("TLS certificate (PEM)", self.tls_certificate)
             form.addRow("", choose_tls_certificate)
             form.addRow("TLS private key (PEM)", self.tls_private_key)
@@ -187,6 +205,14 @@ def run() -> int:
             form.addRow("Public HTTPS origin", self.public_base_url)
             form.addRow("RTSP bind (trusted LAN)", self.rtsp_bind)
             form.addRow("RTSP port", self.rtsp_port)
+            form.addRow(
+                "Recording segment (seconds)", self.recording_segment_seconds
+            )
+            form.addRow("Recording retention (days)", self.retention_days)
+            form.addRow(
+                "Storage warning below free (%)",
+                self.storage_warning_free_percent,
+            )
             form.addRow("", submit)
             form.addRow("", start)
             form.addRow("", stop)
@@ -197,6 +223,7 @@ def run() -> int:
             form.addRow("Edge backup root", self.edge_backup_root)
             form.addRow("Discovered Edge", self.discovered_edge_items)
             form.addRow("", discover_edge)
+            form.addRow("", test_edge)
             form.addRow("Managed camera ID", self.edge_camera_id)
             form.addRow("Managed camera name", self.edge_name)
             form.addRow("Edge device ID", self.edge_device_id)
@@ -383,6 +410,33 @@ def run() -> int:
             ):
                 return None
             return edge
+
+        def test_selected_edge_connection(self):
+            edge = self.selected_discovered_edge()
+            if edge is None:
+                message = (
+                    "[ERROR] EDGE_PROBE: discover and select an unchanged Edge "
+                    "before testing the connection"
+                )
+                self.api_result.setPlainText(message)
+                QMessageBox.critical(self, "Edge connection test failed", message)
+                return
+            try:
+                result = probe_edge_connection(edge)
+            except (EdgePairingError, OSError, ValueError) as exc:
+                message = f"[ERROR] EDGE_PROBE: {exc}"
+                self.api_result.setPlainText(message)
+                QMessageBox.critical(self, "Edge connection test failed", message)
+                return
+            self.api_result.setPlainText(
+                json.dumps(result, ensure_ascii=False, indent=2)
+            )
+            QMessageBox.information(
+                self,
+                "Edge connection test complete",
+                "The selected advertisement identity and management health "
+                "endpoint match. Registration has not been changed.",
+            )
 
         def register_edge(self):
             token = self.edge_auth_token.text()
@@ -573,6 +627,14 @@ def run() -> int:
                         public_base_url=self.public_base_url.text(),
                         rtsp_bind_address=self.rtsp_bind.text(),
                         rtsp_port=self.rtsp_port.value(),
+                        recording_segment_seconds=(
+                            self.recording_segment_seconds.value()
+                        ),
+                        retention_days=self.retention_days.value(),
+                        storage_warning_free_percent=(
+                            self.storage_warning_free_percent.value()
+                        ),
+                        inference_device=self.inference_device.currentText(),
                     )
                 )
             except Exception as exc:
@@ -598,6 +660,7 @@ def run() -> int:
                 f"Inference secrets: {result.inference_secrets_path}\n"
                 f"Media secrets: {result.media_secrets_path}\n"
                 f"Camera credentials: {result.camera_credentials_path}\n"
+                f"Release manifest: {result.release_manifest_path}\n"
                 f"Compose environment: {result.compose_env_path}\n"
                 f"{tls_note}\n"
                 "Register each Edge after startup and transfer its one-time "

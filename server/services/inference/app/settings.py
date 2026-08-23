@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -111,6 +112,10 @@ class Settings:
             raise ValueError("MEDIA_READ_PASSWORD must contain at least 32 characters")
         if any(character in self.media_read_password for character in "\x00\r\n"):
             raise ValueError("MEDIA_READ_PASSWORD must be a single line")
+        if re.fullmatch(r"(?:auto|cpu|cuda(?::[0-9]+)?)", self.device) is None:
+            raise ValueError(
+                "INFERENCE_DEVICE must be auto, cpu, cuda, or cuda:<index>"
+            )
         if not 0 <= self.confidence <= 1:
             raise ValueError("INFERENCE_CONFIDENCE must be in range 0..1")
         if self.analysis_fps <= 0:

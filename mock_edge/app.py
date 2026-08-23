@@ -25,9 +25,10 @@ SIMULATION_ACTIONS = {
     "camera_input_restored",
     "battery_low",
     "battery_critical",
-    "power_disconnected",
-    "power_restored",
+    "external_power_lost",
+    "external_power_restored",
     "storage_warning",
+    "storage_critical",
 }
 
 
@@ -132,7 +133,7 @@ class MockEdgeService:
         self._lock = threading.RLock()
         self._camera_input = "online"
         self._battery_percent: float | None = None
-        self._power_source = "ac"
+        self._power_source = "external"
         self._charging: bool | None = None
         self._storage_override: float | None = None
         self.current_profile = "hd"
@@ -325,6 +326,13 @@ class MockEdgeService:
     def apply_profile(self, requested: str) -> tuple[dict[str, object], int]:
         previous = self.current_profile
         if requested not in self.supported_profiles:
+            self.journal.record(
+                "video_profile_change_failed",
+                previous_profile=previous,
+                requested_profile=requested,
+                current_profile=previous,
+                reason_code="UNSUPPORTED_VIDEO_PROFILE",
+            )
             return (
                 {
                     "status": "rejected",
@@ -337,12 +345,20 @@ class MockEdgeService:
             )
         applied, reason = self.media.apply_profile(requested)
         if not applied:
+            failure_code = reason or "PIPELINE_START_FAILED"
+            self.journal.record(
+                "video_profile_change_failed",
+                previous_profile=previous,
+                requested_profile=requested,
+                current_profile=previous,
+                reason_code=failure_code,
+            )
             return (
                 {
                     "status": "rejected",
                     "requested_profile": requested,
                     "current_profile": previous,
-                    "reason_code": reason or "PIPELINE_START_FAILED",
+                    "reason_code": failure_code,
                     "message": "video pipeline could not apply the requested profile",
                 },
                 503,
@@ -385,26 +401,53 @@ class MockEdgeService:
             self.media.resume_publisher()
         elif action == "camera_input_lost":
             self._camera_input = "offline"
-            self.journal.record(action, reason="mock_operator_request")
+            self.journal.record(
+                action,
+                reason="mock_operator_request",
+                timeout_seconds=0,
+            )
         elif action == "camera_input_restored":
             self._camera_input = "online"
             self.journal.record(action, reason="mock_operator_request")
         elif action in {"battery_low", "battery_critical"}:
             default = 20.0 if action == "battery_low" else 5.0
-            self._battery_percent = request.battery_percent or default
+            self._battery_percent = (
+                request.battery_percent
+                if request.battery_percent is not None
+                else default
+            )
             self._power_source = "battery"
             self._charging = False
-            self.journal.record(action, battery_percent=self._battery_percent)
-        elif action == "power_disconnected":
+            self.journal.record(
+                action,
+                battery_percent=self._battery_percent,
+                power_source=self._power_source,
+            )
+        elif action == "external_power_lost":
+            if request.battery_percent is not None:
+                self._battery_percent = request.battery_percent
             self._power_source = "battery"
             self._charging = False
-            self.journal.record(action)
-        elif action == "power_restored":
-            self._power_source = "ac"
+            self.journal.record(
+                action,
+                battery_percent=self._battery_percent,
+                power_source=self._power_source,
+            )
+        elif action == "external_power_restored":
+            self._power_source = "external"
             self._charging = self._battery_percent is not None
-            self.journal.record(action)
-        elif action == "storage_warning":
-            self._storage_override = request.storage_percent or 90.0
+            self.journal.record(
+                action,
+                battery_percent=self._battery_percent,
+                power_source=self._power_source,
+            )
+        elif action in {"storage_warning", "storage_critical"}:
+            default = 90.0 if action == "storage_warning" else 97.0
+            self._storage_override = (
+                request.storage_percent
+                if request.storage_percent is not None
+                else default
+            )
             self.journal.record(action, storage_percent=self._storage_override)
         return {"status": "applied", "action": action, "edge": self.status()}
 
