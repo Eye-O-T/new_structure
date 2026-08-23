@@ -11,6 +11,8 @@ class DataClient:
             base_url=base_url,
             headers={"X-Internal-Token": token},
             timeout=timeout,
+            # Never forward the scoped Data token to a host/container proxy.
+            trust_env=False,
         )
 
     def close(self) -> None:
@@ -32,7 +34,9 @@ class DataClient:
         return payload.get("items", payload.get("cameras", []))
 
     def set_camera_status(self, camera_id: str, status: str) -> None:
-        response = self._client.patch(f"/cameras/{camera_id}", json={"status": status})
+        response = self._client.patch(
+            f"/cameras/{camera_id}/status", json={"status": status}
+        )
         response.raise_for_status()
 
     def create_event(self, event: dict[str, Any]) -> None:

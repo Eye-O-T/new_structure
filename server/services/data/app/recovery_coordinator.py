@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from ai_cctv_core.identifiers import safe_storage_path, validate_camera_id
 from ai_cctv_core.time import format_utc, parse_utc
@@ -50,7 +50,9 @@ class _RejectRedirects(HTTPRedirectHandler):
         return None
 
 
-_HTTP_OPENER = build_opener(_RejectRedirects())
+# Internal bearer/service credentials must never be handed to a host-configured
+# HTTP(S) proxy. Edge and loopback destinations are selected explicitly.
+_HTTP_OPENER = build_opener(ProxyHandler({}), _RejectRedirects())
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,12 @@ def read_recovery_token() -> str:
 
 
 def read_internal_token() -> str:
+    if os.getenv("DATA_RECOVERY_TOKEN") or os.getenv("DATA_RECOVERY_TOKEN_FILE"):
+        return _read_secret(
+            "DATA_RECOVERY_TOKEN",
+            "DATA_RECOVERY_TOKEN_FILE",
+            minimum_length=32,
+        )
     return _read_secret(
         "INTERNAL_SERVICE_TOKEN",
         "INTERNAL_SERVICE_TOKEN_FILE",
@@ -265,6 +273,7 @@ class RecoveryCoordinator:
         timeout_seconds: float = 30.0,
         max_segment_bytes: int = DEFAULT_MAX_SEGMENT_BYTES,
         open_request: Callable[..., Any] | None = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> None:
         try:
             self.camera_id = validate_camera_id(camera_id)
@@ -287,6 +296,7 @@ class RecoveryCoordinator:
         self.timeout_seconds = timeout_seconds
         self.max_segment_bytes = max_segment_bytes
         self._open_request = open_request or _default_open
+        self._progress_callback = progress_callback
 
     def _read_json(self, request: Request, service: str) -> Any:
         try:
@@ -338,7 +348,9 @@ class RecoveryCoordinator:
 
     def _destination(self, item: ManifestItem) -> tuple[str, Path]:
         central_relative = (
-            PurePosixPath(self.camera_id) / PurePosixPath(item.relative_path)
+            PurePosixPath("recovered")
+            / PurePosixPath(self.camera_id)
+            / PurePosixPath(item.relative_path)
         ).as_posix()
         try:
             destination = safe_storage_path(self.recordings_root, central_relative)
@@ -410,14 +422,18 @@ class RecoveryCoordinator:
                 raise RecoveryError("Edge file SHA-256 verification failed")
             os.chmod(temporary, 0o640)
             os.replace(temporary, destination)
-            directory_descriptor = os.open(
-                destination.parent,
-                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
-            )
-            try:
-                os.fsync(directory_descriptor)
-            finally:
-                os.close(directory_descriptor)
+            # POSIX directory fsync makes the atomic rename durable. Windows
+            # does not permit opening a directory with os.open; os.replace is
+            # still atomic there and the file itself was flushed above.
+            if os.name != "nt":
+                directory_descriptor = os.open(
+                    destination.parent,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                )
+                try:
+                    os.fsync(directory_descriptor)
+                finally:
+                    os.close(directory_descriptor)
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -467,18 +483,32 @@ class RecoveryCoordinator:
         downloaded = 0
         reused = 0
         idempotent_replays = 0
+        indexing_reported = False
         for item in items:
             central_relative, destination = self._destination(item)
-            existing_matches = (
-                destination.is_file()
-                and destination.stat().st_size == item.size
-                and _sha256_file(destination) == item.sha256
-            )
-            if existing_matches:
+            if destination.exists():
+                if not destination.is_file():
+                    raise RecoveryError(
+                        "existing recovery destination is not a regular file"
+                    )
+                existing_matches = (
+                    destination.stat().st_size == item.size
+                    and _sha256_file(destination) == item.sha256
+                )
+                if not existing_matches:
+                    # Relative paths are immutable identities. Replacing a
+                    # different file would leave an existing database row
+                    # describing bytes that are no longer on disk.
+                    raise RecoveryError(
+                        "existing recovery destination does not match manifest"
+                    )
                 reused += 1
             else:
                 self._download(item, destination)
                 downloaded += 1
+            if not indexing_reported and self._progress_callback is not None:
+                self._progress_callback("indexing")
+                indexing_reported = True
             indexed = self._index(item, central_relative)
             if isinstance(indexed, dict) and indexed.get("idempotent_replay") is True:
                 idempotent_replays += 1

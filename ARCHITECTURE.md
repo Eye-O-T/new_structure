@@ -9,8 +9,9 @@
 | 대상 저장소 | `Eye-O-T/AI_CCTV` |
 | 기준 브랜치 | `develop` |
 | 문서 버전 | `0.3.0-draft` |
-| 기준일 | 2026-08-22 |
-| 현재 구현 | 단일 카메라 중심 Python/PyQt 프로토타입 |
+| 기준일 | 2026-08-23 |
+| 현재 구현 | 중앙 MediaMTX·최대 4개 활성 카메라·Docker Compose·Edge HTTP 관리 구조 |
+| Legacy 구현 | `client_code/` 단일 카메라 Python/PyQt 관제 프로토타입 |
 | 목표 구조 | 멀티카메라·중앙 MediaMTX·Docker Compose 기반 소규모 서비스 구조 |
 
 이 문서는 [SRS.md](SRS.md)의 요구사항을 어떤 구성 요소와 데이터 흐름으로 실현할지 정의한다. 현재 코드의 설명과 목표 구조를 구분하기 위해 다음 표기를 사용한다.
@@ -52,14 +53,17 @@ AI_CCTV의 목표는 Raspberry Pi 카메라 2~4대에서 들어오는 영상을 
 | AD-009 | 저장 영상 암호화는 현재 릴리스에서 제외한다. | 구현 범위를 통제하되 HTTPS, JWT, 비밀정보 보호는 현재 적용한다. |
 | AD-010 | Tailscale, Kubernetes, 별도 메시지 브로커는 사용하지 않는다. | 2~4대 카메라와 단일 중앙 서버 규모에서 운영 복잡도가 이득보다 크기 때문이다. |
 | AD-011 | FFmpeg CLI는 핵심 런타임의 필수 구성으로 두지 않는다. | 현재 GStreamer, MediaMTX, OpenCV 경로로 핵심 기능이 가능하다. VOD HLS, 클립, 썸네일 등 필요 시 한정 도입한다. |
+| AD-012 | 기본 영상은 `hd` 1280×720@30fps·2Mbps이고 `fhd` 1920×1080@30fps·4Mbps는 카메라별 선택 Profile로 둔다. | 기본 대역폭·저장량을 낮추고 장치 Capability에 따라 FHD를 명시적으로 적용하기 위함이다. |
+| AD-013 | PyQt Configurator는 설치·운영 설정 도구이고 기존 PyQt 관제 UI는 Legacy로 둔다. | 서버 운영과 일반 사용자 영상 관제를 분리하기 위함이다. |
+| AD-014 | Edge 상태·제어·복구는 현재 인증된 HTTP를 사용하고 MQTT는 후속 확장으로 둔다. | 현재 범위에서 Broker 운영·QoS·중복 명령 처리를 추가하지 않기 위함이다. |
 
 ---
 
-## 4. 현재 아키텍처
+## 4. Legacy 아키텍처
 
-### 4.1 현재 런타임 구조
+### 4.1 Legacy 런타임 구조
 
-현재 `develop` 브랜치의 주요 영상 경로는 다음과 같다.
+`client_code/`와 `rtspv1.0/`에 보존된 이전 관제 프로토타입의 주요 영상 경로는 다음과 같다. 신규 배포의 공식 런타임이 아니다.
 
 ```mermaid
 flowchart LR
@@ -85,7 +89,7 @@ flowchart LR
     AI --> DISC
 ```
 
-### 4.2 현재 코드의 강점
+### 4.2 Legacy 코드의 강점
 
 - Raspberry Pi 카메라 취득과 H.264 인코딩 경로가 존재한다.
 - Edge에서 10초 단위 MPEG-TS 백업을 수행한다.
@@ -94,7 +98,7 @@ flowchart LR
 - 네트워크 복구 요청과 누락 파일 반환의 기본 흐름이 존재한다.
 - 역할별 Python package가 어느 정도 분리되어 있다.
 
-### 4.3 현재 구조의 한계
+### 4.3 Legacy 구조의 한계
 
 - GUI와 `VideoWorker`가 단일 카메라 전제를 가진다.
 - 영상 수신, 녹화, 추론, 복구, UI가 한 Python 프로세스에 강하게 결합되어 있다.
@@ -172,7 +176,7 @@ Internet / untrusted network
 ```
 
 - 인터넷에서 직접 접근 가능한 구성 요소는 Nginx 하나로 제한한다.
-- RTSP 8554는 Edge와 중앙 서버가 위치한 신뢰 LAN에서만 접근한다.
+- RTSP 8554는 기본적으로 loopback에 Bind하며, 원격 Edge가 필요한 설치에서만 중앙 서버의 명시된 신뢰 LAN IP에 Bind한다.
 - Data Service, Inference Service, MediaMTX HLS/Playback 내부 포트는 Host에 공개하지 않는다.
 - Docker 내부 통신과 외부 통신은 논리적으로 분리한다.
 
@@ -230,6 +234,7 @@ Camera ID와 MediaMTX path를 동일하게 유지하여 매핑을 단순화한�
 
 - 활성 카메라 목록 조회
 - MediaMTX RTSP 연결
+- External과만 공유한 전용 reader 자격증명으로 RTSP read 인증
 - YOLO 사람 탐지
 - ByteTrack 또는 동등 추적
 - 안정 Track ID 보정
@@ -312,7 +317,7 @@ Inference Supervisor
 - 선택적 `/internal/media/` → MediaMTX Control/Adapter
 - 보호 자원에 대한 인증 Subrequest
 - Forwarded Header와 요청 크기/시간 제한 설정
-- 정적 Web UI가 존재할 경우 파일 제공
+- 후속 별도 Web UI가 도입될 경우에만 빌드된 정적 파일 제공
 
 **비책임**
 
@@ -322,7 +327,7 @@ Inference Supervisor
 - JWT 발급
 - AI 추론
 
-Nginx는 외부 listener와 Docker Network 전용 내부 listener를 별도 `server` block으로 구성한다. Inference, External, Media hook, Recovery Coordinator의 제어·메타데이터 HTTP 요청은 내부 listener를 거쳐 Data Service로 중계한다. 내부 listener는 Host에 publish하지 않는다. Nginx를 영상 프레임이나 대용량 파일 업로드의 서비스 버스로 사용하지 않는다.
+Nginx는 외부 listener와 Docker Network 전용 내부 listener를 별도 `server` block으로 구성한다. Inference, External, Media hook의 제어·메타데이터 HTTP 요청은 내부 listener를 거쳐 Data Service로 중계한다. Data Service 내부 Recovery Worker는 Loopback API를 사용한다. 내부 listener는 Host에 publish하지 않는다. Nginx를 영상 프레임이나 대용량 파일 업로드의 서비스 버스로 사용하지 않는다.
 
 ### 6.7 Configurator와 Installer
 
@@ -335,14 +340,28 @@ Server Setup.exe
           ├── Validation
           ├── Model Manager
           ├── Docker/Compose Adapter
-          └── Diagnostic Adapter
+          ├── Diagnostic Adapter
+          └── External API Management Client
 ```
 
 GUI와 CLI는 동일한 Config Core를 호출한다.
 
-- GUI: 일반 사용자 설치와 운영 설정
-- CLI: 자동화, 장애 진단, 개발자 운영
+- GUI: 서버 설치·최초 설정, Edge 등록·상태 조회, 카메라별 HD/FHD 설정과 서비스 운영
+- CLI: 같은 Edge 관리 작업의 자동화, 장애 진단, 개발자 운영
 - Installer: 파일 배치, Configurator 설치, 최초 실행
+
+Configurator의 Edge 관리 Client는 Nginx 공개 HTTPS Origin에 관리자 JWT로 접속한다. `POST/PATCH /api/v1/cameras`, `GET /status`, `GET/PATCH /video-profile`, `POST /publish-credentials/rotate`만 알고 Edge 내부 API 형식이나 Data Service를 직접 알지 않는다. 최초 설정의 공개 HTTPS Origin은 GUI 입력 또는 CLI의 `--public-base-url`로 받고 HTTPS Origin 형식만 허용하여 Compose `PUBLIC_BASE_URL`을 생성한다. 등록 시 상태·제어·이벤트용 `edge_management_url`(기본 8003)과 `/v1/recovery`용 `edge_recovery_url`(기본 8002)을 별도로 받고 Port를 추론하지 않는다. 32자 이상의 Edge Bearer Token은 두 Edge API가 공유하되 등록·수정 요청에서만 전달하고 서버 응답, GUI 결과, CLI 출력과 로그에는 표시하지 않는다. 등록·재발급 응답의 일회성 RTSP 게시 자격증명은 API 호출 전에 검증한 경로에 해당 Camera만 포함한 제한 권한 파일로 원자 저장하고, 관리자에게 Edge setup으로 안전하게 전달하도록 안내한다.
+
+UI 책임은 다음처럼 고정한다.
+
+| UI | 역할 |
+| --- | --- |
+| PyQt/CLI Configurator | 서버 설치 및 운영 설정 |
+| 기존 `client_code/` PyQt UI | Legacy 개발·진단 참고용 |
+| 외부 사용자 애플리케이션 | 별도 프로젝트, REST와 HLS/Playback 사용 |
+| Web UI·모바일 네이티브 앱 | 현재 저장소 범위 제외 |
+
+따라서 Configurator는 일반 사용자의 영상 관제 기능을 포함하지 않는다.
 
 ---
 
@@ -371,7 +390,7 @@ flowchart LR
 
 ### 7.2 RTSP 전달 모드
 
-두 구현 방식 모두 외부 계약은 RTSP/1.0으로 동일하다.
+두 구현 방식 모두 **Edge–중앙 내부 영상 계약**은 RTSP/1.0으로 동일하다. 일반 사용자 외부 영상 계약은 HTTPS HLS/Playback이다.
 
 #### 모드 A — Edge publish
 
@@ -389,13 +408,32 @@ Edge GStreamer -- RTSP RECORD --> Central MediaMTX /cam-001
 Edge RTSP Server <-- RTSP DESCRIBE/PLAY -- Central MediaMTX
 ```
 
-- 현재의 Edge RTSP 제공 구조를 재사용하기 쉽다.
-- 중앙 MediaMTX가 source 상태를 관리한다.
-- Edge RTSP 포트가 중앙 서버에서 접근 가능해야 한다.
+- Edge의 로컬 MediaMTX와 진단 Pipeline 준비 코드는 보존한다.
+- 현재 중앙 서버에는 DB `source_url`을 MediaMTX 동적 Path 설정으로 적용하는 Adapter가 없으므로 운영 호환 모드로 제공하지 않는다.
+- 후속 구현 시 중앙 MediaMTX source 수명주기, 인증, 상태 동기화와 통합시험이 함께 필요하다.
 
-**초기 마이그레이션은 모드 B가 위험이 낮고**, 중앙화 완료 후 모드 A의 배포 단순성과 재연결 특성을 비교 시험하여 최종 고정한다.
+신규 Edge의 구현·공식 기본은 **모드 A `central_publish`**다. 모드 B `central_pull`은 Edge 진단용 준비 코드일 뿐 중앙 연동이 완료되기 전까지 지원 Profile이 아니며, 외부 사용자에게 Edge RTSP 주소를 노출하는 근거가 되지 않는다.
 
-### 7.3 Edge 로컬 백업
+### 7.3 영상 Profile과 HTTP 제어
+
+카메라 하나는 한 시점에 하나의 활성 Profile만 갖는다.
+
+| Profile | 해상도 | FPS | Bitrate | 정책 |
+| --- | ---: | ---: | ---: | --- |
+| `hd` | 1280×720 | 30 | 2,000kbps | 기본 |
+| `fhd` | 1920×1080 | 30 | 4,000kbps | 장치 지원 시 선택 |
+
+중앙 External Service는 `GET/PATCH /api/v1/cameras/{camera_id}/video-profile`을 제공하고, 저장된 `edge_management_url`과 비공개 `edge_auth_token`으로 Edge의 다음 인증된 HTTP API를 호출한다.
+
+```text
+GET /internal/v1/capabilities/video
+PUT /internal/v1/config/video-profile
+Authorization: Bearer <edge_auth_token>
+```
+
+Profile 변경은 요청 검증 → 기본 Camera(index 0)의 센서 Mode 해상도·최대 FPS와 Encoder Capability 확인 → 시험 Pipeline 시작 → 프레임·RTSP 게시 확인 → 설정 원자 교체 순서로 확정한다. Mode 정보 판정이 불가능하면 `CAPABILITY_UNKNOWN`, 지원하지 않는 FHD면 `UNSUPPORTED_VIDEO_PROFILE`로 기존 HD를 유지한다. 적용 중 실패하면 이전 Pipeline으로 Rollback하며 중앙의 `current_profile`은 Edge의 적용 성공 응답 후에만 바꾼다. HD와 FHD를 동시에 만드는 Adaptive HLS는 현재 범위가 아니다.
+
+### 7.4 Edge 로컬 백업
 
 기본 경로:
 
@@ -433,7 +471,7 @@ sequenceDiagram
     U->>I: Setup.exe 실행
     I->>I: Docker/Compose 검사
     I->>C: Configurator 설치·실행
-    U->>C: 저장소·관리자·모델·포트 입력
+    U->>C: 저장소·관리자·모델·포트·공개 HTTPS Origin 입력
     C->>C: 입력 검증·secret 생성
     C->>D: config/volume/image 준비
     D->>S: compose up -d
@@ -445,27 +483,31 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    actor A as Admin
+    actor A as Admin / Configurator
     participant N as Nginx public/internal
     participant X as External Service
     participant D as Data Service
     participant M as MediaMTX
 
-    A->>N: POST /api/v1/cameras
+    A->>N: POST /api/v1/cameras + Edge ID/관리·복구 URL/비공개 Token
     N->>X: public API proxy + JWT
-    X->>N: POST /internal/data/v1/cameras
-    N->>D: 중복 검사·카메라 저장
-    D-->>N: 저장 결과
-    N-->>X: 저장 결과
-    X->>N: Media path 설정 요청
-    N->>M: Control API 또는 설정 Adapter
-    M-->>N: RTSP path 상태
-    N-->>X: Media 상태
-    X-->>N: 등록 결과
-    N-->>A: 201 Created
+    X->>N: POST /internal/data/v1/cameras (enabled=false)
+    N->>D: 중복·활성 한도 검사 후 차단 상태 저장
+    D-->>X: 저장 결과
+    X->>N: PUT 동적 게시 자격증명 Argon2 hash
+    N->>D: Camera credential 저장
+    D-->>X: 저장 완료
+    X->>N: PATCH 요청한 enabled 상태
+    N->>D: 최대 4개 활성 Camera 검사·상태 확정
+    D-->>X: 등록 완료
+    X-->>A: 201 + 일회성 게시 자격증명 전달 파일
+    Note over X,M: 중간 실패 시 Camera를 차단한 채 Publisher를 kick한 뒤에만 rollback
 ```
 
-MediaMTX 설정 갱신 방식은 다음 우선순위를 따른다.
+카메라는 동적 자격증명이 저장되기 전에는 활성화하지 않는다. 따라서 삭제 후 같은
+Camera ID를 재등록하더라도 Bootstrap 정적 비밀번호를 가진 오래된 Edge가 인증
+경계 사이에 Publisher로 남을 수 없다. MediaMTX 설정 갱신이 필요한 경우 다음
+우선순위를 따른다.
 
 1. Control API 또는 지원되는 동적 설정
 2. 설정 파일을 임시 파일에 생성하고 검증 후 원자 교체
@@ -473,6 +515,32 @@ MediaMTX 설정 갱신 방식은 다음 우선순위를 따른다.
 4. 해당 서비스만 제한적으로 재시작
 
 전체 Compose 재시작은 최후 수단이다.
+
+#### Edge 상태와 Profile 운영
+
+```mermaid
+sequenceDiagram
+    actor A as Admin / Configurator
+    participant N as Nginx
+    participant X as External Service
+    participant E as Edge HTTP Control API
+    participant D as Data Service
+
+    A->>N: GET /api/v1/cameras/cam-001/status
+    N->>X: 관리자/Viewer JWT
+    X->>E: GET status + Edge Bearer
+    E-->>X: resource/power/camera/profile 상태
+    X->>D: Runtime 상태와 UTC last_seen 저장
+    X-->>A: 내부 주소·Token이 제거된 상태
+    A->>N: PATCH /api/v1/cameras/cam-001/video-profile {profile: fhd}
+    N->>X: Admin JWT
+    X->>E: Capability 조회 후 Profile 변경
+    E-->>X: applied 또는 reason_code
+    X->>D: desired/current/result 저장
+    X-->>A: 성공 또는 변경 불가 사유
+```
+
+초기 상태 수집 권장 주기는 5초이며 향후 운영 시험으로 확정한다. Runtime 응답에는 CPU, 메모리, 저장장치, 배터리, 전원, 카메라 입력, 중앙 연결, 현재 Profile, `last_seen_at`과 최근 오류를 포함한다. 일반 응답에는 `edge_management_url`, `edge_recovery_url`, `edge_auth_token`, RTSP 게시 자격증명을 포함하지 않는다.
 
 ### 8.3 실시간 영상
 
@@ -485,16 +553,18 @@ sequenceDiagram
 
     U->>N: GET /api/v1/cameras/cam-001/live
     N->>X: API proxy + JWT
-    X-->>U: 보호된 HLS URL 또는 재생 정보
-    U->>N: GET /hls/cam-001/index.m3u8
-    N->>X: auth_request
+    X-->>U: protocol=hls, HTTPS url, cookie auth 정보
+    U->>N: GET /hls/cam-001/index.m3u8 + Secure Cookie
+    N->>X: Manifest auth_request
     X-->>N: 2xx / 401 / 403
     N->>M: HLS playlist 요청
     M-->>N: playlist / segment
     N-->>U: HTTPS HLS
+    U->>N: GET media segment + Secure Cookie
+    N->>X: Segment auth_request
 ```
 
-브라우저 HLS Segment 요청마다 인증 헤더를 넣기 어려운 경우 HttpOnly Secure Cookie를 우선 사용한다. URL Query Token은 로그와 referrer 유출 가능성이 있으므로 기본 방식으로 사용하지 않는다.
+브라우저/HLS 연속 재생의 공식 방식은 로그인 응답이 설정한 HttpOnly Secure Access Cookie다. Nginx는 Manifest와 모든 Segment에서 동일하게 JWT와 Camera ACL을 검증한다. 헤더 주입이 가능한 네이티브 Player는 Bearer Token을 매 요청에 사용할 수 있다. URL Query Token은 사용하지 않는다. `PUBLIC_BASE_URL`이 있으면 `url`은 Absolute HTTPS이고 개발용 미설정 때만 같은 Origin 상대 경로일 수 있다.
 
 ### 8.4 중앙 녹화와 인덱싱
 
@@ -520,9 +590,12 @@ sequenceDiagram
 Hook 처리 원칙:
 
 - 완료된 파일만 인덱싱한다.
-- Hook 실패 시 재시도 queue 또는 주기적 reconciliation으로 보상한다.
+- Hook은 제한 재시도하며 끝내 실패하면 Data Service의 시작 시·주기적
+  reconciliation이 settle된 표준 MediaMTX 경로를 `central` Segment로 멱등
+  인덱싱한다.
 - Data Service가 파일 크기와 경로를 검증한다.
 - 동일 Camera ID, 시작 시각, 경로의 중복 등록을 방지한다.
+- 검증할 수 없는 파일은 자동 신뢰하지 않고 `orphaned` 진단 목록에 남긴다.
 
 ### 8.5 AI 이벤트 생성
 
@@ -588,36 +661,38 @@ sequenceDiagram
 sequenceDiagram
     participant E as Edge
     participant M as MediaMTX
-    participant R as Recovery Coordinator
-    participant N as Nginx internal
-    participant D as Data Service
+    participant X as External Status Collector
+    participant D as Data Service + Recovery Worker
     participant F as Central Storage
 
     E-xM: 네트워크 단절
     E->>E: 10초 로컬 Segment 저장
+    E->>E: central_connection_lost Journal
+    X->>E: 인증된 Status/Event Poll
+    E-->>X: lost Event
+    X->>D: Event 저장 + Job detected
     E->>M: RTSP 재연결
-    M-->>R: 연결 복구 또는 gap 감지
-    R->>N: 누락 구간 조회
-    N->>D: recording search relay
-    D-->>N: 중앙 보유 구간
-    N-->>R: 중앙 보유 구간
-    R->>E: 누락 시간 범위 요청
-    E-->>R: 해당 Segment + manifest
-    R->>F: 임시 업로드·검증·원자 이동
-    R->>N: edge_recovery Segment 등록
-    N->>D: Segment metadata relay
-    D-->>N: 등록 완료
-    N-->>R: 등록 완료
-    R-->>E: 수신 완료 ACK
+    E->>E: central_connection_restored Journal
+    X->>E: 인증된 Status/Event Poll
+    E-->>X: restored Event
+    X->>D: Event 저장 + Job waiting_for_recovery
+    D->>D: settle 뒤 due Job claim (downloading)
+    D->>E: 누락 시간 범위 manifest/file 요청
+    E-->>D: 해당 Segment + SHA-256
+    D->>F: temp 다운로드·크기/SHA-256 검증·원자 이동
+    D->>D: recovered/&lt;camera&gt;/... metadata 멱등 등록
+    D->>D: Job completed 또는 failed/backoff retry
 ```
+
+Edge Publisher가 생성한 `central_connection_lost/restored`만 자동 Segment 복구의 권위 Event다. MediaMTX를 읽는 Inference Worker의 장애는 `inference_stream_lost/restored`로 별도 기록하여 복구 구간을 만들지 않는다. 중복 수집 또는 순서가 뒤바뀐 동일 장애 보고는 상관 Window 안에서 시작 최솟값과 종료 최댓값으로 병합한다.
 
 복구 파일은 원본 중앙 녹화와 시간이 겹칠 수 있다. 다음 키를 이용해 중복을 판별한다.
 
 - `camera_id`
 - 시작/종료 시각
 - 파일 크기
-- 선택적 SHA-256
-- source=`central_recording` 또는 `edge_recovery`
+- 필수 SHA-256
+- source=`central` 또는 `edge_recovery`
 
 중복 시 무조건 덮어쓰지 않고 우선순위 정책을 적용한다.
 
@@ -630,8 +705,13 @@ sequenceDiagram
 ```mermaid
 erDiagram
     USERS ||--o{ REFRESH_TOKENS : owns
+    EDGE_DEVICES ||--o{ CAMERAS : manages
+    EDGE_DEVICES ||--o| EDGE_RUNTIME_STATUS : reports
     CAMERAS ||--o{ RECORDING_SEGMENTS : produces
     CAMERAS ||--o{ EVENTS : produces
+    CAMERAS ||--o| CAMERA_RUNTIME_STATUS : reports
+    CAMERAS ||--|| CAMERA_VIDEO_PROFILES : selects
+    CAMERAS ||--o{ RECOVERY_JOBS : recovers
     EVENTS }o--o{ RECORDING_SEGMENTS : overlaps
 
     USERS {
@@ -657,9 +737,59 @@ erDiagram
         string stream_path UK
         string status
         boolean enabled
-        string edge_address
+        string edge_device_id FK
         datetime created_at_utc
         datetime updated_at_utc
+    }
+
+    EDGE_DEVICES {
+        string edge_device_id PK
+        string management_url UK
+        string recovery_url
+        string auth_token_secret
+        datetime updated_at_utc
+    }
+
+    EDGE_RUNTIME_STATUS {
+        string edge_device_id PK_FK
+        boolean online
+        float cpu_percent
+        float memory_percent
+        float storage_percent
+        float battery_percent
+        string power_source
+        datetime last_seen_at_utc
+        string last_error_code
+    }
+
+    CAMERA_RUNTIME_STATUS {
+        string camera_id PK_FK
+        string camera_input_status
+        string central_connection_status
+        string current_video_profile
+        string event_cursor
+        datetime last_seen_at_utc
+        string last_error_code
+    }
+
+    CAMERA_VIDEO_PROFILES {
+        string camera_id PK_FK
+        string current_profile
+        string desired_profile
+        json supported_profiles
+        string encoder
+        string last_error_code
+    }
+
+    RECOVERY_JOBS {
+        integer id PK
+        string camera_id FK
+        datetime outage_started_at_utc
+        datetime outage_ended_at_utc
+        string status
+        integer attempt_count
+        datetime next_retry_at_utc
+        string last_error
     }
 
     RECORDING_SEGMENTS {
@@ -687,7 +817,7 @@ erDiagram
     }
 ```
 
-Event와 Segment는 다대다 관계가 될 수 있다. 하나의 Event가 Segment 경계를 가로지를 수 있고, 하나의 Segment에 여러 Event가 포함될 수 있기 때문이다. 실제 schema에서는 `event_recording_segments` 연결 테이블을 둔다.
+Event와 Segment는 다대다 관계가 될 수 있다. 하나의 Event가 Segment 경계를 가로지를 수 있고, 하나의 Segment에 여러 Event가 포함될 수 있기 때문이다. 실제 schema에서는 `event_recording_segments` 연결 테이블을 둔다. `edge_devices.auth_token`과 내부 URL은 External Service가 Edge를 호출할 때만 읽고 공개 Camera/Status/Profile 응답에서는 제거한다. 영구 설정과 Runtime 상태, 요청 Profile과 실제 적용 Profile을 별도 테이블로 유지한다.
 
 ### 9.2 필수 인덱스
 
@@ -723,8 +853,8 @@ runtime/
 ├── recordings/
 │   └── cam-001/
 │       └── 2026/08/22/
-│           ├── 20260822T080000.000Z_20260822T080100.000Z.mp4
-│           └── 20260822T080100.000Z_20260822T080200.000Z.mp4
+│           ├── 20260822T080000-000001Z.mp4
+│           └── 20260822T080100-000001Z.mp4
 ├── recovered/
 │   └── cam-001/2026/08/22/...
 ├── snapshots/
@@ -734,7 +864,12 @@ runtime/
 └── logs/
 ```
 
-파일명 규칙은 사람이 읽을 수 있어야 하지만 검색의 주 수단으로 사용하지 않는다. DB의 상대 경로가 정본이며, 파일명 parsing은 복구·reconciliation 보조 수단으로만 사용한다.
+Host의 `runtime/recovered/`는 Compose가 Data 컨테이너의
+`/recordings/recovered/`에 중첩 bind mount한다. 따라서 DB에는 중앙 Segment는
+`cam-001/...`, Edge 복구 Segment는 `recovered/cam-001/...` 상대 경로로 저장한다.
+파일명 규칙은 사람이 읽을 수 있어야 하지만 검색의 주 수단으로 사용하지 않는다.
+DB의 상대 경로가 정본이며, 파일명 parsing은 Hook 유실 복구·reconciliation 보조
+수단으로만 사용한다.
 
 ### 9.4 시간 규칙
 
@@ -754,10 +889,12 @@ runtime/
 | `ready` | 검색·재생 가능 |
 | `missing` | DB에는 있으나 파일이 없음 |
 | `corrupt` | 파일 검사 실패 |
-| `deleting` | 보관 정책에 따라 삭제 중 |
+| `deleting` | 보관 정책에 따라 삭제 중; 시작 시·주기 점검에서 재시도 |
 | `deleted` | 논리 삭제 완료 |
 
-파일 생성과 DB insert는 하나의 DB 트랜잭션으로 묶을 수 없으므로, Hook와 Reconciliation을 이용한 **eventual consistency**를 허용한다.
+파일 생성과 DB insert는 하나의 DB 트랜잭션으로 묶을 수 없으므로, Hook와
+Reconciliation을 이용한 **eventual consistency**를 허용한다. `deleting` 중 프로세스가
+중단되면 파일이 남은 경우 unlink를 재시도하고 이미 없으면 `deleted`로 수렴한다.
 
 ---
 
@@ -774,12 +911,25 @@ runtime/
 | POST | `/auth/logout` | External |
 | GET | `/cameras` | External → Nginx internal → Data |
 | POST | `/cameras` | External → Nginx internal → Data/Media Adapter |
+| PATCH | `/cameras/{id}` | External → Nginx internal → Data/Edge Adapter |
+| DELETE | `/cameras/{id}` | External → Data history preflight/Media Adapter |
 | GET | `/cameras/{id}/live` | External |
+| GET | `/cameras/{id}/status` | External → Edge HTTP/Runtime Data |
+| GET | `/cameras/{id}/video-profile` | External → Edge HTTP/Runtime Data |
+| PATCH | `/cameras/{id}/video-profile` | External → Edge HTTP/Runtime Data |
+| POST | `/cameras/{id}/publish-credentials/rotate` | External → Data/Media Adapter |
 | GET | `/recordings` | External → Nginx internal → Data |
 | GET | `/recordings/{id}/playback` | External → Nginx internal → Data/Media |
+| GET | `/recordings/{id}/content` | External ACL → Data recovered MPEG-TS stream |
 | GET | `/events` | External → Nginx internal → Data |
 | GET | `/events/{id}` | External → Nginx internal → Data |
 | GET | `/system/status` | External → services |
+| GET | `/openapi.json` | External OpenAPI 3 schema |
+| GET | `/docs` | External interactive API documentation |
+
+공개 경로의 완전한 URL은 `/api/v1/openapi.json`, `/api/v1/docs`다. Nginx의 `/api/` proxy를 통해 제공되므로 Data·Edge 내부 API와 `/health/*`는 Schema에 포함하지 않는다. 카메라 등록/수정 관리자 입력은 `edge_device_id`, `edge_management_url`, `edge_recovery_url`, `edge_auth_token`을 포함할 수 있으나 일반 카메라·상태·Profile 응답은 `source_url`, Edge 관리·복구 주소·Token과 게시 자격증명을 제거한다. 관리 URL(8003)과 Recovery URL(8002)은 독립 계약이며 서로의 Port를 추론하지 않는다. Configurator 신규 등록은 네 Edge 필드를 모두 요구하고, 일반 Bootstrap은 네 필드 전체를 생략할 수 있다. 일부만 있는 기존 DB 레코드는 호환하여 읽되 제어·복구를 `CAPABILITY_UNKNOWN` 또는 `failed`로 보고하고 `edge-update`로 완성한다.
+
+`PUBLIC_BASE_URL`이 설정된 운영 배포는 Live HLS와 Playback에 Absolute HTTPS URL을 반환한다. 개발용 미설정 배포만 같은 Origin 기준 상대 경로를 반환할 수 있다. 외부 앱 계약의 정본은 [외부 애플리케이션 REST/HLS 연동](docs/external-app-integration.md)이다.
 
 ### 10.2 내부 Data API
 
@@ -790,31 +940,47 @@ runtime/
 
 | Method | Path | 호출자 |
 | --- | --- | --- |
-| POST | `/recording-segments` | Media hook/indexer/recovery |
-| POST | `/events` | Inference |
-| GET | `/cameras/enabled` | Inference/External |
-| PATCH | `/cameras/{id}/status` | Media monitor |
-| GET | `/recording-segments/search` | External/Recovery |
-| POST | `/reconcile` | Operator job |
+| POST | `/recording-segments` | Data 내 Recovery Worker (`DATA_RECOVERY_TOKEN`) |
+| POST | `/hooks/recording-complete` | MediaMTX hook (`DATA_MEDIA_TOKEN`) |
+| POST | `/events` | Inference 또는 External (`DATA_INFERENCE_TOKEN`/`DATA_EXTERNAL_TOKEN`) |
+| GET | `/cameras/enabled` | Inference (`DATA_INFERENCE_TOKEN`) |
+| PATCH | `/cameras/{id}/status` | Inference (`DATA_INFERENCE_TOKEN`) |
+| 기타 사용자·Camera·검색·운영 Route | External (`DATA_EXTERNAL_TOKEN`) |
 
-Nginx는 `/internal/`을 외부 listener에 노출하지 않는다. 내부 API 인증은 Docker network만으로 끝내지 않고 서비스 간 shared token 또는 mTLS 확장을 고려할 수 있다. 초기 릴리스에서는 호출 서비스별 최소 권한의 내부 token을 secret으로 주입하고 Nginx가 이를 upstream에 전달하거나 검증한다.
+Nginx는 `/internal/`을 외부 listener에 노출하지 않는다. Data Service는 서로 다른 네
+Token을 constant-time 비교하고 호출 서비스별 Route allowlist를 적용한다. External,
+Inference, Media hook, Recovery Worker는 자기 Token 하나만 받으며 환경 HTTP Proxy와
+Redirect를 사용하지 않는다. 신규 Compose 배포는 결합 shared Token을 허용하지 않는다.
+
+RTSP read 인증은 Data API Token과 별도다. Configurator가 생성한
+`MEDIA_READ_USERNAME`/`MEDIA_READ_PASSWORD` 쌍은 External의 MediaMTX 인증 callback과
+Inference에만 동일하게 주입한다. Inference는 이 값을 percent-encode한 URI userinfo로
+MediaMTX에 제시하며, Data와 Media hook에는 reader 쌍을 주입하지 않는다.
 
 ### 10.3 Media 제어 API
 
-External Service의 Media Adapter만 MediaMTX Control API를 사용한다. 호출은 Nginx Docker 전용 `/internal/media/` route를 거치며, Data Service와 Inference Service가 MediaMTX 설정 형식을 직접 알지 않도록 한다.
+External Service의 좁은 Media Adapter만 MediaMTX Control API를 사용한다. 호출은 Nginx Docker 전용 `/internal/media/` route를 거치며, Data Service와 Inference Service가 MediaMTX 설정 형식을 직접 알지 않도록 한다. 현재 Adapter 책임은 Camera disable/delete 때 `GET /v3/paths/get/{camera_id}`로 활성 RTSP source를 찾고 `POST /v3/rtspsessions/kick/{session_id}`로 해당 publisher만 종료하는 것이다.
 
 ```text
 External Service
-    └── MediaGatewayAdapter
+    └── MediaMtxClient
           └── Nginx /internal/media/
                 └── MediaMTX Control API
-                      ├── create_path()
-                      ├── disable_path()
-                      ├── get_path_status()
-                      └── get_playback_url()
+                      ├── get_camera_path()
+                      └── disconnect_rtsp_publisher()
 ```
 
-MediaMTX 버전 변경 시 Adapter, Nginx upstream 설정과 통합 테스트만 수정할 수 있게 한다.
+일반 비활성화는 DB를 먼저 disabled로 바꾸어 새 게시 인증과 Live/HLS를 차단하고,
+그 뒤 session을 종료한다. Media 제어 실패 시 DB는 disabled로 유지하여 fail closed하고
+관리 API가 재시도 가능한 오류를 반환한다. 삭제는 먼저 Data의 Recording/Event/Recovery
+이력을 검사하며, 이력이 있으면 활성 상태를 바꾸거나 session을 종료하지 않고 409로
+거부한다. 자격증명 재발급은 일시 차단→기존 Publisher 종료→동적 Argon2 Credential
+교체→원래 활성 상태 복원 순서이며 새 원문은 한 번만 반환한다. MediaMTX 버전 변경 시
+Adapter, Nginx upstream 설정과 통합 테스트만 수정할 수 있게 한다.
+
+### 10.4 Future MQTT 경계
+
+현재 Edge Telemetry, Event, Availability와 Command/Result는 인증된 HTTP 상태·제어 API를 사용한다. MQTT는 현 릴리스의 구성 요소나 필수 의존성이 아니다. 후속 도입 시 Broker, 장치 인증, retained 상태, Last Will, QoS, Command ID 기반 중복 제거와 결과 Topic을 함께 설계하고 HTTP 계약에서 단계적으로 이전한다. 영상은 MQTT로 전달하지 않으며 Edge→중앙·Inference는 계속 RTSP, 사용자 재생은 계속 HLS/Playback을 사용한다.
 
 ---
 
@@ -832,7 +998,8 @@ External Service
   - refresh token issue/rotate
         |
         v
-HttpOnly Secure Cookie 또는 Bearer Token
+REST API: Authorization Bearer
+Browser/HLS 연속 요청: HttpOnly Secure Cookie
 ```
 
 Access JWT 최소 Claim:
@@ -852,6 +1019,9 @@ Access JWT 최소 Claim:
 - Secret과 비밀번호 hash를 Git에 포함하지 않는다.
 - JWT 전체 값을 로그에 기록하지 않는다.
 - Access Token은 짧게, Refresh Token은 회전·철회 가능하게 구성한다.
+- 로그인과 Refresh 응답은 JSON Token과 함께 HttpOnly Secure Access/Refresh Cookie를 설정한다.
+- REST API Client는 `Authorization: Bearer <access_token>`을 사용한다.
+- 브라우저/HLS 재생의 공식 방식은 Cookie이며 Query Token은 사용하지 않는다.
 
 ### 11.2 HLS와 Playback 보호
 
@@ -873,7 +1043,7 @@ location = /_auth {
 }
 ```
 
-위 설정은 구조 예시다. 실제 설정은 Cookie/Bearer 전달, cache control, range request, timeout, CORS를 포함하여 통합 테스트해야 한다.
+실제 Nginx는 Manifest와 모든 Segment 요청마다 `Authorization`과 `Cookie`를 `/internal/auth/verify`로 전달하고 Camera ACL을 확인한다. 인증 전에 원본 URI의 `%` 인코딩, 역슬래시, 중복 Slash와 dot Segment를 거부하여 Nginx와 Application의 정규화 차이를 이용한 우회를 막는다. 브라우저/HLS 연속 재생의 공식 인증은 HttpOnly Secure Cookie다. 헤더를 매 요청에 지정할 수 있는 네이티브 Player는 Bearer도 사용할 수 있다. Access Token이 재생 중 만료되어 401이 발생하면 Refresh Token을 회전한 뒤 Playlist를 다시 로드한다. Query Token은 로그·referrer 유출 위험 때문에 허용하지 않는다. 복구 Content는 `Range`의 `200/206/416`과 ETag 기반 `If-Range`를 지원하며 Cache control, timeout과 CORS는 연동 시험에 포함한다.
 
 ### 11.3 Media publish 인증
 
@@ -884,7 +1054,7 @@ edge-001 credentials -> publish cam-001 only
 edge-002 credentials -> publish cam-002 only
 ```
 
-RTSP credential은 Edge 설정의 secret 영역에 저장하고 로그나 CLI 일반 출력에 노출하지 않는다.
+RTSP publish credential은 Edge 설정의 secret 영역에 저장하고 로그나 CLI 일반 출력에 노출하지 않는다. Inference read credential은 게시 자격증명과 별도로 생성하며 32자 이상의 password를 External과 Inference secret 파일에만 동일하게 저장한다. External 인증 callback은 read 요청에서 이 전용 쌍만 constant-time 비교하고 Camera publish 자격증명을 read 권한으로 재사용하지 않는다.
 
 ### 11.4 저장 데이터 보호
 
@@ -1000,7 +1170,7 @@ ai_cctv_internal
 | --- | --- | --- | --- |
 | 80 | HTTP | 선택 | HTTPS redirect 또는 로컬 개발 |
 | 443 | HTTPS | 예 | 외부 사용자 진입점 |
-| 8554 | RTSP | LAN binding만 | Edge publish/pull |
+| 8554 | RTSP | 기본 loopback, 원격 Edge 필요 시 명시적 trusted-LAN IP | Edge publish, Inference authenticated read |
 | 8888 | HTTP | 아니오 | MediaMTX HLS 내부 |
 | 9996 | HTTP | 아니오 | MediaMTX Playback 내부 |
 | 9997 | HTTP | 아니오 | MediaMTX Control API 내부 |
@@ -1032,18 +1202,35 @@ Windows Docker Desktop에서 LAN 전용 binding이 의도대로 적용되는지 
 ```text
 C:\ProgramData\AI_CCTV\
 ├── config\config.yaml
-├── secrets\secrets.env
+├── secrets\data.env
+├── secrets\external.env
+├── secrets\inference.env
+├── secrets\media.env
+├── secrets\camera-credentials.json
 ├── models\
 ├── database\
 ├── recordings\
+├── recovered\
 ├── snapshots\
 └── logs\
 ```
 
 - `config.yaml`: 일반 설정
-- `secrets.env`: JWT secret, 내부 service token, RTSP credential
+- `data.env`: 상호 구별된 External/Inference/Media/Recovery Data Token과 초기 관리자 Hash
+- `external.env`: `DATA_EXTERNAL_TOKEN`, JWT Secret, Bootstrap RTSP publish credential, Inference 전용 RTSP reader 쌍
+- `inference.env`: `DATA_INFERENCE_TOKEN`과 External에 일치하는 Inference 전용 RTSP reader 쌍
+- `media.env`: `DATA_MEDIA_TOKEN`만 포함
+- `camera-credentials.json`: Configurator가 초기 Edge 전달용으로만 보관
 - SQLite: 카메라, 사용자, 런타임 데이터
 - Compose env/override: Configurator가 생성하는 배포 세부 정보
+
+신규 Configurator/Compose 배포는 결합 `secrets.env`를 허용하지 않으며 `doctor`가
+필수 Key, 서비스별 allowlist, Token 길이·일치·상호 구별, RTSP reader 쌍의
+External/Inference 간 일치·32자 이상 password와 Legacy 결합 배포를
+검사한다. `INTERNAL_SERVICE_TOKEN` fallback은 Compose 밖 직접 개발·테스트 호환에만
+남긴다. Configurator는 POSIX `0600` 또는 Windows에서 상속을 제거한 DACL로 Secret
+파일을 보호한다. Inference와 MediaMTX에는 JWT·관리자·Edge·Camera publish
+자격증명을 주입하지 않으며, Inference에는 자신의 전용 RTSP read credential만 추가한다.
 
 ### 13.2 Config Core
 
@@ -1253,12 +1440,20 @@ Edge:
 ### 17.1 기본 검증 규모
 
 - Raspberry Pi Camera: 2대 필수 검증, 4대 목표
-- 입력: 각 1920×1080, 30fps, H.264 약 4Mbps 기본
+- 기본 입력: 각 `hd` 1280×720, 30fps, H.264 약 2Mbps
+- 선택 입력: 각 `fhd` 1920×1080, 30fps, H.264 약 4Mbps
 - 중앙 녹화: 모든 활성 카메라
 - 추론: 서버 자원에 따라 분석 FPS 분리
 - 외부 사용자: 학부 프로젝트 규모의 소수 동시 사용자
 
-4대 × 4Mbps일 때 영상 입력만 약 16Mbps이며, HLS 사용자 수와 저장 I/O가 추가된다. 실제 용량과 성능은 코덱, GOP, 장면 복잡도, 동시 재생 수에 따라 측정해야 한다.
+기본 HD 4대의 Edge→MediaMTX 입력은 약 8Mbps이고 선택 FHD 4대는 약 16Mbps다. 명목 연속 녹화량은 `bitrate × seconds ÷ 8`의 십진 단위로 계산한다.
+
+| Profile | 1대/시간 | 1대/일 | 4대/일 | 4대/7일 | 4대/30일 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `hd` 2Mbps | 0.9GB | 21.6GB | 86.4GB | 604.8GB | 2.592TB |
+| `fhd` 4Mbps | 1.8GB | 43.2GB | 172.8GB | 1.210TB | 5.184TB |
+
+Container·Audio·파일시스템 overhead는 표에 포함하지 않으므로 실제 저장소에는 최소 10~20% 여유와 보관 정책을 반영한다. HLS egress는 동시 사용자 한 명당 선택 Profile Bitrate가 대략 추가된다. MediaMTX→Inference의 RTSP는 Docker 내부 대역폭으로 별도 발생하며 추론 FPS를 낮춰도 RTSP 원본 전송 Bitrate 자체가 자동으로 줄지는 않는다. 실제 용량과 성능은 코덱, GOP, 장면 복잡도와 동시 재생 수에 따라 측정한다.
 
 ### 17.2 추론 성능 분리
 
@@ -1323,7 +1518,7 @@ analysis_fps  = configurable, e.g. 5~15 fps
 | `client_code/workers/video_worker.py` | Camera supervisor로 분해 |
 | `client_code/storage/recording_manager.py` | 중앙 MediaMTX 녹화로 대체 또는 fallback |
 | `client_code/recovery/` | Recovery Coordinator/Edge package |
-| `client_code/ui/` | Configurator 또는 별도 관제 UI로 재설계 |
+| `client_code/ui/` | Legacy 관제 UI로 보존; Configurator와 외부 앱에 포함하지 않음 |
 
 ### Phase 5 — External Service와 Nginx
 
@@ -1386,20 +1581,11 @@ analysis_fps  = configurable, e.g. 5~15 fps
 
 다음 항목은 구현 전에 시험 또는 별도 ADR이 필요하다.
 
-1. Edge RTSP 기본 모드를 publish와 central pull 중 어느 것으로 고정할지
-2. 중앙 MediaMTX 최종 버전과 image digest
-3. live HLS variant: 일반 fMP4 HLS 또는 Low-Latency HLS
-4. 저장 영상 재생의 기본 응답: fMP4 또는 완전한 MP4
-5. 저장 영상 HLS VOD가 v1.0 필수인지 후속 기능인지
-6. JWT Cookie와 Bearer의 기본 UX
-7. Refresh Token 저장·철회 방식
-8. External과 Data를 초기 릴리스에서 분리할지 합칠지
-9. Windows GPU 컨테이너 지원 범위와 NVIDIA dependency
-10. 카메라별 ACL을 v1.0에 포함할지
-11. 기본 보관 기간과 디스크 임계치
-12. Edge 복구 전송 API 형식과 checksum 수준
-13. Web UI, PyQt 관제 UI 또는 둘의 역할 분담
-14. 오픈소스 라이선스와 모델 weight 배포 정책
+1. 중앙 MediaMTX 최종 버전과 image digest
+2. 저장 영상 HLS VOD를 어느 후속 릴리스에서 추가할지
+3. Windows GPU 컨테이너 지원 범위와 NVIDIA dependency
+4. 기본 보관 기간과 디스크 임계치
+5. 오픈소스 라이선스와 모델 weight 배포 정책
 
 미결정 항목은 구현 편의로 암묵적으로 고정하지 않고 ADR 또는 issue에 결정 근거와 검증 결과를 기록한다.
 
@@ -1444,4 +1630,3 @@ Authenticated User
 ```
 
 이 구조의 핵심은 **대용량 영상 경로와 제어·검색 데이터 경로를 분리하는 것**이다. 영상은 RTSP, HLS, 파일시스템을 통해 이동하고, HTTP/SQLite에는 작은 메타데이터만 전달한다. 이를 통해 2~4대 카메라 규모에서 구현 복잡도를 통제하면서도 설치성, 검색성, 외부 접근성, 향후 확장성을 확보한다.
-

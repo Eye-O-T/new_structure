@@ -4,13 +4,12 @@ readTimeout: 10s
 writeTimeout: 10s
 writeQueueSize: 512
 
-# Only publishers are authenticated here. RTSP readers, HLS and Playback are
-# reachable solely on the Compose network and user-facing HTTP access is
-# protected by Nginx auth_request.
+# RTSP publishers and readers are authenticated here. HLS and Playback stay on
+# the Compose network and user-facing HTTP access is protected by Nginx
+# auth_request; their MediaMTX actions remain excluded or explicitly allowed.
 authMethod: http
 authHTTPAddress: http://external:8000/internal/media-auth
 authHTTPExclude:
-  - action: read
   - action: playback
   - action: api
   - action: metrics

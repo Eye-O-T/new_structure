@@ -9,8 +9,10 @@ def enforce_retention(
     max_bytes: int,
     max_age_hours: int,
     now: float | None = None,
+    *,
+    preserve_newest: bool = False,
 ) -> list[Path]:
-    """Delete oldest completed TS segments until age and size limits are met."""
+    """Delete old TS segments without unlinking the active splitmux output."""
 
     current = time.time() if now is None else now
     cutoff = current - max_age_hours * 3600
@@ -22,10 +24,14 @@ def enforce_retention(
             continue
         files.append((stat.st_mtime, stat.st_size, path))
 
+    protected = None
+    if preserve_newest and files:
+        protected = max(files, key=lambda item: (item[0], item[2].as_posix()))[2]
+
     deleted: list[Path] = []
     retained = []
     for mtime, size, path in sorted(files):
-        if mtime < cutoff:
+        if path != protected and mtime < cutoff:
             path.unlink(missing_ok=True)
             deleted.append(path)
         else:
@@ -35,6 +41,8 @@ def enforce_retention(
     for _, size, path in retained:
         if total <= max_bytes:
             break
+        if path == protected:
+            continue
         path.unlink(missing_ok=True)
         total -= size
         deleted.append(path)

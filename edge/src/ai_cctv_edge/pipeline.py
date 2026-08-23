@@ -16,6 +16,26 @@ def daily_backup_directory(config: EdgeConfig, compact_utc_date: str) -> Path:
     )
 
 
+def _encoder_command(config: EdgeConfig) -> list[str]:
+    if config.video.encoder == "x264enc":
+        return [
+            "x264enc",
+            "tune=zerolatency",
+            "speed-preset=ultrafast",
+            f"bitrate={config.video.bitrate_kbps}",
+            f"key-int-max={config.video.fps}",
+            "bframes=0",
+        ]
+    if config.video.encoder == "v4l2h264enc":
+        # video_bitrate is the standard V4L2 MPEG control exposed through the
+        # plugin. Device-specific register addresses are deliberately avoided.
+        return [
+            "v4l2h264enc",
+            f"extra-controls=controls,video_bitrate={config.video.bitrate_kbps * 1000}",
+        ]
+    raise ValueError("video.encoder must be x264enc or v4l2h264enc")
+
+
 def build_gstreamer_command(
     config: EdgeConfig, compact_utc_timestamp: str
 ) -> list[str]:
@@ -36,24 +56,13 @@ def build_gstreamer_command(
             f"framerate={config.video.fps}/1"
         ),
         "!",
+        "watchdog",
+        f"timeout={int(config.monitoring.frame_timeout_seconds * 1000)}",
+        "!",
         "videoconvert",
         "!",
     ]
-    if config.video.encoder == "x264enc":
-        command.extend(
-            [
-                "x264enc",
-                "tune=zerolatency",
-                "speed-preset=ultrafast",
-                f"bitrate={config.video.bitrate_kbps}",
-                f"key-int-max={config.video.fps}",
-                "bframes=0",
-            ]
-        )
-    elif config.video.encoder == "v4l2h264enc":
-        command.append("v4l2h264enc")
-    else:
-        raise ValueError("video.encoder must be x264enc or v4l2h264enc")
+    command.extend(_encoder_command(config))
 
     command.extend(
         [
@@ -103,6 +112,29 @@ def build_gstreamer_command(
                 "shm-size=16777216",
             ]
         )
+    return command
+
+
+def build_profile_probe_command(config: EdgeConfig) -> list[str]:
+    """Build a bounded encoder preflight that does not seize the real camera."""
+
+    command = [
+        "gst-launch-1.0",
+        "-q",
+        "videotestsrc",
+        f"num-buffers={config.video.fps * 2}",
+        "!",
+        (
+            "video/x-raw,"
+            f"width={config.video.width},height={config.video.height},"
+            f"framerate={config.video.fps}/1"
+        ),
+        "!",
+        "videoconvert",
+        "!",
+    ]
+    command.extend(_encoder_command(config))
+    command.extend(["!", "h264parse", "!", "fakesink", "sync=false"])
     return command
 
 

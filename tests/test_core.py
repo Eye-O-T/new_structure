@@ -29,6 +29,36 @@ def test_config_rejects_duplicate_camera_ids():
         )
 
 
+def test_camera_bootstrap_accepts_safe_edge_management_url():
+    camera = CameraBootstrap(
+        camera_id="cam-001",
+        name="Entrance",
+        edge_device_id="edge-001",
+        edge_management_url="https://192.0.2.10:8003/",
+        edge_recovery_url="https://192.0.2.10:8002/",
+    )
+    assert camera.edge_management_url == "https://192.0.2.10:8003"
+    assert camera.edge_recovery_url == "https://192.0.2.10:8002"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "rtsp://edge.example:8554",
+        "https://user:secret@edge.example",
+        "https://edge.example/?token=secret",
+        "https://edge.example/base/../admin",
+    ],
+)
+def test_camera_bootstrap_rejects_unsafe_edge_management_url(url):
+    with pytest.raises(ValueError, match="Edge service URL"):
+        CameraBootstrap(
+            camera_id="cam-001",
+            name="Entrance",
+            edge_management_url=url,
+        )
+
+
 def test_recording_segment_range():
     assert RecordingConfig(segment_seconds=10).segment_seconds == 10
     with pytest.raises(ValueError):
@@ -59,6 +89,6 @@ def test_server_example_config_matches_core_schema():
 
     assert config.schema_version == 1
     assert config.server.public_http_port == 80
-    assert config.recording.recovery_root == "/recovered"
+    assert config.recording.recovery_root == "/recordings/recovered"
     assert config.inference.event_pre_roll_seconds == 5
     assert [camera.camera_id for camera in config.cameras] == ["cam-001"]

@@ -1,46 +1,108 @@
 # AI_CCTV 구현·검증 상태
 
-기준 소스는 `Eye-O-T/AI_CCTV`의 `develop` 브랜치 commit `09db3ed`이며, 루트의 `SRS.md`, `ARCHITECTURE.md`, `README.md`를 구현 기준으로 사용했습니다. 기존 PyQt/RTSP 프로토타입은 삭제하지 않고 legacy 경로에 보존했습니다.
+기준일은 2026-08-23이다. 이 문서는 현재 작업 트리의 소스 구현과 아직 필요한 실환경 인수시험을 구분한다. 기준 요구사항과 계약은 [SRS.md](SRS.md), [ARCHITECTURE.md](ARCHITECTURE.md), [README.md](README.md), [외부 애플리케이션 연동 문서](docs/external-app-integration.md)를 따른다.
 
-## 구현 결과
+## 구현 상태
 
-| 영역 | 결과 |
+| 영역 | 현재 소스 구현 |
 | --- | --- |
-| 중앙 배포 | Data, External, Inference, MediaMTX, Nginx의 5-container Compose와 영속 bind mount 구현 |
-| Edge | H.264 취득, 중앙 RTSP publish, 10초 MPEG-TS ring backup, 장애 격리 재연결, systemd·ARM64 deb recipe 구현 |
-| Media | Camera ID path, publish 인증, HLS, 60초 fMP4 녹화, Playback, 완료 hook 구현 |
-| Data | SQLite WAL/FK/migration, 카메라·사용자·ACL, recording/event M:N, 검색, retention, backup, reconciliation 구현 |
-| Inference | 최대 4개 독립 RTSP worker, YOLO/ByteTrack, 출현·이탈·네트워크 이벤트와 snapshot 구현 |
-| External | JWT access/refresh rotation/logout, Argon2, RBAC/ACL, 카메라·녹화·이벤트 API, 보호 영상 인증 구현 |
-| Recovery | Edge Bearer manifest/file API와 중앙 순차 다운로드·SHA-256·원자 이동·idempotent `edge_recovery` 인덱싱 구현 |
-| Configurator | 공용 schema, GUI/CLI, secret·카메라 credential 생성, custom/manifest model 설치, Compose 제어·doctor 구현 |
-| Packaging | PyInstaller/Inno Setup 정의와 Raspberry Pi OS ARM64 `.deb` 빌드 정의 구현 |
-| 운영 | TLS, 중앙 배포, 저장소/DB backup·restore, Edge recovery 절차 및 ADR 제공 |
+| 영상 Profile | 기본 `hd` 1280×720@30fps·2Mbps, 선택 `fhd` 1920×1080@30fps·4Mbps, 지원 Profile 검증과 원자적 선택 상태 저장 |
+| Edge 영상 | GStreamer H.264 취득, 중앙 RTSP publish 기본, 10초 MPEG-TS 로컬 백업, 재시작 Backoff |
+| Edge 관측성 | CPU·메모리·저장장치 사용률, Linux power-supply 기반 배터리·외부 전원 상태, 마지막 프레임 기반 Camera Input Watchdog |
+| Edge 이벤트 | `camera_input_lost/restored`, `central_connection_lost/restored`, `external_power_lost/restored`, `battery_low/critical`, Profile 변경 성공·실패 Journal |
+| Edge 서비스 분리 | Capture, 상태·제어 API, Recovery API를 별도 systemd Service로 분리하여 Capture 장애 중에도 상태·복구 경로 유지 |
+| Edge HTTP | 상태·Capability·Profile·Event는 인증된 관리 API 8003, Manifest/File 복구는 인증된 Recovery API 8002 |
+| 중앙 상태 | 주기적 Status Collector, Camera/Edge Runtime 상태 저장, 전원·입력·연결·저장장치 전이 Event 생성 |
+| 중앙 Profile 제어 | 현재·요청·지원 Profile 분리 저장, Edge Capability 확인, 적용 성공 후 현재값 확정, 오류 코드와 실패 Event 저장 |
+| 자동 복구 | 중앙 연결 중단·복구 구간을 Recovery Job으로 저장하고 제한된 재시도, SHA-256 검증, 원자 이동, `edge_recovery` 중복 방지 인덱싱 수행 |
+| 중앙 미디어 | 최대 4개 활성 Camera ID 경로, MediaMTX RTSP 집약, 내부 Inference RTSP, 보호된 fMP4 HLS, 60초 fMP4 녹화와 Playback |
+| Data | SQLite WAL/FK/Migration, Camera·Edge·Runtime·Profile·Recovery 상태, Recording/Event/ACL 검색, 중단 삭제 재수렴, Hook 유실 Segment 멱등 인덱싱 |
+| External | JWT Access/Refresh 회전·로그아웃, RBAC/Camera ACL, Camera·Live·Recording·Event·Status·Profile·게시 자격증명 재발급 API |
+| 공개 계약 | `/api/v1/openapi.json`, `/api/v1/docs`, `PUBLIC_BASE_URL` 기반 Absolute HTTPS Live/Playback URL, UTC RFC 3339, `Range`/`If-Range`, 안정된 Edge 오류 코드 |
+| HLS 인증 | Browser/HLS는 HttpOnly Secure Access Cookie, REST는 Bearer, Manifest와 모든 Segment에 Nginx `auth_request`, 모호한 원본 URI 선차단 적용 |
+| 내부 인증 | External·Inference·Media·Recovery별 상호 구별 Token과 Route allowlist, 내부 HTTP 환경 Proxy·Redirect 차단 |
+| Configurator | 초기 설치·Compose 운영 외에 Edge 등록/수정, 상태 조회, Profile 조회·HD/FHD 변경, 게시 자격증명 안전 재발급과 오류 사유 표시를 GUI/CLI에 제공 |
+| UI 범위 | Configurator는 설치·운영 설정 전용, 기존 PyQt 관제 UI는 Legacy, 모바일/Web 사용자 앱은 별도 프로젝트 |
 
-## 자동 검증 결과
+## Edge 등록 계약
 
-- `pytest`: **63 passed**
-- Ruff lint: 구현 경로 전체 통과
+Configurator의 신규 `edge-register`는 다음 값을 모두 요구한다.
+
+- `edge_device_id`
+- `edge_management_url`: 상태·제어·이벤트 API, 기본 8003
+- `edge_recovery_url`: `/v1/recovery` API, 기본 8002
+- 32자 이상의 Edge Bearer Token
+
+두 URL은 서로 독립적이며 Port를 추론하지 않는다. Token은 명령행 값으로 직접 전달하지 않고 숨김 입력 또는 권한이 제한된 `--edge-auth-token-file`을 사용한다.
+
+```bash
+ai-cctv-server edge-register cam-001 \
+  --server-url https://cctv.example.com \
+  --name Entrance \
+  --edge-device-id edge-001 \
+  --management-url http://192.0.2.41:8003 \
+  --recovery-url http://192.0.2.41:8002 \
+  --edge-auth-token-file /secure/edge-001-control.token \
+  --publish-credentials-output /secure/cam-001-publish.json
+```
+
+일반 Camera Bootstrap은 Edge Metadata 전체를 생략할 수 있지만 일부만 포함한 신규 등록은 거부한다. 업그레이드 전 DB의 불완전 Metadata는 읽을 수 있으나 상태 제어 또는 복구가 `CAPABILITY_UNKNOWN`/`failed`이며 `edge-update`로 완성해야 한다. Edge Token과 내부 URL은 일반 Camera·Status·Profile 응답, Configurator 결과와 로그에 노출하지 않는다. 등록·재발급 응답의 일회성 RTSP 게시 자격증명은 해당 Camera만 포함한 제한 권한 JSON 파일에 원자 저장하고 화면·콘솔에는 마스킹한다. 관리자는 이 파일을 일치하는 Edge setup에 전달한 뒤 불필요한 복사본을 제거한다.
+
+```bash
+ai-cctv-server edge-rotate-credentials cam-001 \
+  --server-url https://cctv.example.com \
+  --publish-credentials-output /secure/cam-001-publish-rotated.json
+```
+
+## 자동 검증 상태
+
+2026-08-23 현재 합쳐진 작업 트리에서 다음 자동 검증을 완료했다.
+
+- `.venv\Scripts\python.exe -m pytest -q`: **167 passed**
+- `.venv\Scripts\python.exe -m ruff check .`: 통과
 - Python `compileall`: 통과
-- `git diff --check`: 통과
-- Root/Configurator wheel 및 Edge wheel 빌드: 통과, 예상 package 포함 확인
-- Docker Compose v2.29.7 정적 render: 통과, Host 공개 포트는 Nginx 80/443과 MediaMTX RTSP 8554로 제한
-- MediaMTX v1.9.0 실제 binary config load 및 RTSP/HLS/Playback/API listener 시작: 통과
-- 설정 example의 strict schema load와 shell script 구문 검사: 통과
+- `server/compose.yml`, `server/mediamtx/mediamtx.yml`, `server/config/config.example.yaml` YAML 파싱: 통과
+- Edge·MediaMTX 관련 셸 스크립트 `bash -n`: 통과
+- `git diff --check`: 오류 없음(Windows CRLF 변환 안내만 출력)
 
-## 목표 환경에서 추가해야 하는 인수 시험
+현재 최종 검증 환경에는 Docker가 없다. 따라서 `docker compose config`, 실제 컨테이너 기동과 Nginx·MediaMTX 실행 검증은 수행하지 않았으며 아래 P3 운영환경 인수시험에 포함한다.
 
-아래 항목은 소스나 build recipe의 누락이 아니라 이 작업 환경에 해당 운영체제·장비·Docker daemon이 없어 실행하지 못한 검증입니다.
+자동 검증은 다음 경계를 포함한다.
 
-1. Windows에서 PyInstaller와 Inno Setup으로 `.exe`를 만들고 설치·업데이트·제거 UI를 확인합니다.
-2. Docker daemon이 있는 중앙 서버에서 5개 image를 build/up하고 `nginx -t`, 전체 health, 실제 HLS/Playback을 확인합니다.
-3. ARM64 Raspberry Pi에서 `.deb`를 만들고 libcamera, GStreamer, systemd, 재부팅 자동 시작을 확인합니다.
-4. 실제 카메라 1~4대에서 해상도/FPS/bitrate, 24시간 안정성, 네트워크 단절 중 backup 및 복구를 측정합니다.
-5. CPU/GPU별 YOLO 모델의 FPS·지연·메모리를 측정하고 운영 모델 Manifest의 URL, SHA-256, license를 확정합니다. 현재 example Manifest는 이 release 결정 전까지 의도적으로 비활성입니다.
-6. 운영 DNS·신뢰 TLS 인증서·LAN 방화벽·Router 정책을 적용한 외부 접근과 보안 시험을 수행합니다.
+- HD/FHD 설정 Schema와 미지원 Profile 거부
+- Edge 상태·전원·Camera Input Watchdog 상태 전이
+- 관리 API 8003과 Recovery API 8002의 인증 및 생명주기 분리
+- Status Collector, Runtime 상태, Event와 Recovery Job 저장
+- Profile 성공 확정, 실패 오류 코드와 Rollback 유지
+- Configurator의 별도 관리/복구 URL, 32자 이상 Token, Secret 마스킹
+- OpenAPI 공개 경로, `PUBLIC_BASE_URL`, JWT Cookie/Bearer, HLS ACL
+- 서비스별 Data Token Scope, 내부 Proxy/Redirect 차단, URI 정규화 우회 거부
+- 게시 자격증명 재발급·재등록과 Camera Lifecycle fail-closed 동작
+- `Range`/`If-Range`, 중단된 삭제 재수렴, Hook 유실 중앙 Segment 인덱싱
+- UTC Query/응답과 Recovery 중복 방지
 
-## 보안 인계
+## P3 실환경·수동 인수시험 — 미검증
 
-기존 브랜치에 추적되던 `.proj_env`는 배포본에서 제거하고 `.proj_env.example`로 대체했습니다. 과거 Git 이력에 실제 Discord Bot token을 넣은 적이 있다면 이 배포 여부와 무관하게 Discord에서 해당 token을 폐기·재발급해야 합니다.
+다음 항목은 실제 장비·운영 네트워크·Docker/OS 환경이 필요하며 현재 작업 환경에서는 검증 완료로 간주하지 않는다.
 
-실행 순서는 `README.md`와 `docs/operations/`에 정리되어 있습니다.
+1. Raspberry Pi Camera에서 기본 HD 30fps·약 2Mbps와 선택 FHD 30fps·약 4Mbps의 실제 Encoder 출력, 프레임 안정성, CPU·메모리 사용률을 측정한다.
+2. Camera 4대가 동시에 RTSP publish, 중앙 녹화, 내부 Inference RTSP와 외부 HLS를 유지하는지 측정한다.
+3. UPS HAT의 실제 Linux power-supply 노출값을 확인하고 외부 전원 차단·복구, 충전, 저전압, 배터리 Low/Critical과 지속시간을 검증한다.
+4. 카메라 케이블을 물리적으로 분리해 5초 Frame Watchdog, `camera_input_lost/restored`, Pipeline 재시작과 네트워크 장애 구분을 검증한다.
+5. Ethernet 단선, Switch 전원 차단, 중앙 서버 중단을 각각 시험해 `central_connection_lost/restored`와 Edge 생존·배터리 상태가 올바르게 구분되는지 확인한다.
+6. 장애 구간 자동 Recovery Job이 `detected → waiting_for_recovery → downloading → indexing → completed/failed`로 전이하고 재시도·SHA-256·중복 방지가 동작하는지 검증한다.
+7. FHD 미지원 장치, Encoder 부재, Pipeline 시작 실패와 Rollback 실패를 주입해 기존 HD 유지와 Configurator 오류 표시를 확인한다.
+8. 실제 HLS Player에서 로그인 Cookie, Manifest/Segment ACL, Access Token 만료 중 Refresh와 재생 복구를 검증한다.
+9. Windows에서 PyInstaller/Inno Setup 설치·업데이트·제거와 신뢰 TLS 인증서를 적용한 Configurator HTTPS 연결을 검증한다.
+10. ARM64 Raspberry Pi에서 `.deb`, 세 systemd Service, 권한, 재부팅 자동 시작과 Capture 장애 중 Recovery API 지속을 검증한다.
+11. 운영 저장장치에서 4대 HD/FHD 연속 녹화량, 10~20% 여유, 보관·삭제·Storage Warning/Critical을 장시간 검증한다.
+12. 운영 DNS·TLS·방화벽 환경에서 외부 REST/HLS/Playback, OpenAPI, Camera ACL과 내부 Port 비노출을 보안 시험한다.
+
+## 현재 범위 밖
+
+- 모바일 네이티브 애플리케이션과 Web UI 구현
+- MQTT Broker, Telemetry, Event, Availability/LWT, retained 상태와 Command/Result
+- HD/FHD 동시 Adaptive HLS
+- 저장 영상 HLS VOD와 저장 파일 암호화
+
+현재 Edge 상태·제어·복구는 인증된 HTTP를 사용하고, 영상은 Edge→중앙 및 내부 추론에 RTSP, 외부 사용자에게 HTTPS HLS/Playback을 사용한다.

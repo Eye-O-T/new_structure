@@ -2,6 +2,6 @@
 set -eu
 
 if [ "${1:-}" = "remove" ]; then
-    systemctl disable --now ai-cctv-edge.service || true
+    systemctl disable --now ai-cctv-edge.service \
+        ai-cctv-edge-control.service ai-cctv-edge-recovery.service || true
 fi
-

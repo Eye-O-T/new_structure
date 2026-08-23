@@ -17,9 +17,13 @@ CONTAINER_SCRIPT = textwrap.dedent(
     import sys
     import urllib.request
 
+    class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_args, **_kwargs):
+            return None
+
     values = json.load(sys.stdin)
     body = json.dumps({"filename": values.get("filename")}).encode("utf-8")
-    token = os.environ.get("DATA_INTERNAL_TOKEN") or os.environ["INTERNAL_SERVICE_TOKEN"]
+    token = os.environ["DATA_EXTERNAL_TOKEN"]
     request = urllib.request.Request(
         "http://127.0.0.1:8000/internal/v1/backup",
         data=body,
@@ -29,7 +33,10 @@ CONTAINER_SCRIPT = textwrap.dedent(
             "X-Internal-Token": token,
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), NoRedirectHandler()
+    )
+    with opener.open(request, timeout=30) as response:
         result = json.load(response)
     print(json.dumps(result))
     """

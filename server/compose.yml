@@ -29,7 +29,7 @@ services:
     init: true
     restart: unless-stopped
     env_file:
-      - ${SECRETS_FILE:-./secrets/secrets.env}
+      - ${DATA_SECRETS_FILE:-./secrets/data.env}
     environment:
       AI_CCTV_CONFIG_FILE: /app/config/config.yaml
       AI_CCTV_DATABASE_PATH: /data/database/ai_cctv.db
@@ -40,7 +40,13 @@ services:
       DATA_STORAGE_ROOT: /recordings
       DATA_SNAPSHOT_ROOT: /snapshots
       DATA_BACKUP_ROOT: /data/database/backups
-      RECOVERED_ROOT: /recovered
+      RECOVERY_DATA_BASE_URL: http://127.0.0.1:8000/internal/v1
+      RECOVERY_POLL_INTERVAL_SECONDS: ${RECOVERY_POLL_INTERVAL_SECONDS:-5}
+      RECOVERY_MAX_ATTEMPTS: ${RECOVERY_MAX_ATTEMPTS:-3}
+      RECOVERY_RETRY_BASE_SECONDS: ${RECOVERY_RETRY_BASE_SECONDS:-30}
+      RECOVERY_SETTLE_SECONDS: ${RECOVERY_SETTLE_SECONDS:-15}
+      RECOVERY_TIMEOUT_SECONDS: ${RECOVERY_TIMEOUT_SECONDS:-30}
+      CENTRAL_RECORDING_SEGMENT_SECONDS: ${CENTRAL_RECORDING_SEGMENT_SECONDS:-60}
       TZ: UTC
     expose:
       - "8000"
@@ -68,8 +74,9 @@ services:
           create_host_path: false
       - type: bind
         source: ${RECOVERED_DIR:-./runtime/recovered}
-        target: /recovered
-        read_only: true
+        # Keep recovered media on its independently configurable host volume
+        # while exposing it under the Data Service's single storage namespace.
+        target: /recordings/recovered
         bind:
           create_host_path: false
     healthcheck: *python-healthcheck
@@ -85,13 +92,14 @@ services:
     init: true
     restart: unless-stopped
     env_file:
-      - ${SECRETS_FILE:-./secrets/secrets.env}
+      - ${EXTERNAL_SECRETS_FILE:-./secrets/external.env}
     environment:
       AI_CCTV_CONFIG_FILE: /app/config/config.yaml
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
       DATA_BASE_URL: http://nginx:8080/internal/data/v1
       DATA_HEALTH_URL: http://nginx:8080/internal/data/health/ready
       MEDIA_CONTROL_URL: http://nginx:8080/internal/media
+      MEDIA_CONTROL_TIMEOUT_SECONDS: ${MEDIA_CONTROL_TIMEOUT_SECONDS:-5}
       ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-15}
       REFRESH_TOKEN_DAYS: ${REFRESH_TOKEN_DAYS:-7}
       ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
@@ -100,6 +108,15 @@ services:
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       PUBLIC_HLS_PREFIX: /hls
       PUBLIC_PLAYBACK_PREFIX: /playback
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      EDGE_STATUS_POLL_INTERVAL_SECONDS: ${EDGE_STATUS_POLL_INTERVAL_SECONDS:-5}
+      EDGE_CONTROL_TIMEOUT_SECONDS: ${EDGE_CONTROL_TIMEOUT_SECONDS:-75}
+      EDGE_STATUS_TIMEOUT_SECONDS: ${EDGE_STATUS_TIMEOUT_SECONDS:-5}
+      EDGE_EVENT_PAGE_LIMIT: ${EDGE_EVENT_PAGE_LIMIT:-100}
+      BATTERY_LOW_PERCENT: ${BATTERY_LOW_PERCENT:-20}
+      BATTERY_CRITICAL_PERCENT: ${BATTERY_CRITICAL_PERCENT:-10}
+      STORAGE_WARNING_PERCENT: ${STORAGE_WARNING_PERCENT:-85}
+      STORAGE_CRITICAL_PERCENT: ${STORAGE_CRITICAL_PERCENT:-95}
       TZ: UTC
     expose:
       - "8000"
@@ -130,7 +147,7 @@ services:
     init: true
     restart: unless-stopped
     env_file:
-      - ${SECRETS_FILE:-./secrets/secrets.env}
+      - ${MEDIA_SECRETS_FILE:-./secrets/media.env}
     environment:
       TZ: UTC
     ports:
@@ -230,7 +247,7 @@ services:
     init: true
     restart: unless-stopped
     env_file:
-      - ${SECRETS_FILE:-./secrets/secrets.env}
+      - ${INFERENCE_SECRETS_FILE:-./secrets/inference.env}
     environment:
       AI_CCTV_CONFIG_FILE: /app/config/config.yaml
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1

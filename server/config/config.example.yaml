@@ -9,7 +9,7 @@ server:
 
 recording:
   root: /recordings
-  recovery_root: /recovered
+  recovery_root: /recordings/recovered
   segment_seconds: 60
   retention_days: 7
   warning_free_percent: 15

@@ -9,10 +9,11 @@
 | 대상 저장소 | `Eye-O-T/AI_CCTV` |
 | 기준 브랜치 | `develop` |
 | 문서 버전 | `0.3.0-draft` |
-| 기준일 | 2026-08-22 |
-| 문서 상태 | 아키텍처 전환 기준안 |
-| 현재 구현 기준 | 단일 카메라 Python/PyQt 프로토타입 |
-| 목표 구현 기준 | 멀티카메라·Docker Compose·중앙 MediaMTX 기반 시스템 |
+| 기준일 | 2026-08-23 |
+| 문서 상태 | 구현 정합화 기준안 |
+| 현재 구현 기준 | 중앙 MediaMTX·최대 4개 활성 카메라·Docker Compose·Edge HTTP 관리 구조 |
+| Legacy 기준 | `client_code/` 단일 카메라 Python/PyQt 관제 프로토타입 |
+| 목표 구현 기준 | HD 기본/FHD 선택·외부 REST/HLS·상태/복구가 정합화된 시스템 |
 
 이 문서에서 **하여야 한다**는 필수 요구사항, **권장한다**는 우선 적용하되 합리적인 사유가 있으면 변경할 수 있는 요구사항, **할 수 있다**는 선택 요구사항을 의미한다.
 
@@ -22,9 +23,9 @@
 
 AI_CCTV는 Raspberry Pi 기반 카메라 장치에서 영상을 수집하고 중앙 서버에서 스트림 중계, 저장, AI 추론, 이벤트 기록 및 사용자 조회를 제공하는 저비용 지능형 CCTV 시스템이다.
 
-본 명세서는 현재 `develop` 브랜치에 구현된 단일 카메라 프로토타입을 다음 목표 구조로 전환하기 위한 요구사항을 정의한다.
+본 명세서는 `client_code/`의 단일 카메라 프로토타입을 Legacy로 보존하면서, 현재 `develop` 브랜치의 중앙 MediaMTX·멀티카메라 구조를 다음 정합화 목표까지 완성하기 위한 요구사항을 정의한다.
 
-- 2대 이상, 기본 목표 4대 이하의 멀티카메라 지원
+- 2대 이상, 기본 목표 최대 4대 동시 활성 멀티카메라 지원
 - Raspberry Pi에서 중앙 서버로 RTSP 영상 입력
 - 중앙 MediaMTX를 통한 스트림 집약, 녹화 및 HLS 제공
 - 영상 파일과 SQLite 메타데이터의 분리 저장
@@ -71,37 +72,36 @@ AI_CCTV는 Raspberry Pi 기반 카메라 장치에서 영상을 수집하고 중
 - 대규모 분산 DB 또는 다중 중앙 서버 클러스터
 - 생체정보 기반 신원 식별의 정확성 보장
 - 모바일 네이티브 애플리케이션
+- Web UI
+- MQTT Broker와 MQTT 기반 Telemetry·Event·Availability·Command
 
-단, HTTPS, JWT, 비밀번호 해시, 비밀정보 보호는 저장 영상 암호화와 별개로 현재 범위에 포함한다.
+단, HTTPS, JWT, 비밀번호 해시, 비밀정보 보호는 저장 영상 암호화와 별개로 현재 범위에 포함한다. 모바일 애플리케이션은 별도 담당자가 구현하며 이 저장소는 그 앱이 사용할 HTTPS REST, 보호된 HLS/Playback과 OpenAPI 계약까지 제공한다. MQTT 도입 전 Edge 상태 조회·화질 제어·복구는 인증된 HTTP를 사용한다.
 
 ---
 
 ## 4. 현재 구현 기준과 목표 기준
 
-### 4.1 현재 `develop` 브랜치 기준
+### 4.1 현재 구현 기준
 
-현재 프로토타입은 다음 특성을 가진다.
+현재 기준 구현은 다음 특성을 가진다. 기존 단일 카메라 PyQt 코드는 Legacy 경로로만 보존한다.
 
 | 영역 | 현재 상태 |
 | --- | --- |
-| Python | 3.11 계열 권장, patch 버전 미고정 |
+| Python | 3.11.9 기준 |
 | RTSP | RTSP/1.0 기반 |
-| Edge 영상 처리 | GStreamer 1.x, H.264, 기본 1920×1080@30fps |
-| Edge MediaMTX | `v1.9.0`을 Raspberry Pi에서 실행 |
+| Edge 영상 처리 | GStreamer 1.x, H.264, 기본 `hd` 1280×720@30fps·2Mbps, 선택 `fhd` 1920×1080@30fps·4Mbps |
+| Edge RTSP | 중앙 `central_publish` 구현·기본; `central_pull`은 Edge 진단용 준비 코드이며 중앙 동적 source 연동 전까지 비지원 |
 | Edge 백업 | 10초 단위 MPEG-TS 파일 |
-| 중앙 수신 | OpenCV 기반 영상 스트림 수신 |
-| 중앙 녹화 | OpenCV `VideoWriter`, 분할 MP4 저장 |
-| 추론 | Ultralytics YOLO, ByteTrack, 안정 ID 보정 |
-| VLM | 비동기 분석 후 Discord 전달 경로 존재 |
-| GUI | PyQt5 단일 카메라 관제 화면 |
-| 멀티카메라 | 미구현에 가까움 |
-| Docker Compose | 미구현 |
-| SQLite 검색 인덱스 | 미구현 |
-| HLS 사용자 제공 | 미구현 |
-| JWT 로그인 | 미구현 |
-| Nginx | 미구현 |
+| 중앙 수신·녹화 | MediaMTX RTSP 집약, 60초 fMP4 Segment |
+| 추론 | MediaMTX 내부 RTSP를 읽는 카메라별 독립 Worker |
+| GUI/CLI | PyQt/CLI Configurator; 기존 관제 UI는 Legacy |
+| 멀티카메라 | 최대 4개 활성 Camera ID/Stream Path; 이력 보존용 비활성 Camera는 별도 |
+| Docker Compose | Data·External·Inference·MediaMTX·Nginx |
+| SQLite 검색 인덱스 | Data Service 단독 소유, Recording/Event/ACL |
+| 사용자 영상 | JWT/ACL로 보호된 HTTPS HLS와 Playback |
+| Edge 관리 | 상태/제어 8003, 복구 8002의 인증된 HTTP API |
 
-### 4.2 목표 기준
+### 4.2 정합화 목표 기준
 
 목표 시스템은 다음 기준을 적용하여야 한다.
 
@@ -119,7 +119,7 @@ AI_CCTV는 Raspberry Pi 기반 카메라 장치에서 영상을 수집하고 중
 | 사용자 인증 | JWT 기반 로그인 |
 | 서비스 규모 | 영상·데이터·추론·외부의 4개 논리 역할 |
 | 배포 컨테이너 | MediaMTX, Inference, Data, External, Nginx |
-| 카메라 수 | 최소 2대 검증, 기본 목표 최대 4대 |
+| 카메라 수 | 최소 2대 검증, 기본 목표 최대 4대 동시 활성 |
 
 MediaMTX의 현재 검증 기준은 `v1.9.0`이다. 중앙화 과정에서 버전을 변경할 경우 HLS, 녹화, Playback, Hook, JWT 또는 HTTP 인증 연동을 회귀 테스트한 뒤 이미지 태그 또는 digest를 고정하여야 한다.
 
@@ -140,7 +140,7 @@ MediaMTX의 현재 검증 기준은 `v1.9.0`이다. 중앙화 과정에서 버�
 | Data Service | SQLite와 검색 메타데이터를 단독 관리하는 서비스 |
 | External Service | 로그인, JWT, 사용자용 REST API를 제공하는 서비스 |
 | Inference Service | RTSP 스트림을 읽고 탐지·추적·VLM 분석을 수행하는 서비스 |
-| Configurator | 서버 설치 및 설정을 GUI/CLI로 관리하는 프로그램 |
+| Configurator | 서버 설치·최초 설정과 Edge/카메라 운영 설정을 GUI/CLI로 관리하는 프로그램 |
 
 ---
 
@@ -179,6 +179,17 @@ MediaMTX의 현재 검증 기준은 `v1.9.0`이다. 중앙화 과정에서 버�
 - 모델과 서비스 버전 교체
 - 백업과 복구 수행
 
+### 6.4 UI 책임 경계
+
+| UI | 공식 역할 |
+| --- | --- |
+| PyQt/CLI Configurator | 서버 설치·최초 설정, Edge/카메라 등록, 상태 조회, 카메라별 HD/FHD 설정, 서비스 운영 |
+| 기존 `client_code/` PyQt 관제 UI | Legacy 개발·진단 참고용 |
+| 외부 사용자 애플리케이션 | 별도 프로젝트에서 REST/HLS/Playback을 사용하여 구현 |
+| Web UI·모바일 네이티브 앱 | 현재 저장소 구현 범위 제외 |
+
+Configurator는 일반 사용자의 실시간·저장 영상 관제 UI를 포함하지 않는다.
+
 ---
 
 ## 7. 운영 환경 및 제약
@@ -202,7 +213,7 @@ MediaMTX의 현재 검증 기준은 `v1.9.0`이다. 중앙화 과정에서 버�
 ### 7.3 네트워크 제약
 
 - Edge와 중앙 서버는 기본적으로 동일 LAN에 위치한다.
-- RTSP 8554 포트는 LAN 또는 신뢰 네트워크에서만 접근 가능하여야 한다.
+- RTSP 8554 포트는 기본적으로 `127.0.0.1`에만 Bind하고, 원격 Edge 수신이 필요한 설치에서만 중앙 서버의 신뢰 LAN IP를 명시하여 접근 가능하여야 한다.
 - 인터넷에는 Nginx의 80/443 포트만 노출하는 것을 원칙으로 한다.
 - Tailscale은 사용하지 않는다.
 - 외부 접속에 필요한 공인 IP, DNS, Router Port Forwarding 또는 터널링은 배포 환경 책임으로 둔다.
@@ -252,17 +263,28 @@ flowchart LR
 | FR-INSTALL-008 | Configurator는 Docker Compose 서비스를 시작, 중지, 재시작하고 상태를 표시할 수 있어야 한다. |
 | FR-INSTALL-009 | Edge 배포본은 ARM64 `.deb` 패키지 또는 동등한 설치 스크립트를 제공하여야 한다. |
 | FR-INSTALL-010 | Edge 설치 후 `ai-cctv-edge setup` 또는 동등한 대화형 설정 명령을 제공하여야 한다. |
-| FR-INSTALL-011 | Edge 설정 도구는 장치 ID, 카메라 ID, 중앙 서버 주소, 해상도, FPS, bitrate, 백업 위치를 입력받아야 한다. |
+| FR-INSTALL-011 | Edge 설정 도구는 장치 ID, 카메라 ID, 중앙 서버 주소, 영상 Profile과 백업 위치를 입력받아야 한다. |
 | FR-INSTALL-012 | Edge 설정 도구는 카메라, 네트워크, 중앙 RTSP 경로를 시험하는 진단 기능을 제공하여야 한다. |
 | FR-INSTALL-013 | 서버 GUI와 서버 CLI는 동일한 Config Core 및 Validation 규칙을 사용하여야 한다. |
 | FR-INSTALL-014 | 설치와 설정 과정에서 사용자가 `.env`, Compose YAML, MediaMTX YAML을 직접 편집하도록 요구하지 않아야 한다. |
+| FR-INSTALL-015 | Configurator는 Edge Device ID, 상태/제어 관리 주소, 복구 전용 주소와 32자 이상의 공용 Edge Bearer 인증정보로 Edge를 등록·수정할 수 있어야 한다. |
+| FR-INSTALL-016 | Configurator는 카메라별 Edge 상태와 마지막 상태 시각을 조회할 수 있어야 한다. |
+| FR-INSTALL-017 | Configurator는 Edge가 지원하는 영상 Profile과 현재·요청 Profile을 조회할 수 있어야 한다. |
+| FR-INSTALL-018 | Configurator는 카메라별 `hd` 또는 `fhd` Profile을 요청하고 실제 적용 결과 이후에만 현재 Profile을 갱신하여야 한다. |
+| FR-INSTALL-019 | Profile 변경 실패 시 Configurator는 오류 코드와 변경 불가 사유를 표시하여야 한다. |
+| FR-INSTALL-020 | Edge 인증정보, 관리자 비밀번호, JWT와 게시 자격증명을 GUI 결과·CLI 출력·로그에 노출하지 않아야 한다. |
+| FR-INSTALL-021 | GUI와 CLI의 Edge 관리 기능은 Nginx 공개 API와 동일한 관리자 JWT 계약을 사용하여야 한다. |
+| FR-INSTALL-022 | Edge 등록 또는 재발급에서 한 번 반환되는 RTSP 게시 자격증명은 해당 Camera만 포함한 `0600`/제한 DACL 파일로 원자 저장하고 화면·표준출력·로그에는 표시하지 않아야 한다. |
+| FR-INSTALL-023 | Configurator는 저장한 게시 자격증명 파일을 일치하는 Edge setup으로 전달하도록 관리자에게 안내하여야 한다. |
+| FR-INSTALL-024 | Configurator GUI/CLI는 운영 공개 HTTPS Origin을 입력·검증하여 `PUBLIC_BASE_URL`을 생성하고, 운영자가 `.env`를 직접 편집하지 않아도 Live/Playback Absolute URL을 설정할 수 있어야 한다. |
+| FR-INSTALL-025 | Configurator GUI/CLI는 관리자 API를 통해 Camera 게시 자격증명을 안전하게 재발급하고 새 전달 파일 위치만 표시할 수 있어야 한다. |
 
 ### 9.2 Edge 영상 취득 및 RTSP 제공
 
 | ID | 요구사항 |
 | --- | --- |
 | FR-EDGE-001 | Edge는 카메라 영상을 취득하여 H.264로 인코딩하여야 한다. |
-| FR-EDGE-002 | 기본 영상 설정은 1920×1080, 30fps, 4Mbps로 하되 Configurator에서 변경할 수 있어야 한다. |
+| FR-EDGE-002 | 기본 `hd` Profile은 1280×720, 30fps, 2,000kbps H.264여야 한다. |
 | FR-EDGE-003 | Edge는 카메라마다 고유한 Camera ID와 Stream Path를 사용하여야 한다. |
 | FR-EDGE-004 | Camera ID는 `^[a-z0-9][a-z0-9_-]{0,63}$` 형식을 따라야 한다. |
 | FR-EDGE-005 | Edge는 중앙 MediaMTX가 읽거나 수신할 수 있는 RTSP/1.0 스트림을 제공하여야 한다. |
@@ -271,8 +293,19 @@ flowchart LR
 | FR-EDGE-008 | Edge 서비스는 부팅 후 자동으로 시작하고 비정상 종료 시 재시작할 수 있어야 한다. |
 | FR-EDGE-009 | Edge는 동일 Camera ID의 중복 실행을 방지하여야 한다. |
 | FR-EDGE-010 | Edge는 상태, 최근 오류, 현재 중앙 서버 연결 여부를 CLI로 확인할 수 있어야 한다. |
+| FR-EDGE-011 | 선택 `fhd` Profile은 1920×1080, 30fps, 4,000kbps H.264로 정의하여야 한다. |
+| FR-EDGE-012 | Edge는 `hd`, `fhd` 중 장치가 실제 지원하는 Profile 목록과 현재 Profile을 HTTP Capability API로 반환하여야 한다. |
+| FR-EDGE-013 | 지원하지 않는 Profile 요청은 기존 Pipeline을 유지한 채 `UNSUPPORTED_VIDEO_PROFILE`로 거부하여야 한다. |
+| FR-EDGE-014 | Profile 변경은 새 Pipeline의 프레임 생성과 RTSP 게시를 확인한 후 확정하고 실패 시 이전 Profile로 Rollback하여야 한다. |
+| FR-EDGE-015 | 한 카메라는 한 시점에 하나의 Profile만 송출하며 HD/FHD 동시 Adaptive HLS는 현재 범위에서 제외한다. |
+| FR-EDGE-016 | Edge는 CPU, Memory, 저장공간, UPS Battery, 외부 전원, Camera 입력과 중앙 연결 상태를 인증된 HTTP Status API로 제공하여야 한다. |
+| FR-EDGE-017 | Camera 입력은 프로세스 생존 여부가 아니라 마지막 실제 녹화 Frame 활동을 기준으로 Watchdog하여야 한다. |
+| FR-EDGE-018 | Camera Frame Timeout과 복구는 각각 `camera_input_lost`, `camera_input_restored`로 기록하고 중앙 연결 장애와 구분하여야 한다. |
+| FR-EDGE-019 | 외부 전원 전환과 Battery 임계치는 `external_power_lost`, `external_power_restored`, `battery_low`, `battery_critical`로 기록하여야 한다. |
+| FR-EDGE-020 | Recovery API는 Capture Pipeline과 별도 systemd 생명주기로 실행되어 Capture 장애 중에도 기존 Segment를 제공하여야 한다. |
+| FR-EDGE-021 | Profile Capability는 설정 선언만 신뢰하지 않고 기본 Camera(index 0)의 센서 Mode 해상도와 최대 FPS 및 Encoder 존재를 전환 전에 확인하여야 한다. Mode 판정이 불가능하면 `CAPABILITY_UNKNOWN`으로 거부하여야 한다. |
 
-RTSP 게시 방식은 GStreamer RTSP client publish, Edge RTSP server를 중앙 MediaMTX가 pull하는 방식 등으로 구현할 수 있다. 외부 인터페이스는 RTSP/1.0과 Camera ID 경로 규칙을 만족하여야 한다.
+RTSP 게시 방식은 GStreamer RTSP client publish, Edge RTSP server를 중앙 MediaMTX가 pull하는 방식 등으로 구현할 수 있다. Edge–중앙 내부 영상 인터페이스는 RTSP/1.0과 Camera ID 경로 규칙을 만족하여야 한다. 일반 사용자에게 제공하는 영상 인터페이스는 HLS/Playback뿐이다.
 
 ### 9.3 Edge 로컬 백업 및 복구
 
@@ -286,6 +319,11 @@ RTSP 게시 방식은 GStreamer RTSP client publish, Edge RTSP server를 중앙 
 | FR-RECOVERY-006 | 복구 전송된 Segment는 중앙 저장소에 수용되고 SQLite에 `edge_recovery` 출처로 인덱싱되어야 한다. |
 | FR-RECOVERY-007 | 중복 복구 요청은 동일 파일을 중복 등록하지 않아야 한다. |
 | FR-RECOVERY-008 | 복구 성공 후 Edge 파일 삭제 여부는 보관 정책에 따라 결정하며 기본값은 즉시 삭제하지 않음으로 한다. |
+| FR-RECOVERY-009 | 중앙은 Edge Publisher의 `central_connection_lost`와 `central_connection_restored`를 장애 구간의 권위 있는 경계로 사용하여 Recovery Job을 자동 생성·실행하여야 한다. |
+| FR-RECOVERY-010 | Recovery Job 상태는 `detected`, `waiting_for_recovery`, `downloading`, `indexing`, `completed`, `failed`로 관리하고 제한된 지수 Backoff 재시도를 제공하여야 한다. |
+| FR-RECOVERY-011 | 중복 또는 순서가 뒤바뀐 동일 장애 보고는 시작 시각의 최솟값과 종료 시각의 최댓값으로 병합하여 복구 구간을 축소하지 않아야 한다. |
+| FR-RECOVERY-012 | Manifest의 파일 크기와 SHA-256은 다운로드 결과와 반드시 일치하여야 하며 검증 전 파일을 최종 경로에 노출하지 않아야 한다. |
+| FR-RECOVERY-013 | Inference의 MediaMTX 소비 장애는 `inference_stream_lost/restored`로 구분하며 Edge Segment 복구를 시작하지 않아야 한다. |
 
 ### 9.4 중앙 MediaMTX 및 멀티카메라
 
@@ -294,7 +332,7 @@ RTSP 게시 방식은 GStreamer RTSP client publish, Edge RTSP server를 중앙 
 | FR-MEDIA-001 | 중앙 서버는 MediaMTX를 단일 미디어 게이트웨이로 실행하여야 한다. |
 | FR-MEDIA-002 | MediaMTX는 Camera ID와 동일한 Stream Path를 사용하여 스트림을 분리하여야 한다. |
 | FR-MEDIA-003 | 시스템은 최소 2개의 동시 카메라 스트림을 지원하여야 한다. |
-| FR-MEDIA-004 | 기본 목표 환경에서 최대 4개의 동시 카메라 스트림을 등록할 수 있어야 한다. |
+| FR-MEDIA-004 | 기본 목표 환경에서 최대 4개의 카메라 스트림을 동시에 활성화할 수 있어야 하며, 이력을 보존한 비활성 Camera는 활성 한도에 포함하지 않아야 한다. |
 | FR-MEDIA-005 | MediaMTX는 내부 추론 서비스에 RTSP 스트림을 제공하여야 한다. |
 | FR-MEDIA-006 | MediaMTX는 사용자용 HLS 스트림을 생성하여야 한다. |
 | FR-MEDIA-007 | MediaMTX는 카메라별 중앙 녹화를 수행하여야 한다. |
@@ -303,6 +341,7 @@ RTSP 게시 방식은 GStreamer RTSP client publish, Edge RTSP server를 중앙 
 | FR-MEDIA-010 | MediaMTX 설정 변경은 검증 후 원자적으로 적용하거나 Hot Reload를 사용하여야 한다. |
 | FR-MEDIA-011 | 카메라 연결 상태는 `online`, `offline`, `degraded`, `disabled` 중 하나로 관리하여야 한다. |
 | FR-MEDIA-012 | 동일 Stream Path에 다른 장치가 무단 게시하지 못하도록 게시 인증을 적용하여야 한다. |
+| FR-MEDIA-013 | MediaMTX RTSP read는 Camera 게시 자격증명과 다른 Inference 전용 reader 자격증명을 요구하고 External 인증 callback과 Inference만 그 자격증명을 공유하여야 한다. |
 
 ### 9.5 중앙 영상 저장
 
@@ -316,7 +355,7 @@ RTSP 게시 방식은 GStreamer RTSP client publish, Edge RTSP server를 중앙 
 | FR-STORAGE-006 | 완료되지 않은 Segment와 완료된 Segment를 상태 또는 임시 확장자로 구분하여야 한다. |
 | FR-STORAGE-007 | Segment 완료 후 시작 시각, 종료 시각, Camera ID, 상대 경로, 크기, 상태를 DB에 기록하여야 한다. |
 | FR-STORAGE-008 | 파일 검색은 파일명 전체 순회가 아니라 SQLite 인덱스를 우선 사용하여야 한다. |
-| FR-STORAGE-009 | 저장 파일 삭제 시 DB 상태도 트랜잭션 또는 보상 처리로 동기화하여야 한다. |
+| FR-STORAGE-009 | 저장 파일 삭제 시 DB 상태도 보상 처리로 동기화하고, 중단된 `deleting` 상태는 시작 시와 주기 Reconciliation에서 파일 유무에 따라 재시도 또는 `deleted`로 수렴하여야 한다. |
 | FR-STORAGE-010 | 컨테이너를 삭제하거나 재생성하여도 영상 파일과 DB가 유지되어야 한다. |
 | FR-STORAGE-011 | 보관 기간은 일 단위로 설정할 수 있어야 한다. |
 | FR-STORAGE-012 | 저장 공간 임계치 도달 시 경고를 생성하여야 한다. |
@@ -354,7 +393,7 @@ runtime/
 | FR-DATA-009 | Event 유형과 발생 시각에 대한 인덱스를 생성하여야 한다. |
 | FR-DATA-010 | 파일 경로는 가능한 한 Storage Root 기준 상대 경로로 저장하여야 한다. |
 | FR-DATA-011 | SQLite 백업과 Schema Migration 절차를 제공하여야 한다. |
-| FR-DATA-012 | 파일이 DB에는 있으나 실제로 없거나, 파일은 있으나 DB에 없는 경우를 검사하는 Reconciliation 기능을 제공하여야 한다. |
+| FR-DATA-012 | 파일이 DB에는 있으나 실제로 없거나, 파일은 있으나 DB에 없는 경우를 검사하는 Reconciliation 기능을 제공하여야 한다. 표준 MediaMTX 경로의 settle된 완료 파일은 Hook 유실을 보상하도록 멱등 인덱싱하고, 검증할 수 없는 파일은 `orphaned`로 보고하여야 한다. |
 
 ### 9.7 AI 추론 및 이벤트
 
@@ -365,7 +404,7 @@ runtime/
 | FR-AI-003 | 사람 탐지는 Ultralytics YOLO 계열 모델을 기본 구현으로 사용할 수 있어야 한다. |
 | FR-AI-004 | 객체 추적은 ByteTrack 또는 동등한 추적기를 사용할 수 있어야 한다. |
 | FR-AI-005 | 추론 이벤트는 Camera ID, Event Type, 발생 시각, Person/Track ID, Confidence를 포함하여야 한다. |
-| FR-AI-006 | 출현, 사라짐, 네트워크 장애, 네트워크 복구 이벤트를 지원하여야 한다. |
+| FR-AI-006 | 출현·사라짐 Event와 추론 소비자 상태 `inference_stream_lost`, `inference_stream_restored`를 지원하여야 한다. Legacy `network_failure/recovery`는 입력 호환용 Alias로만 허용한다. |
 | FR-AI-007 | 선택적으로 VLM 분석 결과를 Event Metadata에 추가할 수 있어야 한다. |
 | FR-AI-008 | VLM 실패가 기본 녹화와 실시간 스트림을 중단시키지 않아야 한다. |
 | FR-AI-009 | AI 모델 로딩 실패 시 해당 카메라는 비추론 CCTV 모드로 계속 동작할 수 있어야 한다. |
@@ -400,7 +439,7 @@ runtime/
 | FR-AUTH-007 | 초기 구현에서 HMAC을 사용할 경우 256-bit 이상의 난수 Secret을 사용하여야 한다. |
 | FR-AUTH-008 | Access Token 만료 시간은 설정 가능하여야 하며 기본값은 15분을 권장한다. |
 | FR-AUTH-009 | Refresh Token을 도입하는 경우 서버에서 철회할 수 있어야 한다. |
-| FR-AUTH-010 | 웹 클라이언트는 HLS Segment 요청에도 인증이 유지되도록 HttpOnly Secure Cookie 방식을 우선 고려하여야 한다. |
+| FR-AUTH-010 | Browser/HLS 연속 재생은 로그인 응답이 발급한 HttpOnly Secure Access Cookie를 Manifest와 모든 Segment 요청에 사용하여야 한다. |
 | FR-AUTH-011 | API 클라이언트는 `Authorization: Bearer <token>`을 사용할 수 있어야 한다. |
 | FR-AUTH-012 | 역할은 최소 `admin`, `viewer`를 지원하여야 한다. |
 | FR-AUTH-013 | 카메라 설정, 사용자 관리, 모델 설정은 관리자만 수행할 수 있어야 한다. |
@@ -437,6 +476,7 @@ runtime/
 | FR-NGINX-009 | HLS 전송은 불필요한 Python 파일 복사를 피하고 Nginx 또는 MediaMTX가 직접 담당하여야 한다. |
 | FR-NGINX-010 | Nginx는 영상 프레임 전달용 서비스 버스나 이벤트 큐로 사용하지 않아야 한다. |
 | FR-NGINX-011 | Nginx는 `/internal/` 경로를 Docker 내부 네트워크에만 제공하고 Media, Inference, External Service의 제어·메타데이터 요청을 Data Service로 중계하여야 한다. |
+| FR-NGINX-012 | HLS/Playback 인증 전 원본 URI의 인코딩, 역슬래시, 중복 Slash와 dot Segment를 엄격히 거부하여 정규화 차이를 이용한 ACL 우회를 막아야 한다. |
 
 ### 9.12 서비스 운영과 진단
 
@@ -451,6 +491,9 @@ runtime/
 | FR-OPS-007 | 시스템은 저장 공간 사용량과 카메라 연결 상태를 조회할 수 있어야 한다. |
 | FR-OPS-008 | 비정상 종료 후 완료된 Segment와 DB가 손상되지 않아야 한다. |
 | FR-OPS-009 | DB 손상 또는 영상 디렉터리 접근 불가 시 서비스를 무조건 계속 실행하지 말고 명확한 상태를 보고하여야 한다. |
+| FR-OPS-010 | 중앙 Status Collector는 기본 5초 주기로 각 Edge의 Status와 Event Journal을 수집하여 Runtime 상태와 전이 Event를 Data Service에 저장하여야 한다. |
+| FR-OPS-011 | External Service는 권한이 있는 사용자에게 `GET /api/v1/cameras/{camera_id}/status`로 저장된 Runtime 상태를 제공하여야 한다. |
+| FR-OPS-012 | 운영 Event는 사람, Camera 입력, 중앙 연결, 추론 소비자, 외부 전원, Battery, 저장공간, Edge 가용성 및 영상 Profile 변경 원인을 서로 다른 Event Type으로 보존하여야 한다. |
 
 ### 9.13 업데이트와 제거
 
@@ -467,20 +510,23 @@ runtime/
 
 ## 10. 외부 인터페이스 요구사항
 
-### 10.1 RTSP 인터페이스
+### 10.1 Edge–중앙 내부 RTSP 인터페이스
 
 | 항목 | 기준 |
 | --- | --- |
 | 프로토콜 | RTSP/1.0 |
 | 기본 포트 | 8554/TCP |
 | 영상 코덱 | H.264 |
-| 기본 해상도 | 1920×1080 |
+| 기본 Profile | `hd` |
+| 기본 해상도 | 1280×720 |
 | 기본 FPS | 30 |
-| 기본 Bitrate | 4Mbps |
+| 기본 Bitrate | 2Mbps |
+| 선택 Profile | `fhd`: 1920×1080@30fps, 4Mbps |
 | 경로 예 | `rtsp://central-server:8554/cam-001` |
 | 권장 Transport | LAN 환경에서 TCP 우선 검증 |
+| Inference read 인증 | 전용 `MEDIA_READ_USERNAME`/`MEDIA_READ_PASSWORD`; URI userinfo percent-encoding |
 
-RTSP 포트는 외부 사용자용 인터넷 인터페이스가 아니다.
+RTSP 포트는 외부 사용자용 인터넷 인터페이스가 아니다. Host bind 기본값은 loopback이며 원격 Edge 게시가 필요할 때만 신뢰 LAN IP를 명시한다.
 
 ### 10.2 실시간 HLS 인터페이스
 
@@ -490,8 +536,9 @@ RTSP 포트는 외부 사용자용 인터넷 인터페이스가 아니다.
 | 외부 진입점 | Nginx 443 |
 | 내부 원본 | MediaMTX HLS 8888 |
 | 경로 예 | `/hls/cam-001/index.m3u8` |
-| 인증 | JWT Cookie 또는 Bearer 검증 |
-| 실시간 Variant | fMP4 또는 Low-Latency HLS 중 호환성 시험 후 고정 |
+| 공식 연속 재생 인증 | 로그인 시 발급되는 HttpOnly Secure Access Cookie |
+| API/네이티브 대안 | Playlist와 모든 Segment 요청에 Bearer Access Token 전달 |
+| 실시간 Variant | MediaMTX 일반 fMP4 HLS |
 
 ### 10.3 저장 영상 Playback 인터페이스
 
@@ -502,8 +549,8 @@ RTSP 포트는 외부 사용자용 인터넷 인터페이스가 아니다.
 | 내부 원본 | MediaMTX Playback 9996 또는 동등한 Playback Adapter |
 | 검색 기준 | Camera ID와 UTC 시간 범위 |
 | 초기 응답 형식 | fMP4 또는 MP4 |
-| 인증 | JWT Cookie 또는 Bearer 검증 |
-| Range 요청 | 사용 Client 호환성 시험 후 지원 |
+| 인증 | Browser는 HttpOnly Secure Cookie, 헤더 지원 Client는 요청별 Bearer 검증 |
+| Range 요청 | `Range`의 `200/206/416`과 ETag 기반 `If-Range` 지원 |
 
 실시간 사용자 영상은 HLS로 고정한다. 저장 영상 HLS VOD는 초기 필수 경로로 간주하지 않으며, 필요 시 fMP4 Segment playlist 생성기 또는 제한된 FFmpeg 변환 작업으로 확장한다.
 
@@ -520,37 +567,104 @@ RTSP 포트는 외부 사용자용 인터넷 인터페이스가 아니다.
 | POST | `/api/v1/cameras` | 카메라 등록 | Admin |
 | GET | `/api/v1/cameras/{camera_id}` | 카메라 상세 | Viewer |
 | PATCH | `/api/v1/cameras/{camera_id}` | 카메라 수정 | Admin |
+| DELETE | `/api/v1/cameras/{camera_id}` | 이력 사전검사 후 카메라 삭제 | Admin |
 | GET | `/api/v1/cameras/{camera_id}/live` | Live HLS 정보 | Viewer |
+| GET | `/api/v1/cameras/{camera_id}/status` | Edge·카메라 Runtime 상태 | Viewer |
+| GET | `/api/v1/cameras/{camera_id}/video-profile` | 현재·요청·지원 Profile | Viewer |
+| PATCH | `/api/v1/cameras/{camera_id}/video-profile` | `hd`/`fhd` 변경 | Admin |
+| POST | `/api/v1/cameras/{camera_id}/publish-credentials/rotate` | RTSP 게시 자격증명 안전 재발급 | Admin |
 | GET | `/api/v1/recordings` | 저장 영상 검색 | Viewer |
 | GET | `/api/v1/recordings/{id}` | Segment 상세 | Viewer |
 | GET | `/api/v1/recordings/{id}/playback` | Playback 정보 | Viewer |
+| GET | `/api/v1/recordings/{id}/content` | Edge 복구 MPEG-TS의 인증·ACL·Range 전송 | Viewer |
 | GET | `/api/v1/events` | 이벤트 검색 | Viewer |
 | GET | `/api/v1/events/{id}` | 이벤트 상세 | Viewer |
+| GET | `/api/v1/recovery-jobs` | 자동 복구 작업 목록·결과 | Admin |
 | GET | `/api/v1/system/status` | 시스템 상태 | Admin |
-| GET | `/health/live` | 프로세스 생존 확인 | Internal |
-| GET | `/health/ready` | 의존성 준비 확인 | Internal |
+| GET | `/health/live` | 프로세스 생존 확인; 공개 Schema 제외 | Internal |
+| GET | `/health/ready` | 의존성 준비 확인; 공개 Schema 제외 | Internal |
+| GET | `/api/v1/openapi.json` | OpenAPI 3 Schema | Public schema |
+| GET | `/api/v1/docs` | 대화형 API 문서 | Public schema |
 
-API 오류 응답은 다음 형식을 권장한다.
+카메라 등록·수정의 관리자 입력은 `edge_device_id`, `edge_management_url`, `edge_recovery_url`, `edge_auth_token`을 포함할 수 있다. 관리 URL은 상태·제어·이벤트(기본 8003), 복구 URL은 `/v1/recovery`(기본 8002)용이며 어느 한 URL에서 다른 Port를 추론하지 않는다. Configurator의 신규 Edge 등록은 네 필드를 모두 요구한다. 일반 Camera Bootstrap은 Edge Metadata 전체를 생략할 수 있지만 일부만 포함한 신규 등록은 거부한다. 기존 DB의 불완전 Metadata는 읽을 수 있으나 제어·복구를 `CAPABILITY_UNKNOWN` 또는 `failed`로 표시하고 `edge-update`로 완성한다. `edge_auth_token`, Edge 내부 주소, RTSP 게시 자격증명은 일반 카메라·상태·Profile 응답에 포함하지 않는다. 서버는 `PUBLIC_BASE_URL`이 설정되면 Live/Playback URL을 Absolute HTTPS URL로 반환하고 개발 설정에서만 Origin 기준 상대 경로를 반환할 수 있다.
+
+Profile 조회와 상태 조회의 최소 응답은 다음과 같다.
+
+```json
+{
+  "camera_id": "cam-001",
+  "current_profile": "hd",
+  "desired_profile": "hd",
+  "supported_profiles": ["hd", "fhd"],
+  "edge_online": true,
+  "last_error_code": null
+}
+```
+
+```json
+{
+  "camera_id": "cam-001",
+  "online": true,
+  "cpu_percent": 32.5,
+  "memory_percent": 58.1,
+  "storage_percent": 71.2,
+  "battery_percent": 84,
+  "power_source": "external",
+  "camera_input": "online",
+  "central_connection_status": "online",
+  "current_video_profile": "hd",
+  "last_seen_at": "2026-08-23T07:20:00Z",
+  "last_error_code": null
+}
+```
+
+중앙이 분류하는 운영 Event와 최소 Metadata는 다음과 같다. 외부 연동 Client는 향후 Event Type과 알 수 없는 Metadata 필드를 손실 없이 보존하여야 한다.
+
+| Event Type | 의미 | 주요 Metadata |
+| --- | --- | --- |
+| `person_appeared`, `person_disappeared` | 사람 Track 전이 | `track_id`, `confidence` |
+| `camera_input_lost`, `camera_input_restored` | Edge Camera Frame 중단·복구 | `reason`, `timeout_seconds` |
+| `central_connection_lost`, `central_connection_restored` | Edge Publisher와 중앙 MediaMTX 연결 전이; 자동 복구 권위 Event | `reason` |
+| `inference_stream_lost`, `inference_stream_restored` | MediaMTX→Inference 소비 전이; 복구 비권위 | `reason` |
+| `external_power_lost`, `external_power_restored` | 외부 전원과 Battery 전환 | `battery_percent`, `power_source` |
+| `battery_low`, `battery_critical` | Battery 임계치 진입 | `battery_percent`, `power_source` |
+| `storage_warning`, `storage_critical` | Edge 저장공간 임계치 진입 | `storage_percent` |
+| `edge_offline`, `edge_online` | Edge HTTP 가용성 전이 | `source` |
+| `video_profile_changed`, `video_profile_change_failed` | Profile 적용 결과 | 이전·요청·현재 Profile, `reason_code` |
+
+일반 API 오류는 FastAPI의 UTF-8 JSON `{"detail": "..."}` 형식을 사용하고 입력 검증 오류의 `detail`은 항목 배열일 수 있다. Profile 적용 거부처럼 클라이언트 분기가 필요한 오류는 HTTP 상태와 안정된 `error.code`를 함께 제공하고 Edge의 `reason_code`를 이 필드로 정규화한다.
 
 ```json
 {
   "error": {
-    "code": "RECORDING_NOT_FOUND",
-    "message": "요청한 영상 구간을 찾을 수 없습니다.",
-    "details": {}
+    "code": "UNSUPPORTED_VIDEO_PROFILE",
+    "message": "The Edge device does not support the requested video profile.",
+    "details": {
+      "requested_profile": "fhd",
+      "supported_profiles": ["hd"]
+    }
   }
 }
 ```
 
+Live/Playback URL은 `PUBLIC_BASE_URL` 설정 시 Nginx HTTPS Origin을 포함한 Absolute URL이며, 개발용 미설정 환경에서만 동일 Origin 기준 상대 경로일 수 있다. 모든 검색·응답 시각은 timezone이 포함된 RFC 3339를 사용하고 서버 저장·응답의 표준 표현은 UTC `Z`이다. 구체적인 요청·응답, HLS 인증과 오류 처리는 `docs/external-app-integration.md`를 정본으로 한다.
+
+`playback_url`은 Client가 Prefix를 조합하지 않는 불투명한 값이다. `central` fMP4는 MediaMTX `/playback`, `edge_recovery` MPEG-TS는 `/api/v1/recordings/{id}/content`를 사용하며 후자는 Camera ACL, `video/mp2t`, Byte Range `200/206/416`과 ETag `If-Range` 계약을 적용한다. Camera 비활성화는 새 RTSP 인증과 Live/HLS를 먼저 차단한 뒤 해당 MediaMTX RTSP publisher session을 종료한다. 이력이 있는 삭제는 Media 상태를 바꾸기 전에 `CAMERA_HAS_HISTORY`로 거부하여 기존 활성 상태를 그대로 유지한다. 게시 자격증명 재발급은 Camera를 일시 차단하고 기존 Publisher를 종료한 뒤 새 Argon2 Hash를 저장해 원문을 한 번만 반환하며, 성공 시 요청 전 활성 상태로 복원한다.
+
 ### 10.5 내부 서비스 인터페이스
 
 - Inference Service → Nginx 내부 경로 → Data Service: 이벤트 생성
-- MediaMTX Segment Complete Hook 또는 Indexer → Nginx 내부 경로 → Data Service: Segment 등록
+- MediaMTX Segment Complete Hook → Nginx 내부 경로 → Data Service: 완료 Segment 등록
 - External Service → Nginx 내부 경로 → Data Service: 카메라·영상·이벤트 조회
 - Nginx → External Service: JWT 검증 Subrequest
 - Configurator → Docker CLI/Compose: 서비스 관리
+- Configurator → Nginx 공개 HTTPS → External Service: Edge 등록·상태·Profile·게시 자격증명 운영
+- External Service → Edge 8003: 공용 Edge Bearer로 상태·Capability·Profile 제어
+- Recovery Coordinator → Edge 8002: 공용 Edge Bearer로 `/v1/recovery` Manifest/File 조회
 
-내부 API는 Docker Network에서만 접근 가능하여야 한다.
+내부 API는 Docker Network에서만 접근 가능하여야 하고, External·Inference·Media
+Hook·Recovery에는 서로 다른 Token을 주입하여 호출자별 Route allowlist를 강제하여야
+한다. 모든 내부 HTTP Client는 환경 프록시와 Redirect를 사용하지 않아야 한다.
 
 ---
 
@@ -583,7 +697,21 @@ API 오류 응답은 다음 형식을 권장한다.
 | `created_at` | text/integer | UTC |
 | `updated_at` | text/integer | UTC |
 
-### 11.3 `recording_segments`
+### 11.3 Edge와 Runtime 상태
+
+영구 Camera 설정, Edge 접속 Secret, 실행 상태와 요청/적용 Profile을 분리한다.
+
+| 테이블 | 주요 필드 | 원칙 |
+| --- | --- | --- |
+| `edge_devices` | `edge_device_id`, `management_url`, `recovery_url`, `auth_token` | Token과 내부 URL은 외부 응답에서 제거 |
+| `edge_runtime_status` | `online`, CPU/Memory/Storage/Battery, `power_source`, `last_seen_at`, `last_error_code` | 센서 미지원 값은 nullable |
+| `camera_runtime_status` | `camera_input_status`, `central_connection_status`, `current_video_profile`, `event_cursor`, `last_seen_at`, `last_error_code` | Edge 연결과 Camera 입력 상태를 분리 |
+| `camera_video_profiles` | `current_profile`, `desired_profile`, `supported_profiles_json`, `encoder`, `last_error_code` | Edge 적용 성공 후에만 현재값 확정 |
+| `recovery_jobs` | 장애 시작/종료 UTC, 상태, 시도 횟수, 다음 재시도, 오류, 결과 요약 | Camera/장애 시작 시각 조합 중복 방지 |
+
+Recovery 상태는 `detected`, `waiting_for_recovery`, `downloading`, `indexing`, `completed`, `failed`만 사용한다. Runtime과 Event의 모든 시각은 UTC로 저장한다.
+
+### 11.4 `recording_segments`
 
 | 필드 | 타입 | 제약 |
 | --- | --- | --- |
@@ -608,7 +736,7 @@ CREATE INDEX idx_segments_camera_time
 ON recording_segments(camera_id, start_time, end_time);
 ```
 
-### 11.4 `events`
+### 11.5 `events`
 
 | 필드 | 타입 | 제약 |
 | --- | --- | --- |
@@ -630,7 +758,7 @@ CREATE INDEX idx_events_camera_time_type
 ON events(camera_id, occurred_at, event_type);
 ```
 
-### 11.5 데이터 일관성
+### 11.6 데이터 일관성
 
 - Segment 파일 생성 완료 후 DB에 `ready` 상태로 등록하여야 한다.
 - 이벤트 시각과 Segment가 겹치면 `recording_segment_id`를 연결하여야 한다.
@@ -645,12 +773,22 @@ ON events(camera_id, occurred_at, event_type);
 
 | ID | 요구사항 |
 | --- | --- |
-| NFR-PERF-001 | 기준 서버에서 2개의 1080p@30fps H.264 스트림을 동시에 수신·중계·저장할 수 있어야 한다. |
+| NFR-PERF-001 | 기준 서버에서 4개의 기본 `hd` 720p@30fps H.264 스트림(명목 입력 합계 8Mbps)을 동시에 수신·중계·저장할 수 있어야 한다. |
 | NFR-PERF-002 | 4개 카메라 지원은 검증 대상이며 하드웨어 요구사항과 실제 추론 FPS를 문서화하여야 한다. |
 | NFR-PERF-003 | LAN 기준 Live HLS 재생은 요청 후 10초 이내 시작하는 것을 초기 합격 기준으로 한다. |
 | NFR-PERF-004 | 30일분 4카메라 Segment 메타데이터에서 시간 범위 검색은 기준 데이터셋에서 2초 이내 응답하여야 한다. |
 | NFR-PERF-005 | 이벤트 목록 검색은 기준 데이터셋에서 2초 이내 응답하여야 한다. |
 | NFR-PERF-006 | AI 추론 지연이 녹화와 HLS 전달을 차단하지 않아야 한다. |
+| NFR-PERF-007 | 4개의 선택 `fhd` Stream은 명목 입력 합계 16Mbps로 별도 실환경 검증하여야 한다. |
+
+명목 연속 녹화량은 `bitrate × seconds ÷ 8`의 십진 단위로 계산한다.
+
+| Profile | 1대/시간 | 1대/일 | 4대/일 | 4대/7일 | 4대/30일 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `hd` 2Mbps | 0.9GB | 21.6GB | 86.4GB | 604.8GB | 2.592TB |
+| `fhd` 4Mbps | 1.8GB | 43.2GB | 172.8GB | 1.210TB | 5.184TB |
+
+이 표는 Container·Audio·파일시스템 overhead를 제외한다. 실제 할당에는 최소 10~20% 여유와 보관 정책을 반영한다. HLS egress는 동시 시청자마다 해당 Profile Bitrate가 대략 추가되며 MediaMTX→Inference 내부 RTSP도 별도 트래픽이다.
 
 ### 12.2 신뢰성
 
@@ -676,13 +814,14 @@ ON events(camera_id, occurred_at, event_type);
 | NFR-SEC-008 | 비활성 사용자와 만료 토큰은 보호 자원에 접근할 수 없어야 한다. |
 | NFR-SEC-009 | CORS 허용 Origin은 배포 환경에서 명시적으로 제한하여야 한다. |
 | NFR-SEC-010 | 저장 영상 암호화 미적용 사실을 설치 문서에 명시하여야 한다. |
+| NFR-SEC-011 | Inference RTSP reader 비밀번호는 32자 이상이어야 하며 External/Inference 파일 간 일치, 서비스별 allowlist와 URL userinfo percent-encoding을 검증하여야 한다. |
 
 ### 12.4 유지보수성
 
 | ID | 요구사항 |
 | --- | --- |
 | NFR-MAINT-001 | 영상, 데이터, 추론, 외부 책임을 모듈 또는 서비스 경계로 분리하여야 한다. |
-| NFR-MAINT-002 | 서비스 간 계약은 OpenAPI 또는 명시된 JSON Schema로 문서화하여야 한다. |
+| NFR-MAINT-002 | 외부 계약은 Nginx가 공개하는 `/api/v1/openapi.json`과 명시된 JSON 예제로 문서화하여야 한다. |
 | NFR-MAINT-003 | Python 패키지 버전은 Release 단위로 고정하여야 한다. |
 | NFR-MAINT-004 | Docker Image Tag와 모델 버전을 Release Manifest에 기록하여야 한다. |
 | NFR-MAINT-005 | 설정 Schema는 버전 필드를 포함하여야 한다. |
@@ -715,8 +854,13 @@ ON events(camera_id, occurred_at, event_type);
 ```text
 AI_CCTV/
 ├── config/
-│   ├── config.yaml
-│   └── secrets.env
+│   └── config.yaml
+├── secrets/
+│   ├── data.env
+│   ├── external.env
+│   ├── inference.env
+│   ├── media.env
+│   └── camera-credentials.json
 ├── models/
 ├── runtime/
 │   ├── recordings/
@@ -754,16 +898,17 @@ cameras:
     enabled: true
 ```
 
-`secrets.env` 예시:
+서비스별 Secret 소유권:
 
-```dotenv
-JWT_SECRET=<generated-secret>
-INITIAL_ADMIN_PASSWORD_HASH=<generated-hash>
-MEDIAMTX_PUBLISH_CAM_001_USER=<generated-user>
-MEDIAMTX_PUBLISH_CAM_001_PASSWORD=<generated-password>
-```
+| 파일 | 허용 Secret | 주입 대상 |
+| --- | --- | --- |
+| `data.env` | 서로 다른 External/Inference/Media/Recovery Data Token, 초기 관리자 ID/Argon2 Hash, 필요 시 Legacy Edge Token map | Data |
+| `external.env` | `DATA_EXTERNAL_TOKEN`, JWT Signing Secret, Bootstrap RTSP 게시 자격증명 map, Inference 전용 RTSP reader 쌍 | External |
+| `inference.env` | `DATA_INFERENCE_TOKEN`, External과 동일한 Inference 전용 RTSP reader 쌍 | Inference |
+| `media.env` | `DATA_MEDIA_TOKEN`만 | MediaMTX recording hook |
+| `camera-credentials.json` | 최초 Bootstrap 전달용 Camera 게시 원문 | Configurator/관리자만 |
 
-실제 Secret 값은 Git에 Commit하지 않아야 한다.
+신규 설치는 단일 `secrets.env`를 모든 Container에 공유하지 않는다. 네 Data Token은 32자 이상이고 상호 달라야 하며 Data API는 Token별 허용 Route를 강제하여야 한다. RTSP reader username/password는 External과 Inference에만 동일하게 저장하고 Data/Media에는 없어야 하며 password는 32자 이상이어야 한다. Compose와 `doctor`는 기존 결합 파일, 서비스 allowlist 위반, reader 쌍 누락·불일치를 운영 입력으로 허용하지 않고, `INTERNAL_SERVICE_TOKEN` 호환 처리는 Compose 밖의 직접 개발·테스트에만 유지한다. 실제 Secret 값은 Git에 Commit하지 않아야 하며 POSIX `0600` 또는 Windows에서 상속을 제거한 명시적 DACL로 보호하여야 한다.
 
 `cameras` 목록은 최초 설치 또는 복구 시 사용하는 Bootstrap 입력으로 본다. 운영 중 카메라 정보의 최종 Source of Truth는 Data Service의 `cameras` 테이블이며, Configurator와 관리자 API가 이를 갱신하여야 한다.
 
@@ -785,7 +930,7 @@ nginx             # 인프라: Reverse Proxy와 HTTPS
 - 모든 서비스는 하나의 내부 Docker Network를 공유할 수 있다.
 - SQLite, 녹화 파일, 모델, 설정은 명시적 Volume으로 마운트하여야 한다.
 - 외부에는 Nginx의 80/443만 기본 공개한다.
-- Edge RTSP 수신을 위해 MediaMTX 8554는 LAN 인터페이스에 제한적으로 공개할 수 있다.
+- MediaMTX 8554는 loopback을 기본으로 하고, Edge RTSP 원격 수신을 위해 필요한 경우에만 명시한 신뢰 LAN IP에 제한적으로 공개할 수 있다.
 
 ---
 
@@ -809,6 +954,9 @@ nginx             # 인프라: Reverse Proxy와 HTTPS
 | AT-012 | 모델 실패 | 모델 로딩 실패 시 녹화와 HLS는 계속되고 추론 오류가 표시됨 |
 | AT-013 | 저장 공간 경고 | 설정한 임계치 도달 시 관리자 상태 화면에 경고가 표시됨 |
 | AT-014 | Secret 보호 | 로그와 API 응답에서 JWT Secret과 Password가 노출되지 않음 |
+| AT-015 | 기본 HD | 신규 Edge가 1280×720@30fps, 약 2Mbps H.264로 송출함 |
+| AT-016 | FHD 변경 | 지원 Edge에서 서버 요청 후 실제 적용 성공 시에만 현재 Profile이 `fhd`가 됨 |
+| AT-017 | FHD 미지원 | Edge가 기존 `hd`를 유지하고 Configurator가 `UNSUPPORTED_VIDEO_PROFILE` 사유를 표시함 |
 
 ### 15.2 자동 검증 범위
 
@@ -898,13 +1046,10 @@ nginx             # 인프라: Reverse Proxy와 HTTPS
 다음 항목은 구현 전에 ADR 또는 Issue로 최종 결정하여야 한다.
 
 1. 중앙 MediaMTX의 최종 고정 버전과 Docker Image Digest
-2. Live HLS Variant: `fmp4` 또는 `lowLatency`
-3. 저장 영상 기본 응답을 MediaMTX Playback의 `fmp4`와 `mp4` 중 무엇으로 고정할지, HLS VOD를 어느 릴리스에서 추가할지
-4. Edge RTSP 게시 구현: GStreamer publish 또는 Edge RTSP server pull
-5. Windows GPU Container 지원 범위
-6. 최종 오픈소스 라이선스
-7. 기본 YOLO 모델과 VLM 모델의 배포·라이선스 정책
-8. 외부 공개 배포에서 인증서 자동 발급 방안
+2. 저장 영상 HLS VOD를 어느 후속 릴리스에서 추가할지
+3. Windows GPU Container 지원 범위
+4. 최종 오픈소스 라이선스
+5. 기본 YOLO 모델과 VLM 모델의 배포·라이선스 정책
+6. 외부 공개 배포에서 인증서 자동 발급 방안
 
 미결정 사항은 기능을 임의로 구현하기보다 작은 기술 검증 후 문서에 반영하여야 한다.
-

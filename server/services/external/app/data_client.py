@@ -9,6 +9,16 @@ import httpx
 class DataServiceError(Exception):
     status_code = 502
 
+    def __init__(
+        self,
+        message: str = "data service request failed",
+        *,
+        code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
 
 class DataServiceUnavailable(DataServiceError):
     status_code = 503
@@ -34,12 +44,14 @@ class DataClient:
         health_url: str,
         internal_token: str,
         timeout_seconds: float = 5.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.health_url = health_url
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/") + "/",
             headers={"X-Internal-Token": internal_token},
             timeout=httpx.Timeout(timeout_seconds),
+            transport=transport,
             # Internal service traffic must not be diverted through host proxy
             # settings. This also keeps the shared internal token on the
             # private Docker network selected by DATA_BASE_URL.
@@ -81,7 +93,22 @@ class DataClient:
         if response.status_code in {401, 403}:
             raise DataForbidden("data service denied the request")
         if response.status_code == 409:
-            raise DataConflict("resource conflict")
+            code = None
+            message = "resource conflict"
+            try:
+                error = response.json().get("error", {})
+                candidate_code = error.get("code")
+                candidate_message = error.get("message")
+                if candidate_code in {
+                    "CAMERA_HAS_HISTORY",
+                    "CAMERA_LIMIT_REACHED",
+                }:
+                    code = str(candidate_code)
+                    if isinstance(candidate_message, str) and candidate_message:
+                        message = candidate_message
+            except (AttributeError, ValueError):
+                pass
+            raise DataConflict(message, code=code)
         if response.status_code >= 500:
             raise DataServiceUnavailable("data service unavailable")
         if response.status_code >= 400:
@@ -129,27 +156,11 @@ class DataClient:
         )
 
     async def set_camera_permissions(self, user_id: str, camera_ids: list[str]) -> Any:
-        current = await self.get_camera_permissions(user_id)
-        current_items = current.get("items", []) if isinstance(current, dict) else []
-        current_ids = {
-            str(item.get("camera_id"))
-            for item in current_items
-            if isinstance(item, dict) and item.get("camera_id") is not None
-        }
-        requested_ids = set(camera_ids)
-        base_path = f"users/{quote(str(user_id), safe='')}/camera-permissions"
-
-        for camera_id in sorted(current_ids - requested_ids):
-            await self._request(
-                "DELETE",
-                f"{base_path}/{quote(camera_id, safe='')}",
-            )
-        for camera_id in sorted(requested_ids - current_ids):
-            await self._request(
-                "PUT",
-                f"{base_path}/{quote(camera_id, safe='')}",
-            )
-        return await self.get_camera_permissions(user_id)
+        return await self._request(
+            "PUT",
+            f"users/{quote(str(user_id), safe='')}/camera-permissions",
+            json={"camera_ids": camera_ids},
+        )
 
     async def create_refresh_token(self, payload: dict[str, Any]) -> Any:
         return await self._request("POST", "tokens/refresh", json=payload)
@@ -213,6 +224,11 @@ class DataClient:
     async def delete_camera(self, camera_id: str) -> None:
         await self._request("DELETE", f"cameras/{quote(camera_id, safe='')}")
 
+    async def get_camera_deletion_status(self, camera_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", f"cameras/{quote(camera_id, safe='')}/deletion-status"
+        )
+
     async def put_camera_publish_credential(
         self, camera_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
@@ -229,6 +245,54 @@ class DataClient:
             "GET",
             f"cameras/{quote(camera_id, safe='')}/publish-credential",
             not_found_ok=True,
+        )
+
+    async def list_camera_control_targets(self) -> Any:
+        return await self._request("GET", "camera-control-targets")
+
+    async def get_camera_control_target(self, camera_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", f"cameras/{quote(camera_id, safe='')}/control-target"
+        )
+
+    async def get_camera_video_profile(self, camera_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", f"cameras/{quote(camera_id, safe='')}/video-profile"
+        )
+
+    async def update_camera_video_profile(
+        self, camera_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._request(
+            "PATCH",
+            f"cameras/{quote(camera_id, safe='')}/video-profile",
+            json=payload,
+        )
+
+    async def get_camera_runtime_status(self, camera_id: str) -> dict[str, Any]:
+        return await self._request(
+            "GET", f"cameras/{quote(camera_id, safe='')}/runtime-status"
+        )
+
+    async def put_camera_runtime_status(
+        self, camera_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return await self._request(
+            "PUT",
+            f"cameras/{quote(camera_id, safe='')}/runtime-status",
+            json=payload,
+        )
+
+    async def create_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._request("POST", "events", json=payload)
+
+    async def list_recovery_jobs(
+        self, *, camera_id: str | None, limit: int, offset: int
+    ) -> Any:
+        return await self._request(
+            "GET",
+            "recovery-jobs",
+            params={"camera_id": camera_id, "limit": limit, "offset": offset},
         )
 
     async def list_recordings(self, **params: Any) -> Any:
@@ -250,6 +314,42 @@ class DataClient:
             f"recording-segments/{quote(segment_id, safe='')}",
             params={"user_id": user_id},
         )
+
+    async def open_recording_content(
+        self,
+        segment_id: str,
+        *,
+        range_header: str | None = None,
+        if_range_header: str | None = None,
+    ) -> httpx.Response:
+        headers = {
+            name: value
+            for name, value in {
+                "Range": range_header,
+                "If-Range": if_range_header,
+            }.items()
+            if value
+        }
+        request = self._client.build_request(
+            "GET",
+            f"recording-segments/{quote(segment_id, safe='')}/content",
+            headers=headers or None,
+        )
+        try:
+            response = await self._client.send(request, stream=True)
+        except httpx.RequestError as exc:
+            raise DataServiceUnavailable("data service unavailable") from exc
+        if response.status_code in {200, 206, 416}:
+            return response
+        await response.aread()
+        await response.aclose()
+        if response.status_code == 404:
+            raise DataNotFound("recording content not found")
+        if response.status_code in {401, 403}:
+            raise DataForbidden("data service denied the request")
+        if response.status_code >= 500:
+            raise DataServiceUnavailable("data service unavailable")
+        raise DataServiceError("data service rejected the request")
 
     async def list_events(self, **params: Any) -> Any:
         return await self._request(

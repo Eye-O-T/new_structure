@@ -1,0 +1,25 @@
+[Unit]
+Description=AI_CCTV edge authenticated management and status API
+After=network.target
+
+[Service]
+Type=simple
+User=ai-cctv-edge
+Group=ai-cctv-edge
+ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml serve-control
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+RuntimeDirectory=ai-cctv-edge
+RuntimeDirectoryPreserve=yes
+StateDirectory=ai-cctv-edge
+LogsDirectory=ai-cctv-edge
+ConfigurationDirectory=ai-cctv-edge
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

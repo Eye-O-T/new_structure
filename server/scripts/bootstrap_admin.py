@@ -22,18 +22,18 @@ CONTAINER_SCRIPT = textwrap.dedent(
     from app.security import hash_password
 
     values = json.load(sys.stdin)
-    token = os.environ["INTERNAL_SERVICE_TOKEN"]
-    response = httpx.post(
-        "http://nginx:8080/internal/data/v1/users",
-        headers={"X-Internal-Token": token},
-        json={
-            "username": values["username"],
-            "password_hash": hash_password(values["password"]),
-            "role": "admin",
-            "is_active": True,
-        },
-        timeout=10,
-    )
+    token = os.environ["DATA_EXTERNAL_TOKEN"]
+    with httpx.Client(trust_env=False, timeout=10) as client:
+        response = client.post(
+            "http://nginx:8080/internal/data/v1/users",
+            headers={"X-Internal-Token": token},
+            json={
+                "username": values["username"],
+                "password_hash": hash_password(values["password"]),
+                "role": "admin",
+                "is_active": True,
+            },
+        )
     response.raise_for_status()
     user = response.json()
     print(json.dumps({

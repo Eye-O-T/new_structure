@@ -1,7 +1,7 @@
 [Unit]
 Description=AI_CCTV Raspberry Pi edge camera
-After=network-online.target
-Wants=network-online.target
+After=network.target
+Wants=ai-cctv-edge-control.service ai-cctv-edge-recovery.service
 
 [Service]
 Type=simple
@@ -12,6 +12,7 @@ Restart=on-failure
 RestartSec=3
 TimeoutStopSec=15
 RuntimeDirectory=ai-cctv-edge
+RuntimeDirectoryPreserve=yes
 StateDirectory=ai-cctv-edge
 LogsDirectory=ai-cctv-edge
 ConfigurationDirectory=ai-cctv-edge
@@ -23,6 +24,7 @@ ProtectHome=true
 # setup-selected backup mount such as /mnt/cctv can be used by the service.
 ProtectSystem=full
 SupplementaryGroups=video
+ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
 WantedBy=multi-user.target

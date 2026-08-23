@@ -12,6 +12,7 @@ import pytest
 from server.services.data.app.recovery_coordinator import (
     RecoveryCoordinator,
     RecoveryError,
+    read_internal_token,
     read_recovery_token,
 )
 
@@ -128,14 +129,14 @@ def test_recovery_downloads_sequentially_verifies_and_indexes(tmp_path: Path) ->
             assert request.get_header("X-internal-token") == INTERNAL_TOKEN
             assert request.get_header("Authorization") is None
 
-    root = tmp_path / "recordings" / "cam-001"
+    root = tmp_path / "recordings" / "recovered" / "cam-001"
     assert (root / first_path).read_bytes() == first
     assert (root / second_path).read_bytes() == second
     assert list((tmp_path / "recordings").rglob("*.part")) == []
     assert all(item["source"] == "edge_recovery" for item in services.indexed)
     assert all(item["format"] == "mpegts" for item in services.indexed)
     assert all(
-        item["relative_path"].startswith("cam-001/2026/08/22/")
+        item["relative_path"].startswith("recovered/cam-001/2026/08/22/")
         for item in services.indexed
     )
     assert all(
@@ -159,16 +160,43 @@ def test_checksum_failure_never_commits_or_indexes(tmp_path: Path) -> None:
     }
     services = FakeServices(manifest, {relative_path: content})
     coordinator = _coordinator(tmp_path, services)
-    destination = tmp_path / "recordings" / "cam-001" / relative_path
-    destination.parent.mkdir(parents=True)
-    destination.write_bytes(b"previous-valid-file")
+    destination = (
+        tmp_path / "recordings" / "recovered" / "cam-001" / relative_path
+    )
 
     with pytest.raises(RecoveryError, match="SHA-256"):
         coordinator.recover(START, END)
 
-    assert destination.read_bytes() == b"previous-valid-file"
+    assert not destination.exists()
     assert list((tmp_path / "recordings").rglob("*.part")) == []
     assert services.indexed == []
+
+
+def test_existing_recovery_path_is_immutable_on_manifest_mismatch(
+    tmp_path: Path,
+) -> None:
+    relative_path = "2026/08/22/20260822T080000.000000Z_000000.ts"
+    replacement = b"different-valid-content"
+    services = FakeServices(
+        {
+            "camera_id": "cam-001",
+            "items": [_item(relative_path, replacement)],
+        },
+        {relative_path: replacement},
+    )
+    coordinator = _coordinator(tmp_path, services)
+    destination = (
+        tmp_path / "recordings" / "recovered" / "cam-001" / relative_path
+    )
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"previous-indexed-content")
+
+    with pytest.raises(RecoveryError, match="does not match manifest"):
+        coordinator.recover(START, END)
+
+    assert destination.read_bytes() == b"previous-indexed-content"
+    assert services.indexed == []
+    assert not any("/files/" in request.full_url for request in services.requests)
 
 
 @pytest.mark.parametrize(
@@ -212,3 +240,12 @@ def test_recovery_token_is_read_from_environment_or_file(
     monkeypatch.setenv("EDGE_RECOVERY_TOKEN", RECOVERY_TOKEN)
     with pytest.raises(RecoveryError, match="only one"):
         read_recovery_token()
+
+
+def test_data_recovery_token_precedes_legacy_internal_token(monkeypatch) -> None:
+    monkeypatch.setenv("DATA_RECOVERY_TOKEN", "d" * 32)
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", INTERNAL_TOKEN)
+    assert read_internal_token() == "d" * 32
+
+    monkeypatch.delenv("DATA_RECOVERY_TOKEN")
+    assert read_internal_token() == INTERNAL_TOKEN

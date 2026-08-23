@@ -3,11 +3,13 @@ device_id = "edge-001"
 camera_id = "cam-001"
 
 [video]
-width = 1920
-height = 1080
+profile = "hd"
+width = 1280
+height = 720
 fps = 30
-bitrate_kbps = 4000
+bitrate_kbps = 2000
 encoder = "x264enc"
+supported_profiles = ["hd", "fhd"]
 
 [rtsp]
 mode = "central_publish"
@@ -28,3 +30,17 @@ max_age_hours = 24
 bind_host = "0.0.0.0"
 port = 8002
 token_file = "/etc/ai-cctv-edge/recovery.token"
+
+[control]
+bind_host = "0.0.0.0"
+port = 8003
+# The management, status and recovery services share this edge_auth_token.
+token_file = "/etc/ai-cctv-edge/recovery.token"
+apply_timeout_seconds = 30
+preflight_timeout_seconds = 10
+
+[monitoring]
+interval_seconds = 5
+frame_timeout_seconds = 5
+battery_low_percent = 20
+battery_critical_percent = 10

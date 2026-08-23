@@ -20,10 +20,10 @@
 set -e
 
 # --- 사용자 정의 환경 설정 ---
-RESOLUTION_WIDTH=1920     # 전송 및 저장할 비디오의 가로 해상도 (1920픽셀, 1080p)
-RESOLUTION_HEIGHT=1080    # 전송 및 저장할 비디오의 세로 해상도 (1080픽셀, 1080p)
+RESOLUTION_WIDTH=1280     # Legacy 기본값도 신규 Edge의 HD Profile과 일치시킵니다.
+RESOLUTION_HEIGHT=720
 FPS=30                    # 초당 프레임 수 (30프레임: 적당한 프레임수)
-VIDEO_BITRATE=4000        # H.264 영상 전송률 (kbps, 1080p 권장 시작값)
+VIDEO_BITRATE=2000        # H.264 영상 전송률 (kbps, HD Profile)
 BACKUP_DIR="./backups"    # 로컬 녹화 세그먼트 파일이 보관될 폴더 경로
 RTSP_PATH="live"          # 중계 서버가 송출할 RTSP 서비스 식별 경로 (rtsp://IP:8554/live) 192.168.99.200으로 설정해둠.
 MEDIAMTX_VERSION="v1.9.0" # 다운로드할 미디어 프록시 서버(MediaMTX)의 지정 버전
@@ -125,12 +125,12 @@ gst-launch-1.0 -e \
 # === 각 GStreamer 엘리먼트 라인 한글 기능 설명 ===
 #
 # 1. libcamerasrc : 라즈베리파이의 공식 카메라 하드웨어 인터페이스로부터 원본 프레임을 획득
-# 2. video/x-raw,width=1920,height=1080,framerate=30/1 : 영상 규격을 가로 1920, 세로 1080, 초당 30프레임
+# 2. video/x-raw,width=1280,height=720,framerate=30/1 : 기본 HD 영상 규격
 # 3. videoconvert : 카메라 원시 색상 데이터를 압축 인코더 코덱이 이해할 수 있도록 공용 변환 처리
 # 4. x264enc : H.264 압축 코덱
 #      - tune=zerolatency: 인코딩 대기 프레임 누적을 없애 실시간성을 보장
 #      - speed-preset=ultrafast: 가장 빠른 연산 속도로 압축하여 CPU 발열을 낮춤
-#      - bitrate=${VIDEO_BITRATE}: 1080p 화면 깨짐을 줄이기 위해 영상 전송률을 4000kbps 기준으로 설정합니다.
+#      - bitrate=${VIDEO_BITRATE}: HD Profile의 2000kbps 기준값을 사용합니다.
 #      - key-int-max=15: 15프레임(약 0.5초)마다 강제로 핵심 I-프레임을 삽입하여 재접속 시 빠르게 화면이 나타나게 합니다.
 #      - bframes=0: 압축 지연을 유발하는 화면 예측 프레임(B-Frame)을 0개로 비활성화하여 레이턴시를 죽입니다.
 #      - threads=4 sliced-threads=true: 라즈베리파이 4의 쿼드코어 CPU 전체에 인코딩 연산 짐을 병렬로 분산하여 단일 코어 과부하 렉을 근절합니다.

@@ -15,6 +15,12 @@ from server.services.data.app.main import create_app
 TOKEN = "test-internal-token"
 HEADERS = {"X-Internal-Token": TOKEN}
 BASE = "/internal/v1"
+SCOPED_TOKENS = {
+    "external": "e" * 40,
+    "inference": "i" * 40,
+    "media": "m" * 40,
+    "recovery": "r" * 40,
+}
 
 
 @pytest.fixture
@@ -30,6 +36,128 @@ def data_client(tmp_path: Path):
     app = create_app(settings=settings)
     with TestClient(app) as client:
         yield client, settings
+
+
+@pytest.fixture
+def scoped_data_client(tmp_path: Path):
+    settings = Settings(
+        database_path=tmp_path / "database" / "ai_cctv.db",
+        storage_root=tmp_path / "recordings",
+        snapshot_root=tmp_path / "snapshots",
+        backup_root=tmp_path / "backups",
+        internal_token="",
+        data_external_token=SCOPED_TOKENS["external"],
+        data_inference_token=SCOPED_TOKENS["inference"],
+        data_media_token=SCOPED_TOKENS["media"],
+        data_recovery_token=SCOPED_TOKENS["recovery"],
+        busy_timeout_ms=750,
+    )
+    app = create_app(settings=settings)
+    with TestClient(app) as client:
+        yield client
+
+
+def test_scoped_internal_tokens_enforce_least_privilege(scoped_data_client):
+    client = scoped_data_client
+    headers = {
+        scope: {"X-Internal-Token": token}
+        for scope, token in SCOPED_TOKENS.items()
+    }
+
+    assert client.get(f"{BASE}/users", headers=headers["external"]).status_code == 200
+    assert client.get(f"{BASE}/users", headers=headers["inference"]).status_code == 403
+    assert (
+        client.get(f"{BASE}/cameras/enabled", headers=headers["inference"]).status_code
+        == 200
+    )
+    assert (
+        client.get(f"{BASE}/cameras/enabled", headers=headers["external"]).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            f"{BASE}/cameras/missing/status",
+            headers=headers["inference"],
+            json={"status": "online"},
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            f"{BASE}/cameras/missing/status",
+            headers=headers["external"],
+            json={"status": "online"},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(f"{BASE}/events", headers=headers["inference"], json={}).status_code
+        == 422
+    )
+    assert (
+        client.post(f"{BASE}/events", headers=headers["media"], json={}).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"{BASE}/hooks/recording-complete", headers=headers["media"], json={}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"{BASE}/hooks/recording-complete",
+            headers=headers["external"],
+            json={},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"{BASE}/recording-segments", headers=headers["recovery"], json={}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"{BASE}/recording-segments", headers=headers["media"], json={}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            f"{BASE}/users", headers={"X-Internal-Token": "unknown-token"}
+        ).status_code
+        == 401
+    )
+
+
+def test_partial_scoped_tokens_cannot_fall_back_to_legacy(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "database" / "ai_cctv.db",
+        storage_root=tmp_path / "recordings",
+        snapshot_root=tmp_path / "snapshots",
+        backup_root=tmp_path / "backups",
+        internal_token=TOKEN,
+        data_external_token=SCOPED_TOKENS["external"],
+    )
+    assert settings.data_api_tokens()["inference"] == ""
+    with pytest.raises(ValueError, match="must be configured together"):
+        settings.prepare_directories()
+
+
+def test_data_settings_preserve_legacy_runtime_token_fallback(monkeypatch) -> None:
+    for name in (
+        "DATA_EXTERNAL_TOKEN",
+        "DATA_INFERENCE_TOKEN",
+        "DATA_MEDIA_TOKEN",
+        "DATA_RECOVERY_TOKEN",
+        "DATA_INTERNAL_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", TOKEN)
+    settings = Settings.from_env()
+    assert set(settings.data_api_tokens().values()) == {TOKEN}
 
 
 def _create_user(client: TestClient, username: str, role: str = "viewer") -> dict:
@@ -388,6 +516,43 @@ def test_reconcile_marks_missing_and_reports_orphan(data_client) -> None:
     assert stored["status"] == "missing"
 
 
+def test_reconcile_indexes_completed_mediamtx_segment_after_hook_failure(
+    data_client,
+) -> None:
+    client, settings = data_client
+    _create_camera(client, "cam-001")
+    start = datetime(2026, 8, 22, 12, 34, 56, 123456, tzinfo=UTC)
+    end = start + timedelta(seconds=60)
+    relative_path = "cam-001/2026/08/22/20260822T123456-123456Z.mp4"
+    target = settings.storage_root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"completed-central-recording")
+    timestamp = end.timestamp()
+    os.utime(target, (timestamp, timestamp))
+
+    response = client.post(f"{BASE}/reconcile", headers=HEADERS)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["indexed_orphans"] == [relative_path]
+    assert response.json()["orphaned"] == []
+    indexed = client.get(
+        f"{BASE}/recording-segments/search",
+        headers=HEADERS,
+        params={
+            "camera_id": "cam-001",
+            "from": start.isoformat(),
+            "to": (end + timedelta(seconds=1)).isoformat(),
+        },
+    )
+    assert indexed.status_code == 200, indexed.text
+    assert indexed.json()["items"][0]["relative_path"] == relative_path
+    assert indexed.json()["items"][0]["source"] == "central"
+
+    replay = client.post(f"{BASE}/reconcile", headers=HEADERS)
+    assert replay.status_code == 200
+    assert replay.json()["indexed_orphans"] == []
+
+
 def test_backup_and_retention_cleanup(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -422,6 +587,39 @@ def test_backup_and_retention_cleanup(data_client) -> None:
     assert backup_path.is_file()
     with sqlite3.connect(backup_path) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+
+@pytest.mark.parametrize("file_exists", [True, False])
+def test_reconcile_completes_interrupted_retention_delete(
+    data_client, file_exists: bool
+) -> None:
+    client, settings = data_client
+    _create_camera(client, "cam-001")
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    segment = _create_segment(
+        client,
+        settings,
+        relative_path="cam-001/interrupted.mp4",
+        start=start,
+        end=start + timedelta(seconds=60),
+    )
+    target = settings.storage_root / segment["relative_path"]
+    if not file_exists:
+        target.unlink()
+    repository = client.app.state.repository
+    repository.set_segment_status(segment["id"], "deleting")
+
+    response = client.post(f"{BASE}/reconcile", headers=HEADERS)
+
+    assert response.status_code == 200
+    assert response.json()["completed_deletions"] == [
+        "cam-001/interrupted.mp4"
+    ]
+    assert not target.exists()
+    stored = client.get(
+        f"{BASE}/recording-segments/{segment['id']}", headers=HEADERS
+    ).json()
+    assert stored["status"] == "deleted"
 
 
 def test_refresh_rotation_and_revoked_token_state(data_client) -> None:
@@ -523,3 +721,548 @@ cameras:
             cameras = client.get(f"{BASE}/cameras", headers=HEADERS).json()["items"]
             assert [user["username"] for user in users] == ["admin"]
             assert [camera["camera_id"] for camera in cameras] == ["cam-001"]
+
+
+def test_edge_metadata_profiles_and_runtime_state_are_separate(data_client) -> None:
+    client, _settings = data_client
+    token = "e" * 32
+    created = client.post(
+        f"{BASE}/cameras",
+        headers=HEADERS,
+        json={
+            "camera_id": "cam-001",
+            "name": "Entrance",
+            "stream_path": "cam-001",
+            "edge_device_id": "edge-001",
+            "edge_management_url": "http://edge.test:8003",
+            "edge_recovery_url": "http://edge.test:8002",
+            "edge_auth_token": token,
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert "edge_auth_token" not in created.json()
+
+    target = client.get(
+        f"{BASE}/cameras/cam-001/control-target", headers=HEADERS
+    ).json()
+    assert target["management_url"] == "http://edge.test:8003"
+    assert target["auth_token"] == token
+
+    profile = client.get(
+        f"{BASE}/cameras/cam-001/video-profile", headers=HEADERS
+    ).json()
+    assert profile["current_profile"] == "hd"
+    assert profile["desired_profile"] == "hd"
+    changed = client.patch(
+        f"{BASE}/cameras/cam-001/video-profile",
+        headers=HEADERS,
+        json={"desired_profile": "fhd"},
+    ).json()
+    assert changed["desired_profile"] == "fhd"
+    assert changed["current_profile"] == "hd"
+
+    first_status = client.put(
+        f"{BASE}/cameras/cam-001/runtime-status",
+        headers=HEADERS,
+        json={
+            "online": True,
+            "cpu_percent": 12.5,
+            "memory_percent": 34.5,
+            "storage_percent": 56.5,
+            "battery_percent": 78,
+            "power_source": "battery",
+            "camera_input": "online",
+            "central_connection_status": "online",
+            "current_video_profile": "hd",
+            "last_seen_at": "2026-08-23T07:20:00Z",
+        },
+    )
+    assert first_status.status_code == 200, first_status.text
+    offline = client.put(
+        f"{BASE}/cameras/cam-001/runtime-status",
+        headers=HEADERS,
+        json={"online": False, "last_error_code": "EDGE_OFFLINE"},
+    )
+    assert offline.status_code == 200, offline.text
+    status_payload = client.get(
+        f"{BASE}/cameras/cam-001/runtime-status", headers=HEADERS
+    ).json()
+    assert status_payload["online"] is False
+    assert status_payload["cpu_percent"] == 12.5
+    assert status_payload["camera_input"] == "online"
+    assert status_payload["current_video_profile"] == "hd"
+
+    rotated = client.patch(
+        f"{BASE}/cameras/cam-001",
+        headers=HEADERS,
+        json={"edge_auth_token": "r" * 32},
+    )
+    assert rotated.status_code == 200, rotated.text
+    rotated_target = client.get(
+        f"{BASE}/cameras/cam-001/control-target", headers=HEADERS
+    ).json()
+    assert rotated_target["auth_token"] == "r" * 32
+    assert rotated_target["management_url"] == target["management_url"]
+
+    incomplete = client.patch(
+        f"{BASE}/cameras/cam-001",
+        headers=HEADERS,
+        json={"edge_device_id": "edge-new"},
+    )
+    assert incomplete.status_code == 422
+
+    assert client.delete(
+        f"{BASE}/cameras/cam-001", headers=HEADERS
+    ).status_code == 204
+    assert client.get(
+        f"{BASE}/edge-devices/edge-001", headers=HEADERS
+    ).status_code == 404
+
+
+def test_edge_service_urls_reject_ambiguous_or_credentialed_paths(data_client) -> None:
+    client, _settings = data_client
+    common = {
+        "camera_id": "cam-001",
+        "name": "Entrance",
+        "stream_path": "cam-001",
+        "edge_device_id": "edge-001",
+        "edge_recovery_url": "http://edge.test:8002",
+        "edge_auth_token": "e" * 32,
+    }
+    for invalid in (
+        "http://user:pass@edge.test:8003",
+        "http://edge.test:8003/control?token=secret",
+        "http://edge.test:8003/a/../control",
+    ):
+        response = client.post(
+            f"{BASE}/cameras",
+            headers=HEADERS,
+            json={**common, "edge_management_url": invalid},
+        )
+        assert response.status_code == 422
+
+
+def test_edge_event_idempotency_recovery_lifecycle_and_crash_requeue(
+    data_client,
+) -> None:
+    client, _settings = data_client
+    response = client.post(
+        f"{BASE}/cameras",
+        headers=HEADERS,
+        json={
+            "camera_id": "cam-001",
+            "name": "Entrance",
+            "stream_path": "cam-001",
+            "edge_device_id": "edge-001",
+            "edge_management_url": "http://edge.test:8003",
+            "edge_recovery_url": "http://edge.test:8002",
+            "edge_auth_token": "e" * 32,
+        },
+    )
+    assert response.status_code == 201, response.text
+    base = datetime(2026, 8, 22, 7, 30, tzinfo=UTC)
+    lost_payload = {
+        "camera_id": "cam-001",
+        "event_type": "central_connection_lost",
+        "occurred_at": base.isoformat(),
+        "edge_event_id": "edge-001:lost-1",
+    }
+    first = client.post(f"{BASE}/events", headers=HEADERS, json=lost_payload)
+    replay = client.post(f"{BASE}/events", headers=HEADERS, json=lost_payload)
+    assert first.status_code == replay.status_code == 201
+    assert first.json()["id"] == replay.json()["id"]
+    jobs = client.get(f"{BASE}/recovery-jobs", headers=HEADERS).json()["items"]
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "detected"
+
+    restored = client.post(
+        f"{BASE}/events",
+        headers=HEADERS,
+        json={
+            "camera_id": "cam-001",
+            "event_type": "central_connection_restored",
+            "occurred_at": (base + timedelta(minutes=2)).isoformat(),
+            "edge_event_id": "edge-001:restored-1",
+        },
+    )
+    assert restored.status_code == 201, restored.text
+    job = client.get(f"{BASE}/recovery-jobs", headers=HEADERS).json()["items"][0]
+    assert job["status"] == "waiting_for_recovery"
+
+    # A delayed duplicate reporter inside the same interval must not enqueue a
+    # second transfer job.
+    delayed = dict(lost_payload)
+    delayed["edge_event_id"] = "inference:lost-duplicate"
+    delayed["occurred_at"] = (base + timedelta(seconds=1)).isoformat()
+    assert client.post(
+        f"{BASE}/events", headers=HEADERS, json=delayed
+    ).status_code == 201
+    assert len(
+        client.get(f"{BASE}/recovery-jobs", headers=HEADERS).json()["items"]
+    ) == 1
+
+    repository = client.app.state.repository
+    claimed = repository.claim_due_recovery_job()
+    assert claimed is not None
+    assert claimed["status"] == "downloading"
+    assert claimed["attempt_count"] == 1
+    assert repository.requeue_interrupted_recovery_jobs() == 1
+    requeued = repository.get_recovery_job(int(claimed["id"]))
+    assert requeued is not None
+    assert requeued["status"] == "failed"
+    assert requeued["last_error"] == "RECOVERY_INTERRUPTED"
+    assert requeued["next_retry_at"] is not None
+
+
+def test_recovery_merges_out_of_order_reporter_boundaries(data_client) -> None:
+    client, _settings = data_client
+    _create_camera(client, "cam-001")
+    base = datetime(2026, 8, 22, 7, 30, tzinfo=UTC)
+
+    def event(event_id: str, event_type: str, occurred_at: datetime) -> None:
+        response = client.post(
+            f"{BASE}/events",
+            headers=HEADERS,
+            json={
+                "camera_id": "cam-001",
+                "event_type": event_type,
+                "occurred_at": occurred_at.isoformat(),
+                "edge_event_id": event_id,
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    # Transport ordering is intentionally reversed: restore is persisted first.
+    event(
+        "inference:restored-early",
+        "central_connection_restored",
+        base + timedelta(minutes=2),
+    )
+    event(
+        "edge:lost-late",
+        "central_connection_lost",
+        base + timedelta(seconds=10),
+    )
+    event("edge:lost-earlier", "central_connection_lost", base)
+    repository = client.app.state.repository
+    claimed = repository.claim_due_recovery_job()
+    assert claimed is not None
+    stale_revision = int(claimed["revision"])
+    event(
+        "edge:restored-later",
+        "central_connection_restored",
+        base + timedelta(minutes=2, seconds=20),
+    )
+
+    jobs = client.get(f"{BASE}/recovery-jobs", headers=HEADERS).json()["items"]
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job["status"] == "waiting_for_recovery"
+    assert datetime.fromisoformat(
+        job["outage_started_at"].replace("Z", "+00:00")
+    ) == base
+    assert datetime.fromisoformat(
+        job["outage_ended_at"].replace("Z", "+00:00")
+    ) == base + timedelta(minutes=2, seconds=20)
+    assert job["revision"] == 2
+    assert repository.update_recovery_job(
+        int(job["id"]),
+        status="completed",
+        expected_revision=stale_revision,
+    ) is None
+    assert repository.get_recovery_job(int(job["id"]))["status"] == (
+        "waiting_for_recovery"
+    )
+
+    # A later distinct outage starts a new detected interval.
+    event(
+        "edge:lost-new",
+        "central_connection_lost",
+        base + timedelta(minutes=5),
+    )
+    jobs = client.get(f"{BASE}/recovery-jobs", headers=HEADERS).json()["items"]
+    assert len(jobs) == 2
+    assert {item["status"] for item in jobs} == {
+        "waiting_for_recovery",
+        "detected",
+    }
+    event(
+        "edge:lost-old-delayed",
+        "central_connection_lost",
+        base + timedelta(minutes=1),
+    )
+    jobs = client.get(f"{BASE}/recovery-jobs", headers=HEADERS).json()["items"]
+    assert len(jobs) == 2
+    detected = next(item for item in jobs if item["status"] == "detected")
+    assert datetime.fromisoformat(
+        detected["outage_started_at"].replace("Z", "+00:00")
+    ) == base + timedelta(minutes=5)
+
+
+def test_recovery_waits_for_final_edge_segment_to_settle(data_client) -> None:
+    client, _settings = data_client
+    _create_camera(client, "cam-001")
+    base = datetime.now(UTC).replace(microsecond=0) + timedelta(minutes=1)
+
+    for event_id, event_type, occurred_at in (
+        ("edge:lost", "central_connection_lost", base),
+        (
+            "edge:restored",
+            "central_connection_restored",
+            base + timedelta(seconds=20),
+        ),
+    ):
+        response = client.post(
+            f"{BASE}/events",
+            headers=HEADERS,
+            json={
+                "camera_id": "cam-001",
+                "event_type": event_type,
+                "occurred_at": occurred_at.isoformat(),
+                "edge_event_id": event_id,
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    repository = client.app.state.repository
+    job = repository.list_recovery_jobs("cam-001", 10, 0)[0]
+    assert datetime.fromisoformat(
+        job["next_retry_at"].replace("Z", "+00:00")
+    ) == base + timedelta(seconds=35)
+    assert repository.claim_due_recovery_job() is None
+
+    later_restore = client.post(
+        f"{BASE}/events",
+        headers=HEADERS,
+        json={
+            "camera_id": "cam-001",
+            "event_type": "central_connection_restored",
+            "occurred_at": (base + timedelta(seconds=30)).isoformat(),
+            "edge_event_id": "inference:restored-later",
+        },
+    )
+    assert later_restore.status_code == 201
+    job = repository.list_recovery_jobs("cam-001", 10, 0)[0]
+    assert datetime.fromisoformat(
+        job["next_retry_at"].replace("Z", "+00:00")
+    ) == base + timedelta(seconds=45)
+    assert repository.claim_due_recovery_job() is None
+
+
+def test_legacy_network_events_are_stored_without_recovery_side_effects(
+    data_client,
+) -> None:
+    client, _settings = data_client
+    _create_camera(client, "cam-001")
+    base = datetime(2026, 8, 22, 7, 30, tzinfo=UTC)
+
+    def event(event_id: str, event_type: str, occurred_at: datetime) -> None:
+        response = client.post(
+            f"{BASE}/events",
+            headers=HEADERS,
+            json={
+                "camera_id": "cam-001",
+                "event_type": event_type,
+                "occurred_at": occurred_at.isoformat(),
+                "edge_event_id": event_id,
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    # Legacy inference-consumer aliases remain searchable event history, but
+    # cannot create an Edge segment-recovery interval by themselves.
+    event("legacy:lost-only", "network_failure", base)
+    event("legacy:restored-only", "network_recovery", base + timedelta(minutes=5))
+    repository = client.app.state.repository
+    assert repository.list_recovery_jobs("cam-001", 10, 0) == []
+
+    event("edge:lost", "central_connection_lost", base + timedelta(minutes=1))
+    detected = repository.list_recovery_jobs("cam-001", 10, 0)
+    assert len(detected) == 1
+    assert detected[0]["status"] == "detected"
+    assert detected[0]["outage_ended_at"] is None
+    event(
+        "edge:restored",
+        "central_connection_restored",
+        base + timedelta(minutes=2),
+    )
+    before = repository.list_recovery_jobs("cam-001", 10, 0)
+    assert len(before) == 1
+
+    # Nor may delayed legacy aliases expand an authoritative Edge interval.
+    event("legacy:lost-earlier", "network_failure", base - timedelta(minutes=1))
+    event(
+        "legacy:restored-later",
+        "network_recovery",
+        base + timedelta(minutes=3),
+    )
+    after = repository.list_recovery_jobs("cam-001", 10, 0)
+    assert len(after) == 1
+    assert after[0]["outage_started_at"] == before[0]["outage_started_at"]
+    assert after[0]["outage_ended_at"] == before[0]["outage_ended_at"]
+    assert after[0]["revision"] == before[0]["revision"]
+
+    stored = repository.search_events(
+        camera_id="cam-001",
+        event_type=None,
+        start_time=None,
+        end_time=None,
+        limit=20,
+        offset=0,
+    )
+    assert {item["edge_event_id"] for item in stored} >= {
+        "legacy:lost-only",
+        "legacy:restored-only",
+        "legacy:lost-earlier",
+        "legacy:restored-later",
+    }
+
+
+def test_recording_content_supports_mpegts_range_requests(data_client) -> None:
+    client, settings = data_client
+    _create_camera(client, "cam-001")
+    relative_path = "cam-001/recovered/segment.ts"
+    content = b"\x47recovered-mpegts-content"
+    target = settings.storage_root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+    start = datetime(2026, 8, 23, 7, 30, tzinfo=UTC)
+    created = client.post(
+        f"{BASE}/recording-segments",
+        headers=HEADERS,
+        json={
+            "camera_id": "cam-001",
+            "start_time": start.isoformat(),
+            "end_time": (start + timedelta(seconds=10)).isoformat(),
+            "relative_path": relative_path,
+            "format": "mpegts",
+            "source": "edge_recovery",
+        },
+    )
+    assert created.status_code == 201, created.text
+    segment_id = created.json()["id"]
+
+    response = client.get(
+        f"{BASE}/recording-segments/{segment_id}/content",
+        headers={**HEADERS, "Range": "bytes=1-5"},
+    )
+    assert response.status_code == 206
+    assert response.content == content[1:6]
+    assert response.headers["content-range"] == f"bytes 1-5/{len(content)}"
+    assert response.headers["content-type"].startswith("video/mp2t")
+
+    etag = client.get(
+        f"{BASE}/recording-segments/{segment_id}/content",
+        headers=HEADERS,
+    ).headers["etag"]
+    stale_validator = client.get(
+        f"{BASE}/recording-segments/{segment_id}/content",
+        headers={**HEADERS, "Range": "bytes=1-5", "If-Range": '"stale"'},
+    )
+    matching_validator = client.get(
+        f"{BASE}/recording-segments/{segment_id}/content",
+        headers={**HEADERS, "Range": "bytes=1-5", "If-Range": etag},
+    )
+    assert stale_validator.status_code == 200
+    assert stale_validator.content == content
+    assert matching_validator.status_code == 206
+    assert matching_validator.content == content[1:6]
+
+
+def test_camera_limit_history_delete_and_permission_replace_are_transactional(
+    data_client,
+) -> None:
+    client, settings = data_client
+    user = _create_user(client, "operator")
+    for index in range(1, 5):
+        _create_camera(client, f"cam-00{index}")
+    limited = client.post(
+        f"{BASE}/cameras",
+        headers=HEADERS,
+        json={
+            "camera_id": "cam-005",
+            "name": "cam-005",
+            "stream_path": "cam-005",
+        },
+    )
+    assert limited.status_code == 409
+    assert limited.json()["error"]["code"] == "CAMERA_LIMIT_REACHED"
+
+    disabled = client.patch(
+        f"{BASE}/cameras/cam-001",
+        headers=HEADERS,
+        json={"enabled": False, "status": "disabled"},
+    )
+    assert disabled.status_code == 200
+    replacement = client.post(
+        f"{BASE}/cameras",
+        headers=HEADERS,
+        json={
+            "camera_id": "cam-005",
+            "name": "cam-005",
+            "stream_path": "cam-005",
+        },
+    )
+    assert replacement.status_code == 201
+    over_limit_enable = client.patch(
+        f"{BASE}/cameras/cam-001",
+        headers=HEADERS,
+        json={"enabled": True, "status": "offline"},
+    )
+    assert over_limit_enable.status_code == 409
+    assert over_limit_enable.json()["error"]["code"] == "CAMERA_LIMIT_REACHED"
+
+    # Restore this fixture's original four-camera set for history tests below.
+    assert client.delete(f"{BASE}/cameras/cam-005", headers=HEADERS).status_code == 204
+    assert client.patch(
+        f"{BASE}/cameras/cam-001",
+        headers=HEADERS,
+        json={"enabled": True, "status": "offline"},
+    ).status_code == 200
+
+    replaced = client.put(
+        f"{BASE}/users/{user['id']}/camera-permissions",
+        headers=HEADERS,
+        json={"camera_ids": ["cam-001"]},
+    )
+    assert replaced.status_code == 200
+    assert [item["camera_id"] for item in replaced.json()["items"]] == [
+        "cam-001"
+    ]
+    failed_replace = client.put(
+        f"{BASE}/users/{user['id']}/camera-permissions",
+        headers=HEADERS,
+        json={"camera_ids": ["cam-002", "cam-missing"]},
+    )
+    assert failed_replace.status_code == 404
+    unchanged = client.get(
+        f"{BASE}/users/{user['id']}/camera-permissions", headers=HEADERS
+    )
+    assert [item["camera_id"] for item in unchanged.json()["items"]] == [
+        "cam-001"
+    ]
+
+    start = datetime(2026, 8, 23, 8, 0, tzinfo=UTC)
+    _create_segment(
+        client,
+        settings,
+        camera_id="cam-001",
+        relative_path="cam-001/history.mp4",
+        start=start,
+        end=start + timedelta(seconds=10),
+    )
+    deletion_status = client.get(
+        f"{BASE}/cameras/cam-001/deletion-status", headers=HEADERS
+    )
+    assert deletion_status.status_code == 200
+    assert deletion_status.json() == {
+        "camera_id": "cam-001",
+        "deletable": False,
+        "reason_code": "CAMERA_HAS_HISTORY",
+    }
+    conflict = client.delete(f"{BASE}/cameras/cam-001", headers=HEADERS)
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "CAMERA_HAS_HISTORY"
+    assert client.get(
+        f"{BASE}/cameras/cam-001", headers=HEADERS
+    ).status_code == 200

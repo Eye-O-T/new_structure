@@ -22,7 +22,7 @@ install -d "$root/DEBIAN" "$root/etc/ai-cctv-edge" \
 cp "$repo_root/edge/packaging/debian/"* "$root/DEBIAN/"
 cp "$repo_root/edge/config/config.example.toml" \
     "$root/etc/ai-cctv-edge/config.toml"
-cp "$repo_root/edge/systemd/ai-cctv-edge.service" "$root/lib/systemd/system/"
+cp "$repo_root/edge/systemd/"*.service "$root/lib/systemd/system/"
 cp "$MEDIAMTX_BINARY" "$root/usr/lib/ai-cctv-edge/mediamtx"
 chmod 0755 "$root/usr/lib/ai-cctv-edge/mediamtx" "$root/DEBIAN/postinst" "$root/DEBIAN/prerm"
 

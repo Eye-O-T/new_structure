@@ -4,12 +4,21 @@
 
 - `database/`: Data Service만 read/write
 - `recordings/`: MediaMTX read/write, Data Service read/write
+- `recovered/`: Host에서는 별도 bind source이며 Data 컨테이너 안에서는
+  `/recordings/recovered`로 마운트
 - `snapshots/`: Inference read/write, Data Service read/write
 - `models/`: Inference read-only
 
 Data Service의 쓰기 권한은 새 미디어를 생성하기 위한 것이 아니다. Data Service가
 보존 기간 삭제와 DB-파일 reconciliation을 함께 수행하고, readiness에서 저장소
 가용성을 확인하기 위해 필요하다.
+
+Data Service는 시작 시와 주기 점검에서 `deleting` 상태를 다시 처리한다. 파일이
+남아 있으면 삭제를 재시도하고 이미 없으면 DB를 `deleted`로 수렴시킨다. 또한
+MediaMTX 완료 Hook이 Data/Nginx 장애로 끝내 전달되지 않았더라도 표준
+`<camera_id>/YYYY/MM/DD/<UTC>.mp4` 경로이고 settle 기간이 지난 파일은 파일명·mtime을
+검증해 `central` Segment로 멱등 인덱싱한다. 형식이 맞지 않는 파일은 임의로
+신뢰하지 않고 `orphaned` 진단 목록에 남긴다.
 
 ## 안전한 백업
 
@@ -37,16 +46,30 @@ Data Service가 시작되지 않는 장애 상황에서는 다음 보수적 절�
 
 ## Edge 구간 복구
 
-Recovery Coordinator는 별도 상시 컨테이너가 아니다. 실행 중인 Data 컨테이너에서
-필요한 시간 구간에 한해 one-shot CLI로 실행한다. Edge가 생성한 10초 MPEG-TS
-manifest를 조회하고, 각 파일을 순차 다운로드하여 SHA-256을 확인한 뒤
-`RECORDINGS_ROOT/<camera_id>/YYYY/MM/DD/`에 원자적으로 배치하고 Data 내부 HTTP
+정상 운영에서는 별도 상시 컨테이너를 추가하지 않고 Data Service 내부 Worker가
+복구 작업을 자동 처리한다. Edge Publisher의 `central_connection_lost`를 수집하면
+`detected`, 실제 게시 복구를 수집하면 `waiting_for_recovery`가 되고, Worker가
+`downloading`, `indexing`, `completed` 순서로 진행한다. 실패는 `failed`와 안전한
+오류를 기록하고 설정된 최대 횟수까지 지수 Backoff로 재시도한다. 같은 장애를 여러
+수집기가 순서가 바뀌어 보고해도 시작 최솟값과 종료 최댓값을 병합한다. Restore 뒤 기본 15초 settle 기간을 두어 Edge splitmux가 마지막 Segment를 닫은 다음에만 Job을 claim하며, 더 늦은 Restore 경계가 들어오면 종료와 claim 시각을 함께 연장한다. Inference
+소비자의 `inference_stream_lost/restored`는 Edge 업로드 단절이 아니므로 복구 작업을
+만들지 않는다.
+
+Coordinator는 Edge가 생성한 10초 MPEG-TS manifest를 조회하고, 각 파일을 순차
+다운로드하여 파일 크기와 SHA-256을 확인한 뒤
+`RECORDINGS_ROOT/recovered/<camera_id>/YYYY/MM/DD/`에 원자적으로 배치하고 Data 내부 HTTP
 API에 `source=edge_recovery`로 등록한다. 같은 명령을 다시 실행해도 파일 checksum과
 idempotency key로 중복 등록하지 않는다. 복구 성공이 Edge 파일을 삭제하지는 않는다.
 
+다음 one-shot CLI는 자동 Worker를 대신하는 정상 운영 경로가 아니다. 장애 Event가
+유실되었거나 운영자가 특정 UTC 구간을 다시 수집해야 할 때만 Data 컨테이너에서
+수동 보정 도구로 실행한다.
+
 Recovery token은 명령행 인자로 전달하지 않는다. 다음 예시는 host의 보호된 파일을
 명령 프로세스 환경으로만 읽고, `docker compose exec -e NAME`에는 변수 이름만
-전달한다. Data 내부 token은 컨테이너의 기존 `secrets.env`에서 읽는다.
+전달한다. Data 내부 호출에는 `data.env`의 Recovery 전용
+`DATA_RECOVERY_TOKEN`만 사용한다. 신규 Compose 배포는 결합 `secrets.env`를 허용하지
+않으며, Legacy 결합 Token fallback은 Compose 밖의 직접 개발·테스트에만 남겨 둔다.
 
 ```bash
 EDGE_RECOVERY_TOKEN="$(< /secure/ai-cctv/cam-001-recovery.token)" \

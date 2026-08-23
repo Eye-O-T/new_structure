@@ -41,6 +41,16 @@ def _read_positive_int(name: str, default: int) -> int:
     return value
 
 
+def _read_positive_float(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
 def _read_ttl_seconds(
     seconds_name: str,
     legacy_name: str,
@@ -99,6 +109,9 @@ class Settings:
     data_health_url: str
     internal_token: str
     jwt_secret: str
+    media_read_username: str
+    media_read_password: str
+    media_control_url: str = "http://nginx:8080/internal/media"
     jwt_issuer: str = "ai-cctv-external"
     jwt_audience: str = "ai-cctv"
     access_ttl_seconds: int = 900
@@ -109,6 +122,20 @@ class Settings:
     cookie_samesite: str = "lax"
     public_hls_prefix: str = "/hls"
     public_playback_prefix: str = "/playback"
+    public_base_url: str | None = None
+    # Edge profile application can spend 20 seconds waiting for another change,
+    # 20 seconds starting the new encoder and another 20 seconds on rollback.
+    # Keep the central deadline above that complete transaction window so a
+    # client cannot retry after an ambiguous timeout.
+    edge_control_timeout_seconds: float = 75.0
+    edge_status_timeout_seconds: float = 5.0
+    media_control_timeout_seconds: float = 5.0
+    edge_status_poll_interval_seconds: float = 5.0
+    edge_event_page_limit: int = 100
+    battery_low_percent: int = 20
+    battery_critical_percent: int = 10
+    storage_warning_percent: int = 85
+    storage_critical_percent: int = 95
     login_backoff_base_seconds: int = 1
     login_backoff_max_seconds: int = 60
     media_publish_credentials: Mapping[str, PublishCredential] = field(
@@ -118,12 +145,24 @@ class Settings:
     def __post_init__(self) -> None:
         _validate_http_url("DATA_BASE_URL", self.data_base_url)
         _validate_http_url("DATA_HEALTH_URL", self.data_health_url)
+        _validate_http_url("MEDIA_CONTROL_URL", self.media_control_url)
         if len(self.internal_token) < 16:
             raise RuntimeError(
-                "INTERNAL_SERVICE_TOKEN must contain at least 16 characters"
+                "DATA_EXTERNAL_TOKEN or legacy INTERNAL_SERVICE_TOKEN must contain "
+                "at least 16 characters"
             )
         if len(self.jwt_secret.encode("utf-8")) < 32:
             raise RuntimeError("JWT_SECRET must contain at least 32 bytes")
+        if not self.media_read_username or any(
+            character in self.media_read_username for character in "\x00\r\n"
+        ):
+            raise RuntimeError("MEDIA_READ_USERNAME must be a non-empty single line")
+        if len(self.media_read_password) < 32:
+            raise RuntimeError(
+                "MEDIA_READ_PASSWORD must contain at least 32 characters"
+            )
+        if any(character in self.media_read_password for character in "\x00\r\n"):
+            raise RuntimeError("MEDIA_READ_PASSWORD must be a single line")
         if self.cookie_samesite not in {"lax", "strict", "none"}:
             raise RuntimeError("COOKIE_SAMESITE must be lax, strict, or none")
         if self.cookie_samesite == "none" and not self.cookie_secure:
@@ -133,6 +172,34 @@ class Settings:
         for prefix in (self.public_hls_prefix, self.public_playback_prefix):
             if not prefix.startswith("/") or ".." in prefix:
                 raise RuntimeError("Public media prefixes must be absolute safe paths")
+        if self.public_base_url is not None:
+            parsed = urlsplit(self.public_base_url)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in {"", "/"}
+            ):
+                raise RuntimeError(
+                    "PUBLIC_BASE_URL must be a credential-free HTTPS origin"
+                )
+            object.__setattr__(
+                self, "public_base_url", self.public_base_url.rstrip("/")
+            )
+        if not 0 <= self.battery_critical_percent < self.battery_low_percent <= 100:
+            raise RuntimeError("battery thresholds are invalid")
+        if not 0 <= self.storage_warning_percent < self.storage_critical_percent <= 100:
+            raise RuntimeError("storage thresholds are invalid")
+        if self.edge_event_page_limit > 1000:
+            raise RuntimeError("EDGE_EVENT_PAGE_LIMIT cannot exceed 1000")
+        if self.edge_control_timeout_seconds <= 60:
+            raise RuntimeError(
+                "EDGE_CONTROL_TIMEOUT_SECONDS must exceed the 60-second "
+                "Edge lock, apply and rollback window"
+            )
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -152,8 +219,18 @@ class Settings:
                     "http://nginx:8080/internal/data/health/ready",
                 ),
             ),
-            internal_token=os.getenv("INTERNAL_SERVICE_TOKEN", ""),
+            internal_token=(
+                os.getenv("DATA_EXTERNAL_TOKEN")
+                or os.getenv("INTERNAL_SERVICE_TOKEN")
+                or ""
+            ),
             jwt_secret=os.getenv("JWT_SECRET", ""),
+            media_read_username=os.getenv("MEDIA_READ_USERNAME", ""),
+            media_read_password=os.getenv("MEDIA_READ_PASSWORD", ""),
+            media_control_url=_validate_http_url(
+                "MEDIA_CONTROL_URL",
+                os.getenv("MEDIA_CONTROL_URL", "http://nginx:8080/internal/media"),
+            ),
             jwt_issuer=os.getenv("JWT_ISSUER", "ai-cctv-external"),
             jwt_audience=os.getenv("JWT_AUDIENCE", "ai-cctv"),
             access_ttl_seconds=_read_ttl_seconds(
@@ -177,6 +254,24 @@ class Settings:
                 "PUBLIC_PLAYBACK_PREFIX",
                 "/playback",
             ).rstrip("/"),
+            public_base_url=(os.getenv("PUBLIC_BASE_URL") or "").rstrip("/") or None,
+            edge_control_timeout_seconds=_read_positive_float(
+                "EDGE_CONTROL_TIMEOUT_SECONDS", 75.0
+            ),
+            edge_status_timeout_seconds=_read_positive_float(
+                "EDGE_STATUS_TIMEOUT_SECONDS", 5.0
+            ),
+            media_control_timeout_seconds=_read_positive_float(
+                "MEDIA_CONTROL_TIMEOUT_SECONDS", 5.0
+            ),
+            edge_status_poll_interval_seconds=_read_positive_float(
+                "EDGE_STATUS_POLL_INTERVAL_SECONDS", 5.0
+            ),
+            edge_event_page_limit=_read_positive_int("EDGE_EVENT_PAGE_LIMIT", 100),
+            battery_low_percent=_read_positive_int("BATTERY_LOW_PERCENT", 20),
+            battery_critical_percent=_read_positive_int("BATTERY_CRITICAL_PERCENT", 10),
+            storage_warning_percent=_read_positive_int("STORAGE_WARNING_PERCENT", 85),
+            storage_critical_percent=_read_positive_int("STORAGE_CRITICAL_PERCENT", 95),
             login_backoff_base_seconds=_read_positive_int(
                 "LOGIN_BACKOFF_BASE_SECONDS",
                 1,

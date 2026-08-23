@@ -9,15 +9,63 @@ from pathlib import Path
 from typing import Literal
 
 CAMERA_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+VideoProfileName = Literal["hd", "fhd"]
+
+
+@dataclass(frozen=True)
+class VideoProfile:
+    name: VideoProfileName
+    width: int
+    height: int
+    fps: int
+    bitrate_kbps: int
+    codec: str = "H.264"
+
+
+VIDEO_PROFILES: dict[str, VideoProfile] = {
+    "hd": VideoProfile("hd", 1280, 720, 30, 2000),
+    "fhd": VideoProfile("fhd", 1920, 1080, 30, 4000),
+}
 
 
 @dataclass(frozen=True)
 class VideoConfig:
-    width: int = 1920
-    height: int = 1080
+    width: int = 1280
+    height: int = 720
     fps: int = 30
-    bitrate_kbps: int = 4000
+    bitrate_kbps: int = 2000
     encoder: str = "x264enc"
+    profile: VideoProfileName = "hd"
+    supported_profiles: tuple[VideoProfileName, ...] = ("hd", "fhd")
+
+    @classmethod
+    def from_profile(
+        cls,
+        profile: str,
+        *,
+        encoder: str = "x264enc",
+        supported_profiles: tuple[VideoProfileName, ...] = ("hd", "fhd"),
+    ) -> "VideoConfig":
+        try:
+            selected = VIDEO_PROFILES[profile]
+        except KeyError as exc:
+            raise ValueError(f"unsupported video profile: {profile}") from exc
+        return cls(
+            width=selected.width,
+            height=selected.height,
+            fps=selected.fps,
+            bitrate_kbps=selected.bitrate_kbps,
+            encoder=encoder,
+            profile=selected.name,
+            supported_profiles=supported_profiles,
+        )
+
+    def with_profile(self, profile: str) -> "VideoConfig":
+        return self.from_profile(
+            profile,
+            encoder=self.encoder,
+            supported_profiles=self.supported_profiles,
+        )
 
 
 @dataclass(frozen=True)
@@ -47,6 +95,24 @@ class RecoveryConfig:
 
 
 @dataclass(frozen=True)
+class ControlConfig:
+    bind_host: str = "0.0.0.0"
+    port: int = 8003
+    # The same edge_auth_token protects management and recovery by default.
+    token_file: Path = Path("/etc/ai-cctv-edge/recovery.token")
+    apply_timeout_seconds: float = 30.0
+    preflight_timeout_seconds: float = 10.0
+
+
+@dataclass(frozen=True)
+class MonitoringConfig:
+    interval_seconds: float = 5.0
+    frame_timeout_seconds: float = 5.0
+    battery_low_percent: int = 20
+    battery_critical_percent: int = 10
+
+
+@dataclass(frozen=True)
 class EdgeConfig:
     schema_version: int
     device_id: str
@@ -55,6 +121,8 @@ class EdgeConfig:
     rtsp: RtspConfig
     backup: BackupConfig
     recovery: RecoveryConfig
+    control: ControlConfig = ControlConfig()
+    monitoring: MonitoringConfig = MonitoringConfig()
 
     @classmethod
     def load(cls, path: str | Path) -> "EdgeConfig":
@@ -64,16 +132,60 @@ class EdgeConfig:
         rtsp = raw.get("rtsp", {})
         backup = raw.get("backup", {})
         recovery = raw.get("recovery", {})
+        control = raw.get("control", {})
+        monitoring = raw.get("monitoring", {})
+
+        requested_profile = str(video.get("profile", "")).lower()
+        if requested_profile:
+            if requested_profile not in VIDEO_PROFILES:
+                raise ValueError(f"unsupported video profile: {requested_profile}")
+            profile_defaults = VIDEO_PROFILES[requested_profile]
+        else:
+            # Schema v1 files written by releases before profiles were explicit
+            # remain readable when their values exactly match HD or FHD.
+            legacy_values = (
+                int(video.get("width", 1280)),
+                int(video.get("height", 720)),
+                int(video.get("fps", 30)),
+                int(video.get("bitrate_kbps", 2000)),
+            )
+            matching = next(
+                (
+                    item
+                    for item in VIDEO_PROFILES.values()
+                    if legacy_values
+                    == (item.width, item.height, item.fps, item.bitrate_kbps)
+                ),
+                None,
+            )
+            if matching is None:
+                raise ValueError(
+                    "video settings must exactly match the hd or fhd profile"
+                )
+            profile_defaults = matching
+            requested_profile = matching.name
+
+        raw_supported = video.get("supported_profiles", list(VIDEO_PROFILES))
+        if not isinstance(raw_supported, list):
+            raise ValueError("video.supported_profiles must be an array")
+        supported_profiles = tuple(str(item).lower() for item in raw_supported)
+        recovery_token_file = Path(
+            recovery.get("token_file", "/etc/ai-cctv-edge/recovery.token")
+        )
         config = cls(
             schema_version=int(raw.get("schema_version", 0)),
             device_id=str(raw.get("device_id", "")),
             camera_id=str(raw.get("camera_id", "")),
             video=VideoConfig(
-                width=int(video.get("width", 1920)),
-                height=int(video.get("height", 1080)),
-                fps=int(video.get("fps", 30)),
-                bitrate_kbps=int(video.get("bitrate_kbps", 4000)),
+                width=int(video.get("width", profile_defaults.width)),
+                height=int(video.get("height", profile_defaults.height)),
+                fps=int(video.get("fps", profile_defaults.fps)),
+                bitrate_kbps=int(
+                    video.get("bitrate_kbps", profile_defaults.bitrate_kbps)
+                ),
                 encoder=str(video.get("encoder", "x264enc")),
+                profile=requested_profile,
+                supported_profiles=supported_profiles,
             ),
             rtsp=RtspConfig(
                 mode=str(rtsp.get("mode", "central_publish")),
@@ -97,8 +209,25 @@ class EdgeConfig:
             recovery=RecoveryConfig(
                 bind_host=str(recovery.get("bind_host", "0.0.0.0")),
                 port=int(recovery.get("port", 8002)),
-                token_file=Path(
-                    recovery.get("token_file", "/etc/ai-cctv-edge/recovery.token")
+                token_file=recovery_token_file,
+            ),
+            control=ControlConfig(
+                bind_host=str(control.get("bind_host", "0.0.0.0")),
+                port=int(control.get("port", 8003)),
+                token_file=Path(control.get("token_file", recovery_token_file)),
+                apply_timeout_seconds=float(control.get("apply_timeout_seconds", 30.0)),
+                preflight_timeout_seconds=float(
+                    control.get("preflight_timeout_seconds", 10.0)
+                ),
+            ),
+            monitoring=MonitoringConfig(
+                interval_seconds=float(monitoring.get("interval_seconds", 5.0)),
+                frame_timeout_seconds=float(
+                    monitoring.get("frame_timeout_seconds", 5.0)
+                ),
+                battery_low_percent=int(monitoring.get("battery_low_percent", 20)),
+                battery_critical_percent=int(
+                    monitoring.get("battery_critical_percent", 10)
                 ),
             ),
         )
@@ -120,12 +249,60 @@ class EdgeConfig:
             raise ValueError("invalid edge RTSP port")
         if not 1 <= self.recovery.port <= 65535:
             raise ValueError("invalid recovery port")
+        if not 1 <= self.control.port <= 65535:
+            raise ValueError("invalid control port")
+        if self.control.port == self.recovery.port:
+            raise ValueError("control and recovery ports must be different")
         if not (16 <= self.video.width <= 7680 and 16 <= self.video.height <= 4320):
             raise ValueError("unsupported video dimensions")
         if not 1 <= self.video.fps <= 120:
             raise ValueError("video.fps must be in range 1..120")
         if not 100 <= self.video.bitrate_kbps <= 100_000:
             raise ValueError("video.bitrate_kbps must be in range 100..100000")
+        if self.video.profile not in VIDEO_PROFILES:
+            raise ValueError("video.profile must be hd or fhd")
+        expected = VIDEO_PROFILES[self.video.profile]
+        actual = (
+            self.video.width,
+            self.video.height,
+            self.video.fps,
+            self.video.bitrate_kbps,
+        )
+        wanted = (
+            expected.width,
+            expected.height,
+            expected.fps,
+            expected.bitrate_kbps,
+        )
+        if actual != wanted:
+            raise ValueError(
+                f"video values do not match the {self.video.profile} profile"
+            )
+        if not self.video.supported_profiles:
+            raise ValueError("video.supported_profiles cannot be empty")
+        if len(set(self.video.supported_profiles)) != len(
+            self.video.supported_profiles
+        ):
+            raise ValueError("video.supported_profiles cannot contain duplicates")
+        if any(name not in VIDEO_PROFILES for name in self.video.supported_profiles):
+            raise ValueError("video.supported_profiles may only contain hd and fhd")
+        if self.video.profile not in self.video.supported_profiles:
+            raise ValueError("current video.profile must be supported")
+        if self.control.apply_timeout_seconds <= 0:
+            raise ValueError("control.apply_timeout_seconds must be positive")
+        if self.control.preflight_timeout_seconds <= 0:
+            raise ValueError("control.preflight_timeout_seconds must be positive")
+        if self.monitoring.interval_seconds <= 0:
+            raise ValueError("monitoring.interval_seconds must be positive")
+        if self.monitoring.frame_timeout_seconds <= 0:
+            raise ValueError("monitoring.frame_timeout_seconds must be positive")
+        if not (
+            0
+            <= self.monitoring.battery_critical_percent
+            < self.monitoring.battery_low_percent
+            <= 100
+        ):
+            raise ValueError("invalid monitoring battery thresholds")
         if self.backup.segment_seconds != 10:
             raise ValueError(
                 "edge backup segment_seconds must be 10 in schema version 1"
@@ -159,11 +336,15 @@ def render_toml(config: EdgeConfig) -> str:
             f"camera_id = {_quote(config.camera_id)}",
             "",
             "[video]",
+            f"profile = {_quote(config.video.profile)}",
             f"width = {config.video.width}",
             f"height = {config.video.height}",
             f"fps = {config.video.fps}",
             f"bitrate_kbps = {config.video.bitrate_kbps}",
             f"encoder = {_quote(config.video.encoder)}",
+            "supported_profiles = ["
+            + ", ".join(_quote(item) for item in config.video.supported_profiles)
+            + "]",
             "",
             "[rtsp]",
             f"mode = {_quote(config.rtsp.mode)}",
@@ -184,6 +365,19 @@ def render_toml(config: EdgeConfig) -> str:
             f"bind_host = {_quote(config.recovery.bind_host)}",
             f"port = {config.recovery.port}",
             f"token_file = {_quote(config.recovery.token_file)}",
+            "",
+            "[control]",
+            f"bind_host = {_quote(config.control.bind_host)}",
+            f"port = {config.control.port}",
+            f"token_file = {_quote(config.control.token_file)}",
+            f"apply_timeout_seconds = {config.control.apply_timeout_seconds:g}",
+            f"preflight_timeout_seconds = {config.control.preflight_timeout_seconds:g}",
+            "",
+            "[monitoring]",
+            f"interval_seconds = {config.monitoring.interval_seconds:g}",
+            f"frame_timeout_seconds = {config.monitoring.frame_timeout_seconds:g}",
+            f"battery_low_percent = {config.monitoring.battery_low_percent}",
+            f"battery_critical_percent = {config.monitoring.battery_critical_percent}",
             "",
         ]
     )

@@ -43,11 +43,14 @@ def run_checks(config: EdgeConfig) -> list[Check]:
     checks = [_command("gst-launch-1.0"), _command("gst-inspect-1.0")]
     for plugin in (
         "libcamerasrc",
+        "watchdog",
         "videoconvert",
         config.video.encoder,
         "h264parse",
         "splitmuxsink",
         "mpegtsmux",
+        "videotestsrc",
+        "fakesink",
     ):
         checks.append(_plugin(plugin))
     if config.rtsp.mode == "central_pull":
@@ -115,7 +118,9 @@ def run_checks(config: EdgeConfig) -> list[Check]:
     except OSError as exc:
         checks.append(Check(network_name, "WARN", str(exc)))
 
-    secret_paths = [("Recovery token", config.recovery.token_file)]
+    secret_paths = [("Edge auth token", config.control.token_file)]
+    if config.recovery.token_file != config.control.token_file:
+        secret_paths.append(("Recovery token alias", config.recovery.token_file))
     if config.rtsp.mode == "central_publish":
         secret_paths.append(("Publish password", config.rtsp.password_file))
     for name, path in secret_paths:

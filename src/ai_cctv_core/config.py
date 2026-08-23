@@ -7,6 +7,7 @@ import tempfile
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -64,6 +65,8 @@ class CameraBootstrap(StrictModel):
     name: str = Field(min_length=1, max_length=128)
     stream_path: str | None = None
     edge_device_id: str | None = Field(default=None, max_length=128)
+    edge_management_url: str | None = Field(default=None, max_length=2048)
+    edge_recovery_url: str | None = Field(default=None, max_length=2048)
     source_url: str | None = None
     enabled: bool = True
 
@@ -71,6 +74,22 @@ class CameraBootstrap(StrictModel):
     @classmethod
     def camera_id_is_valid(cls, value: str) -> str:
         return validate_camera_id(value)
+
+    @field_validator("edge_management_url", "edge_recovery_url")
+    @classmethod
+    def edge_service_url_is_http(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("Edge service URL must be an HTTP(S) URL")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("Edge service URL must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("Edge service URL must not contain query or fragment")
+        if any(part == ".." for part in parsed.path.split("/")):
+            raise ValueError("Edge service URL contains an invalid path")
+        return value.rstrip("/")
 
     @model_validator(mode="after")
     def normalize_path(self) -> "CameraBootstrap":

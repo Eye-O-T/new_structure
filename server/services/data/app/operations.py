@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from datetime import UTC, datetime, timedelta
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from ai_cctv_core.identifiers import safe_storage_path
@@ -15,6 +16,11 @@ from .config import Settings
 from .errors import ApiError
 from .repository import DataRepository
 from .schemas import RecordingSegmentCreate, RetentionRequest
+
+
+_CENTRAL_RECORDING_FILENAME = re.compile(
+    r"^(?P<date>\d{8})T(?P<time>\d{6})-(?P<fraction>\d{1,9})Z\.mp4$"
+)
 
 
 def normalize_relative_path(root: Path, raw_path: str) -> tuple[str, Path]:
@@ -133,10 +139,78 @@ def prepare_segment(
     }
 
 
+def _prepare_orphaned_central_segment(
+    *,
+    relative_path: str,
+    target: Path,
+    repository: DataRepository,
+    settings: Settings,
+) -> dict[str, Any] | None:
+    """Rebuild metadata when a completed MediaMTX hook was not delivered."""
+
+    parts = PurePosixPath(relative_path).parts
+    if len(parts) != 5:
+        return None
+    camera_id, year, month, day, filename = parts
+    match = _CENTRAL_RECORDING_FILENAME.fullmatch(filename)
+    if match is None or repository.get_camera(camera_id) is None:
+        return None
+
+    fraction = match.group("fraction")[:6].ljust(6, "0")
+    try:
+        start_time = datetime.strptime(
+            f"{match.group('date')}{match.group('time')}{fraction}",
+            "%Y%m%d%H%M%S%f",
+        ).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+    if (year, month, day) != (
+        start_time.strftime("%Y"),
+        start_time.strftime("%m"),
+        start_time.strftime("%d"),
+    ):
+        return None
+
+    stat = target.stat()
+    modified_at = datetime.fromtimestamp(stat.st_mtime, UTC)
+    if (utc_now() - modified_at).total_seconds() < settings.recovery_settle_seconds:
+        # The active recorder may still be finalizing the newest path. A later
+        # maintenance pass will index it after the settle window.
+        return None
+    expected_end = start_time + timedelta(
+        seconds=settings.central_recording_segment_seconds
+    )
+    max_plausible_end = start_time + timedelta(
+        seconds=settings.central_recording_segment_seconds * 2
+    )
+    end_time = (
+        modified_at
+        if start_time < modified_at <= max_plausible_end
+        else expected_end
+    )
+    duration_ms = max(1, round((end_time - start_time).total_seconds() * 1_000))
+    return {
+        "camera_id": camera_id,
+        "start_time": format_utc(start_time),
+        "end_time": format_utc(end_time),
+        "relative_path": relative_path,
+        "format": "fmp4",
+        "codec": "h264",
+        "duration_ms": duration_ms,
+        "file_size": stat.st_size,
+        "source": "central",
+        "status": "ready",
+        "checksum": None,
+        "idempotency_key": f"recording-reconcile:{camera_id}:{relative_path}",
+    }
+
+
 def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
     missing: list[str] = []
     restored: list[str] = []
     corrupt: list[str] = []
+    completed_deletions: list[str] = []
+    deletion_retry_errors: list[str] = []
     known_paths: set[str] = set()
     for segment in repository.list_segments_for_reconcile():
         relative_path, target = normalize_relative_path(
@@ -144,6 +218,18 @@ def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
         )
         known_paths.add(relative_path)
         exists = target.is_file()
+        if segment["status"] == "deleting":
+            if exists:
+                try:
+                    target.unlink()
+                except OSError:
+                    # Keep the durable `deleting` marker so the next startup
+                    # or maintenance pass retries the same idempotent unlink.
+                    deletion_retry_errors.append(relative_path)
+                    continue
+            repository.set_segment_status(segment["id"], "deleted")
+            completed_deletions.append(relative_path)
+            continue
         if not exists and segment["status"] not in {"writing", "missing"}:
             repository.set_segment_status(segment["id"], "missing")
             missing.append(relative_path)
@@ -157,6 +243,7 @@ def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
                 restored.append(relative_path)
 
     orphaned: list[str] = []
+    indexed_orphans: list[str] = []
     for path in settings.storage_root.rglob("*"):
         if not path.is_file():
             continue
@@ -166,13 +253,41 @@ def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
             )
         except ValueError:
             continue
-        if relative not in known_paths:
+        if relative in known_paths:
+            continue
+        existing = repository.get_segment_by_path(relative)
+        if existing is not None:
+            # A file that reappears after a durable `deleted` row is not a
+            # missed hook. Keep it visible to operators instead of silently
+            # resurrecting media removed by retention policy.
             orphaned.append(relative)
+            continue
+        values = _prepare_orphaned_central_segment(
+            relative_path=relative,
+            target=path,
+            repository=repository,
+            settings=settings,
+        )
+        if values is None:
+            orphaned.append(relative)
+            continue
+        segment, created = repository.create_segment(values)
+        if created:
+            repository.link_segment_to_events(
+                segment,
+                settings.event_pre_roll_seconds,
+                settings.event_post_roll_seconds,
+            )
+        known_paths.add(relative)
+        indexed_orphans.append(relative)
     return {
         "missing": sorted(missing),
         "restored": sorted(restored),
         "corrupt": sorted(corrupt),
         "orphaned": sorted(orphaned),
+        "indexed_orphans": sorted(indexed_orphans),
+        "completed_deletions": sorted(completed_deletions),
+        "deletion_retry_errors": sorted(deletion_retry_errors),
     }
 
 

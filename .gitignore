@@ -20,6 +20,7 @@ config/config.yaml
 config/secrets.env
 server/config/config.yaml
 server/secrets/secrets.env
+server/secrets/*.json
 server/certs/*
 !server/certs/README.md
 !server/certs/.gitkeep

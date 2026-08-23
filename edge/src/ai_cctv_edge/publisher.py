@@ -3,14 +3,36 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
 import signal
 import threading
 from pathlib import Path
 
 from .config import EdgeConfig
+from .config import write_atomic
+from .state import default_state_root, utc_timestamp
 
 LOGGER = logging.getLogger("ai_cctv.edge.publisher")
+
+
+def _write_status(camera_id: str, status: str, error: str | None = None) -> None:
+    write_atomic(
+        default_state_root() / "publisher-status.json",
+        json.dumps(
+            {
+                "camera_id": camera_id,
+                "pid": os.getpid(),
+                "status": status,
+                "updated_at": utc_timestamp(),
+                "last_error": error,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+    )
 
 
 def publish(config_path: str | Path) -> int:
@@ -62,6 +84,10 @@ def publish(config_path: str | Path) -> int:
     try:
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("GStreamer publisher could not enter PLAYING state")
+        _change, current, _pending = pipeline.get_state(5 * Gst.SECOND)
+        if current != Gst.State.PLAYING:
+            raise RuntimeError("RTSP publisher did not reach PLAYING state")
+        _write_status(config.camera_id, "online")
         LOGGER.info("publishing camera %s to %s", config.camera_id, location)
         while not stopped.is_set():
             message = bus.timed_pop_filtered(
@@ -73,11 +99,16 @@ def publish(config_path: str | Path) -> int:
             if message.type == Gst.MessageType.ERROR:
                 error, _debug = message.parse_error()
                 LOGGER.error("publisher failed: %s", error.message)
+                _write_status(config.camera_id, "offline", error.message)
                 result = 1
             else:
                 LOGGER.warning("publisher reached end of stream")
+                _write_status(config.camera_id, "offline", "end_of_stream")
                 result = 1
             break
+    except Exception as exc:
+        _write_status(config.camera_id, "offline", type(exc).__name__)
+        raise
     finally:
         pipeline.set_state(Gst.State.NULL)
     return result

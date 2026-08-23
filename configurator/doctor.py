@@ -171,7 +171,9 @@ def checks(server_dir: Path, config_path: Path) -> list[Check]:
                     "-c",
                     (
                         "import urllib.request;"
-                        "print(urllib.request.urlopen("
+                        "opener=urllib.request.build_opener("
+                        "urllib.request.ProxyHandler({}));"
+                        "print(opener.open("
                         "'http://127.0.0.1:8000/internal/v1/status',timeout=3"
                         ").read().decode())"
                     ),

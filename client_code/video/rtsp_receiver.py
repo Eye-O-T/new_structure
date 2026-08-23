@@ -1,7 +1,6 @@
 import cv2
 import threading  # 멀티스레딩 씀. 영상 수신 스레드와 감시(Watchdog) 스레드를 병렬로 실행할려고
 import time  # 시간 계측 및 지연(sleep) 관리
-import sys  # 시스템 출력 콘솔 제어 (대기 메시지 출력용)
 import os  # 운영체제 환경변수 설정용 (FFmpeg 옵션 주입)
 import socket  # 네트워크 소켓 통신: 서버의 포트가 살아있는지 사전 노크(TCP Handshake)용.
 from datetime import datetime

@@ -21,5 +21,20 @@ install -d -m 0750 -o ai-cctv-edge -g ai-cctv-edge \
     /var/lib/ai-cctv-edge/recordings /var/lib/ai-cctv-edge/state
 chown root:ai-cctv-edge /etc/ai-cctv-edge
 chmod 0750 /etc/ai-cctv-edge
+if [ ! -s /etc/ai-cctv-edge/recovery.token ]; then
+    umask 0077
+    python3 -c 'import secrets; print(secrets.token_urlsafe(48))' \
+        > /etc/ai-cctv-edge/recovery.token
+fi
+chown root:ai-cctv-edge /etc/ai-cctv-edge/recovery.token
+chmod 0640 /etc/ai-cctv-edge/recovery.token
 systemctl daemon-reload
-systemctl enable ai-cctv-edge.service
+systemctl enable ai-cctv-edge.service \
+    ai-cctv-edge-control.service ai-cctv-edge-recovery.service
+if [ -n "${2:-}" ]; then
+    # Package upgrades replace the wheel and generated virtual environment
+    # while existing processes keep the old code mapped. Restart only units
+    # that were already active; a first install remains setup-first.
+    systemctl try-restart ai-cctv-edge.service \
+        ai-cctv-edge-control.service ai-cctv-edge-recovery.service
+fi

@@ -19,7 +19,7 @@ SolidCompression=yes
 [Files]
 Source: "..\..\dist\AI_CCTV_Configurator.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\src\*"; DestDir: "{app}\src"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\..\server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,secrets.env,runtime\*"
+Source: "..\..\server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,secrets\*.env,secrets\*.json,runtime\*"
 
 [Icons]
 Name: "{group}\AI CCTV Configurator"; Filename: "{app}\{#MyAppExeName}"

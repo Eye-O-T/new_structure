@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
@@ -23,6 +24,7 @@ from fastapi import (
     Response,
     status,
 )
+from fastapi.responses import FileResponse
 
 from .config import Settings
 from .database import Database
@@ -36,13 +38,17 @@ from .operations import (
     storage_is_ready,
     storage_usage,
 )
-from .repository import DataRepository
+from .repository import CameraHasHistory, CameraLimitReached, DataRepository
+from .recovery_coordinator import RecoveryCoordinator, RecoveryError
 from .schemas import (
     BackupRequest,
     CameraCreate,
+    CameraPermissionsReplace,
     CameraPublishCredentialPut,
+    CameraRuntimeStatusPut,
     CameraStatusUpdate,
     CameraUpdate,
+    EdgeDevicePut,
     EventCreate,
     RecordingSegmentCreate,
     RefreshTokenCreate,
@@ -50,9 +56,20 @@ from .schemas import (
     RevokedTokenPut,
     UserCreate,
     UserUpdate,
+    VideoProfileStatePatch,
 )
 
 LOGGER = logging.getLogger("ai_cctv.data")
+
+_ROUTE_SCOPES: dict[tuple[str, str], frozenset[str]] = {
+    ("GET", "/internal/v1/cameras/enabled"): frozenset({"inference"}),
+    ("PATCH", "/internal/v1/cameras/{camera_id}/status"): frozenset(
+        {"inference"}
+    ),
+    ("POST", "/internal/v1/events"): frozenset({"external", "inference"}),
+    ("POST", "/internal/v1/hooks/recording-complete"): frozenset({"media"}),
+    ("POST", "/internal/v1/recording-segments"): frozenset({"recovery"}),
+}
 
 
 def get_repository(request: Request) -> DataRepository:
@@ -67,16 +84,40 @@ def require_internal_token(
     request: Request,
     x_internal_token: Annotated[str | None, Header()] = None,
 ) -> None:
-    expected = request.app.state.settings.internal_token
-    if not expected:
+    settings: Settings = request.app.state.settings
+    configured_tokens = settings.data_api_tokens()
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", request.url.path)
+    allowed_scopes = _ROUTE_SCOPES.get(
+        (request.method.upper(), route_path), frozenset({"external"})
+    )
+    expected_tokens = {
+        configured_tokens[scope]
+        for scope in allowed_scopes
+        if configured_tokens.get(scope)
+    }
+    if not expected_tokens:
         raise ApiError(
             503,
             "INTERNAL_TOKEN_NOT_CONFIGURED",
             "Data Service 내부 인증 토큰이 설정되지 않았습니다.",
         )
-    if x_internal_token is None or not hmac.compare_digest(
-        x_internal_token.encode("utf-8"), expected.encode("utf-8")
+    if x_internal_token is not None and any(
+        hmac.compare_digest(x_internal_token, expected)
+        for expected in expected_tokens
     ):
+        return
+    if x_internal_token is not None and any(
+        hmac.compare_digest(x_internal_token, configured)
+        for configured in set(configured_tokens.values())
+        if configured
+    ):
+        raise ApiError(
+            403,
+            "INTERNAL_SCOPE_FORBIDDEN",
+            "The service token is not authorized for this Data API operation.",
+        )
+    else:
         raise ApiError(401, "INVALID_INTERNAL_TOKEN", "내부 인증에 실패했습니다.")
 
 
@@ -189,15 +230,58 @@ def build_internal_router() -> APIRouter:
             raise _not_found("user")
         return {"items": repository.list_user_cameras(user_id)}
 
+    @router.put("/users/{user_id}/camera-permissions")
+    def replace_camera_permissions(
+        user_id: int,
+        payload: CameraPermissionsReplace,
+        repository: Repo,
+    ) -> dict[str, Any]:
+        try:
+            items = repository.replace_camera_permissions(
+                user_id, payload.camera_ids
+            )
+        except LookupError as exc:
+            raise _not_found("user") from exc
+        except ValueError as exc:
+            raise ApiError(
+                404,
+                "CAMERA_NOT_FOUND",
+                "One or more requested cameras were not found.",
+            ) from exc
+        return {"items": items}
+
     @router.post("/cameras", status_code=status.HTTP_201_CREATED)
     def create_camera(payload: CameraCreate, repository: Repo) -> dict[str, Any]:
-        if repository.camera_count() >= 4:
+        try:
+            return repository.create_camera(payload.model_dump(mode="json"))
+        except CameraLimitReached as exc:
             raise ApiError(
                 409,
                 "CAMERA_LIMIT_REACHED",
                 "스키마 버전 1은 카메라를 최대 4대까지 지원합니다.",
-            )
-        return repository.create_camera(payload.model_dump(mode="json"))
+            ) from exc
+
+    @router.put("/edge-devices/{edge_device_id}")
+    def put_edge_device(
+        edge_device_id: str, payload: EdgeDevicePut, repository: Repo
+    ) -> dict[str, Any]:
+        return repository.put_edge_device(
+            edge_device_id,
+            payload.management_url,
+            payload.recovery_url,
+            payload.auth_token,
+        )
+
+    @router.get("/edge-devices/{edge_device_id}")
+    def get_edge_device(edge_device_id: str, repository: Repo) -> dict[str, Any]:
+        device = repository.get_edge_device(edge_device_id)
+        if device is None:
+            raise _not_found("edge_device")
+        return device
+
+    @router.get("/camera-control-targets")
+    def list_camera_control_targets(repository: Repo) -> dict[str, Any]:
+        return {"items": repository.list_camera_control_targets()}
 
     # Static path is intentionally registered before /cameras/{camera_id}.
     @router.get("/cameras/enabled")
@@ -209,6 +293,15 @@ def build_internal_router() -> APIRouter:
             raise _not_found("user")
         items = repository.list_cameras(200, 0, enabled_only=True, user_id=user_id)
         return {"items": items}
+
+    @router.get("/cameras/{camera_id}/deletion-status")
+    def get_camera_deletion_status(
+        camera_id: str, repository: Repo
+    ) -> dict[str, Any]:
+        status_result = repository.get_camera_deletion_status(camera_id)
+        if status_result is None:
+            raise _not_found("camera")
+        return status_result
 
     @router.get("/cameras")
     def list_cameras(
@@ -240,7 +333,14 @@ def build_internal_router() -> APIRouter:
         camera_id: str, payload: CameraUpdate, repository: Repo
     ) -> dict[str, Any]:
         values = payload.model_dump(mode="json", exclude_unset=True)
-        camera = repository.update_camera(camera_id, values)
+        try:
+            camera = repository.update_camera(camera_id, values)
+        except CameraLimitReached as exc:
+            raise ApiError(
+                409,
+                "CAMERA_LIMIT_REACHED",
+                "At most four cameras can be enabled at once.",
+            ) from exc
         if camera is None:
             raise _not_found("camera")
         return camera
@@ -254,9 +354,77 @@ def build_internal_router() -> APIRouter:
             raise _not_found("camera")
         return camera
 
+    @router.get("/cameras/{camera_id}/control-target")
+    def get_camera_control_target(
+        camera_id: str, repository: Repo
+    ) -> dict[str, Any]:
+        target = repository.get_camera_control_target(camera_id)
+        if target is None:
+            if repository.get_camera(camera_id) is None:
+                raise _not_found("camera")
+            raise ApiError(
+                409,
+                "CAPABILITY_UNKNOWN",
+                "Edge management metadata is not configured.",
+            )
+        return target
+
+    @router.get("/cameras/{camera_id}/video-profile")
+    def get_camera_video_profile(
+        camera_id: str, repository: Repo
+    ) -> dict[str, Any]:
+        profile = repository.get_camera_video_profile(camera_id)
+        if profile is None:
+            raise _not_found("camera")
+        return profile
+
+    @router.patch("/cameras/{camera_id}/video-profile")
+    def update_camera_video_profile(
+        camera_id: str,
+        payload: VideoProfileStatePatch,
+        repository: Repo,
+    ) -> dict[str, Any]:
+        profile = repository.update_camera_video_profile(
+            camera_id, payload.model_dump(mode="json", exclude_unset=True)
+        )
+        if profile is None:
+            raise _not_found("camera")
+        return profile
+
+    @router.get("/cameras/{camera_id}/runtime-status")
+    def get_camera_runtime_status(
+        camera_id: str, repository: Repo
+    ) -> dict[str, Any]:
+        runtime = repository.get_camera_runtime_status(camera_id)
+        if runtime is None:
+            raise _not_found("camera")
+        return runtime
+
+    @router.put("/cameras/{camera_id}/runtime-status")
+    def put_camera_runtime_status(
+        camera_id: str,
+        payload: CameraRuntimeStatusPut,
+        repository: Repo,
+    ) -> dict[str, Any]:
+        values = payload.model_dump(mode="json", exclude_unset=True)
+        if payload.last_seen_at is not None:
+            values["last_seen_at"] = format_utc(payload.last_seen_at)
+        runtime = repository.update_camera_runtime_status(camera_id, values)
+        if runtime is None:
+            raise _not_found("camera")
+        return runtime
+
     @router.delete("/cameras/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_camera(camera_id: str, repository: Repo) -> Response:
-        if not repository.delete_camera(camera_id):
+        try:
+            deleted = repository.delete_camera(camera_id)
+        except CameraHasHistory as exc:
+            raise ApiError(
+                409,
+                "CAMERA_HAS_HISTORY",
+                "Camera history must be retained; disable the camera instead.",
+            ) from exc
+        if not deleted:
             raise _not_found("camera")
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -324,6 +492,39 @@ def build_internal_router() -> APIRouter:
             raise _not_found("recording")
         return segment
 
+    @router.get("/recording-segments/{segment_id}/content")
+    def get_recording_segment_content(
+        segment_id: int,
+        repository: Repo,
+        settings: RuntimeSettings,
+    ) -> FileResponse:
+        segment = repository.get_segment(segment_id)
+        if segment is None:
+            raise _not_found("recording")
+        if segment.get("status") != "ready":
+            raise ApiError(
+                409,
+                "RECORDING_NOT_READY",
+                "The recording content is not ready for playback.",
+            )
+        _relative_path, target = normalize_relative_path(
+            settings.storage_root, str(segment["relative_path"])
+        )
+        if not target.is_file():
+            raise ApiError(
+                404,
+                "RECORDING_FILE_NOT_FOUND",
+                "The recording content file was not found.",
+            )
+        media_type = (
+            "video/mp2t" if segment.get("format") == "mpegts" else "video/mp4"
+        )
+        return FileResponse(
+            target,
+            media_type=media_type,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
     @router.post("/hooks/recording-complete", status_code=status.HTTP_201_CREATED)
     def recording_complete_hook(
         repository: Repo,
@@ -355,7 +556,21 @@ def build_internal_router() -> APIRouter:
     ) -> dict[str, Any]:
         if repository.get_camera(payload.camera_id) is None:
             raise _not_found("camera")
-        return repository.create_event(_event_values(payload, settings))
+        values = _event_values(payload, settings)
+        event = repository.create_event(values)
+        event_type = (
+            payload.event_type.value
+            if hasattr(payload.event_type, "value")
+            else str(payload.event_type)
+        )
+        repository.note_recovery_event(
+            camera_id=payload.camera_id,
+            event_type=event_type,
+            occurred_at=values["occurred_at"],
+            max_attempts=settings.recovery_max_attempts,
+            settle_seconds=settings.recovery_settle_seconds,
+        )
+        return event
 
     @router.get("/events")
     def search_events(
@@ -387,6 +602,24 @@ def build_internal_router() -> APIRouter:
         if event is None:
             raise _not_found("event")
         return event
+
+    @router.get("/recovery-jobs")
+    def list_recovery_jobs(
+        repository: Repo,
+        camera_id: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        return _page(
+            repository.list_recovery_jobs(camera_id, limit, offset), limit, offset
+        )
+
+    @router.get("/recovery-jobs/{job_id}")
+    def get_recovery_job(job_id: int, repository: Repo) -> dict[str, Any]:
+        job = repository.get_recovery_job(job_id)
+        if job is None:
+            raise _not_found("recovery_job")
+        return job
 
     @router.post("/tokens/refresh", status_code=status.HTTP_201_CREATED)
     def issue_refresh_token(
@@ -478,6 +711,9 @@ def create_app(
     async def lifespan(_app: FastAPI):
         runtime_settings.prepare_directories()
         data_repository.initialize()
+        requeued_jobs = data_repository.requeue_interrupted_recovery_jobs()
+        if requeued_jobs:
+            LOGGER.warning("requeued %d interrupted recovery job(s)", requeued_jobs)
         if data_repository.user_count() == 0:
             username = runtime_settings.initial_admin_username
             password_hash = runtime_settings.initial_admin_password_hash
@@ -505,17 +741,54 @@ def create_app(
         ):
             bootstrap = load_config(runtime_settings.config_path)
             for camera in bootstrap.cameras:
+                management_url = getattr(camera, "edge_management_url", None)
+                recovery_url = getattr(camera, "edge_recovery_url", None)
+                auth_token = (runtime_settings.edge_auth_tokens or {}).get(
+                    camera.edge_device_id or ""
+                )
                 data_repository.create_camera(
                     {
                         "camera_id": camera.camera_id,
                         "name": camera.name,
                         "stream_path": camera.stream_path,
                         "edge_device_id": camera.edge_device_id,
+                        "edge_management_url": management_url,
+                        "edge_recovery_url": recovery_url,
+                        "edge_auth_token": auth_token,
                         "source_url": camera.source_url,
                         "enabled": camera.enabled,
                         "status": "offline" if camera.enabled else "disabled",
                     }
                 )
+
+        # A deployment may add Edge credentials after the camera rows already
+        # exist.  Secrets are keyed by stable device ID, never camera ID.
+        if runtime_settings.config_path is not None and runtime_settings.config_path.is_file():
+            bootstrap = load_config(runtime_settings.config_path)
+            for camera in bootstrap.cameras:
+                edge_device_id = camera.edge_device_id
+                management_url = getattr(camera, "edge_management_url", None)
+                recovery_url = getattr(camera, "edge_recovery_url", None)
+                auth_token = (runtime_settings.edge_auth_tokens or {}).get(
+                    edge_device_id or ""
+                )
+                if edge_device_id and management_url and recovery_url and auth_token:
+                    data_repository.put_edge_device(
+                        edge_device_id, management_url, recovery_url, auth_token
+                    )
+                    stored_camera = data_repository.get_camera(camera.camera_id)
+                    if (
+                        stored_camera is not None
+                        and stored_camera.get("edge_device_id") != edge_device_id
+                    ):
+                        data_repository.update_camera(
+                            camera.camera_id,
+                            {"edge_device_id": edge_device_id},
+                        )
+
+        # Converge any retention operation interrupted between its durable
+        # `deleting` marker and final `deleted` state before serving normally.
+        await asyncio.to_thread(reconcile, data_repository, runtime_settings)
 
         async def maintain_storage() -> None:
             while True:
@@ -536,15 +809,127 @@ def create_app(
                 except Exception:
                     LOGGER.exception("scheduled storage maintenance failed")
 
+        def execute_recovery(job: dict[str, Any]) -> None:
+            job_id = int(job["id"])
+            revision = int(job.get("revision", 0))
+
+            def progress(stage: str) -> None:
+                if stage == "indexing":
+                    data_repository.update_recovery_job(
+                        job_id,
+                        status="indexing",
+                        expected_revision=revision,
+                    )
+
+            try:
+                if not job.get("recovery_url"):
+                    raise RecoveryError("Edge recovery URL is not configured")
+                interval_start = parse_utc(str(job["outage_started_at"]))
+                interval_end = parse_utc(str(job["outage_ended_at"]))
+                aggregate = {
+                    "camera_id": str(job["camera_id"]),
+                    "selected": 0,
+                    "downloaded": 0,
+                    "reused": 0,
+                    "indexed": 0,
+                    "idempotent_replays": 0,
+                    "chunks": 0,
+                }
+                chunk_start = interval_start
+                while chunk_start < interval_end:
+                    chunk_end = min(chunk_start + timedelta(hours=24), interval_end)
+                    coordinator = RecoveryCoordinator(
+                        edge_base_url=str(job["recovery_url"]),
+                        camera_id=str(job["camera_id"]),
+                        recovery_token=str(job["auth_token"]),
+                        data_base_url=runtime_settings.recovery_data_base_url,
+                        internal_token=(
+                            runtime_settings.data_api_tokens()["recovery"]
+                        ),
+                        recordings_root=runtime_settings.storage_root,
+                        timeout_seconds=runtime_settings.recovery_timeout_seconds,
+                        progress_callback=progress,
+                    )
+                    summary = coordinator.recover(chunk_start, chunk_end)
+                    summary_values = asdict(summary)
+                    for key in (
+                        "selected",
+                        "downloaded",
+                        "reused",
+                        "indexed",
+                        "idempotent_replays",
+                    ):
+                        aggregate[key] += int(summary_values[key])
+                    aggregate["chunks"] += 1
+                    chunk_start = chunk_end
+            except RecoveryError as exc:
+                attempt = int(job["attempt_count"])
+                retry_at = None
+                if attempt < int(job["max_attempts"]):
+                    delay = runtime_settings.recovery_retry_base_seconds * (
+                        2 ** max(0, attempt - 1)
+                    )
+                    retry_at = format_utc(utc_now() + timedelta(seconds=delay))
+                data_repository.update_recovery_job(
+                    job_id,
+                    status="failed",
+                    last_error=str(exc)[:1024],
+                    next_retry_at=retry_at,
+                    expected_revision=revision,
+                )
+                return
+            data_repository.update_recovery_job(
+                job_id,
+                status="completed",
+                recovery_summary=aggregate,
+                expected_revision=revision,
+            )
+
+        async def recover_outages() -> None:
+            # Lifespan starts before Uvicorn accepts requests; the coordinator
+            # indexes through the loopback internal API, so allow it to open.
+            await asyncio.sleep(runtime_settings.recovery_poll_interval_seconds)
+            while True:
+                job = await asyncio.to_thread(data_repository.claim_due_recovery_job)
+                if job is None:
+                    await asyncio.sleep(runtime_settings.recovery_poll_interval_seconds)
+                    continue
+                try:
+                    await asyncio.to_thread(execute_recovery, job)
+                except Exception as exc:
+                    LOGGER.exception("automatic Edge recovery failed unexpectedly")
+                    attempt = int(job["attempt_count"])
+                    retry_at = None
+                    if attempt < int(job["max_attempts"]):
+                        delay = runtime_settings.recovery_retry_base_seconds * (
+                            2 ** max(0, attempt - 1)
+                        )
+                        retry_at = format_utc(
+                            utc_now() + timedelta(seconds=delay)
+                        )
+                    data_repository.update_recovery_job(
+                        int(job["id"]),
+                        status="failed",
+                        last_error=str(exc)[:1024],
+                        next_retry_at=retry_at,
+                        expected_revision=int(job.get("revision", 0)),
+                    )
+
         maintenance_task = asyncio.create_task(
             maintain_storage(), name="data-storage-maintenance"
+        )
+        recovery_task = asyncio.create_task(
+            recover_outages(), name="data-edge-recovery"
         )
         try:
             yield
         finally:
             maintenance_task.cancel()
+            recovery_task.cancel()
             try:
-                await maintenance_task
+                await asyncio.gather(
+                    maintenance_task, recovery_task, return_exceptions=True
+                )
             except asyncio.CancelledError:
                 pass
 

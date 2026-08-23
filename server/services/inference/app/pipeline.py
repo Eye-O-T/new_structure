@@ -115,6 +115,26 @@ class CameraWorker(threading.Thread):
                 "camera status delivery failed", extra={"camera_id": self.camera_id}
             )
 
+    def _inference_stream_lost(self, reason: str) -> None:
+        """Report one inference-consumer outage while retrying MediaMTX.
+
+        Edge-to-central ingest loss is detected by the Edge publisher and is
+        the authoritative trigger for segment recovery. A failure at this
+        downstream consumer must not create or truncate an Edge recovery job.
+        """
+
+        if self._failure_reported:
+            return
+        self._status("offline")
+        self._event("inference_stream_lost", reason=reason)
+        self._failure_reported = True
+
+    def _inference_stream_restored(self) -> None:
+        if not self._failure_reported:
+            return
+        self._event("inference_stream_restored", reason="rtsp_stream_available")
+        self._failure_reported = False
+
     def _snapshot(self, frame: Any, track_id: str) -> str | None:
         try:
             import cv2
@@ -153,7 +173,7 @@ class CameraWorker(threading.Thread):
                 )
 
         state = TrackState(self.settings.disappear_seconds)
-        source = f"{self.settings.rtsp_base_url}/{self.stream_path}"
+        source = self.settings.rtsp_source_url(self.stream_path)
         delay = 1.0
         frame_interval = 1.0 / self.settings.analysis_fps
         last_analysis = 0.0
@@ -161,25 +181,25 @@ class CameraWorker(threading.Thread):
         while not self.stop_event.is_set():
             capture = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
             if not capture.isOpened():
-                if self.status.state != "offline":
-                    self._status("offline")
-                    self._event("network_failure")
-                    self._failure_reported = True
+                self._inference_stream_lost("rtsp_open_failed")
                 capture.release()
                 self.stop_event.wait(delay)
                 delay = min(delay * 2, 15.0)
                 continue
 
-            if self._failure_reported:
-                self._event("network_recovery")
-                self._failure_reported = False
-            self._status("online")
-            delay = 1.0
-
+            stream_confirmed = False
             while not self.stop_event.is_set():
                 ok, frame = capture.read()
                 if not ok:
                     break
+                if not stream_confirmed:
+                    # Some RTSP backends report an opened socket before media
+                    # arrives.  Close the outage only after a decodable frame,
+                    # otherwise automatic recovery can truncate the gap.
+                    self._inference_stream_restored()
+                    self._status("online")
+                    delay = 1.0
+                    stream_confirmed = True
                 now = time.monotonic()
                 self.status.last_frame_at = format_utc(utc_now())
                 if tracker is None or now - last_analysis < frame_interval:
@@ -207,6 +227,4 @@ class CameraWorker(threading.Thread):
                     )
             capture.release()
             if not self.stop_event.is_set():
-                self._status("offline")
-                self._event("network_failure")
-                self._failure_reported = True
+                self._inference_stream_lost("rtsp_read_failed")

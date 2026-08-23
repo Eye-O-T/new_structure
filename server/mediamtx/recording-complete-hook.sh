@@ -4,7 +4,8 @@ set -eu
 : "${MTX_PATH:?MediaMTX did not provide MTX_PATH}"
 : "${MTX_SEGMENT_PATH:?MediaMTX did not provide MTX_SEGMENT_PATH}"
 : "${MTX_SEGMENT_DURATION:?MediaMTX did not provide MTX_SEGMENT_DURATION}"
-: "${INTERNAL_SERVICE_TOKEN:?INTERNAL_SERVICE_TOKEN is not configured}"
+DATA_API_TOKEN="${DATA_MEDIA_TOKEN:-${INTERNAL_SERVICE_TOKEN:-}}"
+: "${DATA_API_TOKEN:?DATA_MEDIA_TOKEN or legacy INTERNAL_SERVICE_TOKEN is not configured}"
 
 # Keep the same Camera ID contract as the public and internal APIs.
 case "$MTX_PATH" in
@@ -79,12 +80,13 @@ curl \
   --fail \
   --silent \
   --show-error \
+  --noproxy '*' \
   --connect-timeout 3 \
   --max-time 15 \
   --retry 4 \
   --retry-delay 1 \
   --retry-all-errors \
-  --header "X-Internal-Token: ${INTERNAL_SERVICE_TOKEN}" \
+  --header "X-Internal-Token: ${DATA_API_TOKEN}" \
   --data-urlencode "camera_id=${MTX_PATH}" \
   --data-urlencode "segment_path=${MTX_SEGMENT_PATH}" \
   --data-urlencode "duration_seconds=${duration_seconds}" \
