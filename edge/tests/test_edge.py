@@ -943,12 +943,16 @@ def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
     assert "ai-cctv-server" not in deployment_doc
 
     root_readme = (edge_root.parent / "README.md").read_text(encoding="utf-8")
+    project_guide = (
+        edge_root.parent / "docs/operations/project-guide.md"
+    ).read_text(encoding="utf-8")
     handoff_steps = [
         "export-auth-token",
         "AI_CCTV_CLI.exe edge-register",
         "--publish-credentials-file",
     ]
-    positions = [root_readme.find(step) for step in handoff_steps]
+    positions = [project_guide.find(step) for step in handoff_steps]
     assert all(position >= 0 for position in positions)
     assert positions == sorted(positions)
     assert "(docs/operations/edge-deployment.md)" in root_readme
+    assert "(docs/operations/project-guide.md)" in root_readme

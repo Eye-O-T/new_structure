@@ -4,3 +4,4 @@ httpx==0.28.1
 PyJWT==2.10.1
 argon2-cffi==23.1.0
 pydantic==2.10.6
+firebase-admin==7.1.0

@@ -105,3 +105,9 @@ def install_error_handlers(app: FastAPI) -> None:
                 "INTERNAL_ERROR", "요청을 처리하는 중 내부 오류가 발생했습니다."
             ),
         )
+
+
+def _not_found(resource: str) -> ApiError:
+    return ApiError(
+        404, f"{resource.upper()}_NOT_FOUND", "요청한 항목을 찾을 수 없습니다."
+    )

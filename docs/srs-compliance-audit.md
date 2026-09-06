@@ -49,7 +49,7 @@ Docker MediaMTX와 2~4개 실시간 Stream의 인수 시험을 대신하지 않�
 | `FR-STORAGE-001~013` | 자동 검증 | 파일/DB 분리, Hook, Retention, Reconciliation, 삭제 보상 Test | 비정상 종료된 실제 fMP4 재생과 장기 Disk 임계치 시험 |
 | `FR-DATA-001~012` | 자동 검증 | 단일 Data API Writer, WAL/FK/Migration/Index/Search/Backup Test | Container 재생성 및 대규모 기준 Dataset 성능 시험 |
 | `FR-AI-001~006`, `009~012` | 자동 검증 | RTSP Worker, YOLO/ByteTrack Adapter, Track 전이, Model 실패 격리, Event 연결 Test | 실제 Model과 2~4개 RTSP Stream 처리량 시험 |
-| `FR-AI-007~008`, `013` | 부분 구현 | Event Metadata는 확장 가능하고 Legacy Discord 구현은 분리됨 | 중앙 Inference Service용 선택 VLM/Notification Adapter 구현과 실패 격리 Test |
+| `FR-AI-007~008`, `013` | 부분 구현 | Event Metadata 계약과 선택 FCM 경로가 있으며 인물 연결·metadata 알고리즘은 블랙박스 | 담당 개발자의 인물 연결·metadata 모델 구현과 실제 FCM·모델 검증 |
 | `FR-MODEL-001~008` | 구성 검증 | 확장자/크기/SHA-256 원자 복사, Read-only Mount, CPU/GPU Device 설정 | Windows GPU Container와 오류 진단 인수 시험 |
 | `FR-AUTH-001~015` | 자동 검증 | Argon2, JWT Claim, Refresh Rotation/철회, Cookie/Bearer, RBAC, Login Backoff Test | 공개 TLS 배포에서 Cookie 속성 확인 |
 | `FR-USER-001~010` | 자동 검증 | Camera ACL, 검색 Pagination, Event/Recording/Live/Playback API Test | 실제 HLS Player와 MPEG-TS/fMP4 Client 호환 시험 |
@@ -96,20 +96,20 @@ Docker MediaMTX와 2~4개 실시간 Stream의 인수 시험을 대신하지 않�
    복구를 검증한다.
 4. 4개 HD/FHD Stream과 30일분 Metadata 기준 Dataset의 성능 결과를 Hardware 정보와
    함께 기록한다.
-5. 새 중앙 Inference Service에 선택 VLM/Notification Adapter가 필요하면 Versioned
-   `metadata.attributes` 계약과 실패 격리 Test를 구현한다.
+5. Preprocessing 인물 연결·Analysis metadata 블랙박스 뒤에 실제 모델을 구현하고
+   버전이 있는 결과 스키마·정확도·처리량을 검증한다. FCM은 실제 설정·단말에서 확인한다.
 6. Version 1 이전 Config를 실제로 지원해야 하는 시점에 Config Migration 입력·출력과
    Rollback 규칙을 추가한다.
 
 ## 6. 검증 결과와 재검증 명령
 
-2026-08-24 현재 저장소에서 다음 결과를 확인했다.
+아래 수치는 2026-08-24의 과거 점검 결과이며 이번 구조 변경 이후 테스트 수를 의미하지 않는다. 현재 6개 컨테이너는 `data`, `external`, `preprocessing`, `analysis`, `mediamtx`, `nginx`다. 최신 코드는 아래 명령으로 다시 검증한다.
 
 | 검증 | 결과 |
 | --- | --- |
 | Python 전체 Test Suite | `201 passed` |
 | Ruff 정적 검사 | `All checks passed` |
-| Compose YAML 기본 구조 | PyYAML Parse 통과, `data`·`external`·`inference`·`mediamtx`·`nginx` 확인 |
+| Compose YAML 기본 구조 | PyYAML Parse 통과, 당시 5개 구성 확인; 현행은 6개 구성으로 변경 |
 | Docker Compose 해석 및 Container Black-box | 현재 점검 환경에 Docker CLI가 없어 미실행 |
 
 Docker가 설치된 인수 환경에서는 아래 명령을 모두 다시 실행한다.

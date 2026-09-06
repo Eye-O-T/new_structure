@@ -7,6 +7,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+START_ARGUMENTS = ("up", "-d", "--build", "--wait", "--remove-orphans")
+
 
 def default_server_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -135,15 +137,24 @@ class ComposeAdapter:
         )
 
     def command(self, *arguments: str) -> list[str]:
-        return [
+        command = [
             "docker",
             "compose",
             "--env-file",
             str(self.env_file),
             "-f",
             str(self.compose_file),
-            *arguments,
         ]
+        push_env = self.env_file.with_name("push.env")
+        push_values = _env_values(push_env)
+        if push_values.get("PUSH_ENABLED", "false").lower() in {"true", "1", "yes"}:
+            command += [
+                "--env-file",
+                str(push_env),
+                "-f",
+                str(self.server_dir / "compose.push.yml"),
+            ]
+        return [*command, *arguments]
 
     def deployment_prerequisites(self) -> list[Prerequisite]:
         results = installation_prerequisites(self.server_dir)
@@ -158,6 +169,9 @@ class ComposeAdapter:
             return results
         results.append(Prerequisite(True, "Compose environment", str(self.env_file)))
         values = _env_values(self.env_file)
+        push_values = _env_values(self.env_file.with_name("push.env"))
+        if push_values.get("PUSH_ENABLED", "false").lower() in {"true", "1", "yes"}:
+            values.update(push_values)
 
         def deployment_path(key: str) -> Path | None:
             value = values.get(key)
@@ -170,9 +184,26 @@ class ComposeAdapter:
             "Configuration": deployment_path("CONFIG_FILE"),
             "Data service secrets": deployment_path("DATA_SECRETS_FILE"),
             "External service secrets": deployment_path("EXTERNAL_SECRETS_FILE"),
-            "Inference service secrets": deployment_path("INFERENCE_SECRETS_FILE"),
+            "Preprocessing service secrets": deployment_path("PREPROCESSING_SECRETS_FILE"),
             "Media service secrets": deployment_path("MEDIA_SECRETS_FILE"),
+            "Analysis service secrets": deployment_path("ANALYSIS_SECRETS_FILE"),
         }
+        if values.get("PUSH_ENABLED", "false").lower() in {"true", "1", "yes"}:
+            required_files["Push Compose definition"] = (
+                self.server_dir / "compose.push.yml"
+            )
+            required_files["Firebase service account"] = deployment_path(
+                "FIREBASE_SERVICE_ACCOUNT_FILE"
+            )
+            results.append(
+                Prerequisite(
+                    bool(values.get("FIREBASE_PROJECT_ID")),
+                    "Firebase project",
+                    "Configured"
+                    if values.get("FIREBASE_PROJECT_ID")
+                    else "FIREBASE_PROJECT_ID is missing",
+                )
+            )
         models_root = deployment_path("MODELS_DIR")
         model_name = values.get("MODEL_FILE")
         required_files["Inference model"] = (
@@ -191,7 +222,9 @@ class ComposeAdapter:
                 Prerequisite(
                     present,
                     name,
-                    str(path) if present else f"missing or not configured: {path or name}",
+                    str(path)
+                    if present
+                    else f"missing or not configured: {path or name}",
                 )
             )
         return results
@@ -208,7 +241,8 @@ class ComposeAdapter:
         )
 
     def start(self) -> int:
-        return self.run("up", "-d", "--build", "--wait").returncode
+        # Retired services in this Compose project must not keep producing events.
+        return self.run(*START_ARGUMENTS).returncode
 
     def stop(self) -> int:
         return self.run("down").returncode

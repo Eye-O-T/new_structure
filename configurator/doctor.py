@@ -151,7 +151,14 @@ def checks(
             by_service = {
                 str(row.get("Service") or row.get("Name")): row for row in rows
             }
-            for service in ("data", "external", "inference", "mediamtx", "nginx"):
+            for service in (
+                "data",
+                "external",
+                "preprocessing",
+                "analysis",
+                "mediamtx",
+                "nginx",
+            ):
                 row = by_service.get(service)
                 state = str((row or {}).get("State", "stopped")).lower()
                 health = str((row or {}).get("Health", "")).lower()
@@ -165,11 +172,11 @@ def checks(
                     )
                 )
 
-            if by_service.get("inference") is not None:
+            if by_service.get("preprocessing") is not None:
                 camera_probe = adapter.run(
                     "exec",
                     "-T",
-                    "inference",
+                    "preprocessing",
                     "python",
                     "-c",
                     (

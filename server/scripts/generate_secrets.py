@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=server_dir / "secrets",
-        help="directory for data.env, external.env, inference.env, and media.env",
+        help="directory for data.env, external.env, preprocessing.env, media.env, and analysis.env",
     )
     parser.add_argument(
         "--camera-id",
@@ -94,6 +94,8 @@ def main() -> int:
     data_inference_token = secrets.token_urlsafe(48)
     data_media_token = secrets.token_urlsafe(48)
     data_recovery_token = secrets.token_urlsafe(48)
+    data_identity_token = secrets.token_urlsafe(48)
+    data_analysis_token = secrets.token_urlsafe(48)
     jwt_secret = secrets.token_urlsafe(48)
     media_read_username = "inference-reader"
     media_read_password = secrets.token_urlsafe(48)
@@ -124,6 +126,8 @@ def main() -> int:
                 f"DATA_INFERENCE_TOKEN={data_inference_token}",
                 f"DATA_MEDIA_TOKEN={data_media_token}",
                 f"DATA_RECOVERY_TOKEN={data_recovery_token}",
+                f"DATA_IDENTITY_TOKEN={data_identity_token}",
+                f"DATA_ANALYSIS_TOKEN={data_analysis_token}",
                 "",
             ],
             output_dir / "external.env": [
@@ -136,11 +140,16 @@ def main() -> int:
                 f"MEDIA_PUBLISH_CREDENTIALS_JSON={media_credentials}",
                 "",
             ],
-            output_dir / "inference.env": [
-                "# Inference Service only; do not commit.",
+            output_dir / "preprocessing.env": [
+                "# Preprocessing Service only; do not commit.",
+                f"DATA_IDENTITY_TOKEN={data_identity_token}",
                 f"DATA_INFERENCE_TOKEN={data_inference_token}",
                 f"MEDIA_READ_USERNAME={media_read_username}",
                 f"MEDIA_READ_PASSWORD={media_read_password}",
+                "",
+            ],
+            output_dir / "analysis.env": [
+                f"DATA_ANALYSIS_TOKEN={data_analysis_token}",
                 "",
             ],
             output_dir / "media.env": [

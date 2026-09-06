@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from server.services.data.app.recovery_coordinator import (
+from server.services.data.app.workers.recovery import (
     RecoveryCoordinator,
     RecoveryError,
     read_internal_token,

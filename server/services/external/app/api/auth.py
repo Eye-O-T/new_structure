@@ -1,0 +1,341 @@
+from __future__ import annotations
+
+import hashlib
+import hmac
+from typing import Any
+
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
+from fastapi.responses import JSONResponse
+
+from ..clients.data import (
+    DataClient,
+    DataNotFound,
+    DataServiceError,
+)
+from ..config import Settings
+from ..dependencies import (
+    get_data_client,
+    get_login_backoff,
+    get_settings_dependency,
+)
+from ..schemas import (
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    TokenResponse,
+)
+from ..security.login_backoff import LoginBackoff
+from ..security.passwords import verify_password
+from ..security.tokens import (
+    TokenExpiredError,
+    TokenValidationError,
+    decode_token,
+    issue_token,
+    utc_iso_from_epoch,
+)
+from .representations import _public_user
+
+router = APIRouter()
+
+
+def _auth_error(detail: str = "Invalid credentials") -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _user_id(user: dict[str, Any]) -> str:
+    value = user.get("id", user.get("user_id"))
+    if value is None:
+        raise DataServiceError("invalid user response")
+    return str(value)
+
+
+def _user_role(user: dict[str, Any]) -> str:
+    role = user.get("role")
+    if role not in {"admin", "viewer"}:
+        raise DataServiceError("invalid user response")
+    return str(role)
+
+
+def _user_is_active(user: dict[str, Any]) -> bool:
+    return bool(user.get("is_active", user.get("active", True)))
+
+
+def _issue_pair(settings: Settings, user_id: str, role: str) -> tuple[Any, Any]:
+    access = issue_token(
+        settings,
+        user_id=user_id,
+        role=role,
+        token_type="access",
+        ttl_seconds=settings.access_ttl_seconds,
+    )
+    refresh = issue_token(
+        settings,
+        user_id=user_id,
+        role=role,
+        token_type="refresh",
+        ttl_seconds=settings.refresh_ttl_seconds,
+    )
+    return access, refresh
+
+
+def _token_hash(encoded: str) -> str:
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _refresh_record(
+    token: Any,
+    *,
+    family_id: str | None = None,
+    rotated_from_jti: str | None = None,
+) -> dict[str, Any]:
+    record = {
+        "jti": token.claims.jti,
+        "user_id": token.claims.sub,
+        "token_hash": _token_hash(token.encoded),
+        "family_id": family_id or token.claims.jti,
+        "expires_at": utc_iso_from_epoch(token.claims.exp),
+    }
+    if rotated_from_jti is not None:
+        record["rotated_from_jti"] = rotated_from_jti
+    return record
+
+
+def _set_auth_cookies(
+    response: Response, settings: Settings, access: Any, refresh: Any
+) -> None:
+    response.set_cookie(
+        key=settings.access_cookie_name,
+        value=access.encoded,
+        max_age=settings.access_ttl_seconds,
+        path="/",
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite=settings.cookie_samesite,
+    )
+    response.set_cookie(
+        key=settings.refresh_cookie_name,
+        value=refresh.encoded,
+        max_age=settings.refresh_ttl_seconds,
+        path="/api/v1/auth",
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite=settings.cookie_samesite,
+    )
+
+
+def _clear_auth_cookies(response: Response, settings: Settings) -> None:
+    response.delete_cookie(
+        settings.access_cookie_name,
+        path="/",
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite=settings.cookie_samesite,
+    )
+    response.delete_cookie(
+        settings.refresh_cookie_name,
+        path="/api/v1/auth",
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite=settings.cookie_samesite,
+    )
+
+
+def _token_response(
+    settings: Settings, access: Any, refresh: Any, user: dict[str, Any]
+) -> JSONResponse:
+    response = JSONResponse(
+        {
+            "access_token": access.encoded,
+            "refresh_token": refresh.encoded,
+            "token_type": "bearer",
+            "expires_in": settings.access_ttl_seconds,
+            "user": _public_user(user),
+        }
+    )
+    _set_auth_cookies(response, settings, access, refresh)
+    return response
+
+
+def _extract_bearer(request: Request) -> str | None:
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, value = authorization.partition(" ")
+    if scheme.lower() == "bearer" and value.strip():
+        return value.strip()
+    return None
+
+
+def _login_key(request: Request, username: str) -> str:
+    host = request.client.host if request.client is not None else "unknown"
+    return f"{host}:{username.casefold()}"
+
+
+def _optional_refresh_token(
+    request: Request,
+    settings: Settings,
+    body_token: Any,
+) -> str | None:
+    if body_token is not None:
+        return body_token.get_secret_value()
+    return request.cookies.get(settings.refresh_cookie_name)
+
+
+@router.post("/api/v1/auth/login", response_model=TokenResponse)
+async def login(
+    payload: LoginRequest,
+    request: Request,
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+    backoff: LoginBackoff = Depends(get_login_backoff),
+) -> Response:
+    key = _login_key(request, payload.username)
+    retry_after = backoff.retry_after(key)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="Login temporarily delayed",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    try:
+        user = await data.get_user_by_username(payload.username)
+    except DataNotFound:
+        backoff.record_failure(key)
+        raise _auth_error()
+
+    password_hash = user.get("password_hash")
+    password_valid = isinstance(password_hash, str) and verify_password(
+        password_hash,
+        payload.password.get_secret_value(),
+    )
+    if not password_valid or not _user_is_active(user):
+        backoff.record_failure(key)
+        raise _auth_error()
+
+    user_id = _user_id(user)
+    role = _user_role(user)
+    access, refresh = _issue_pair(settings, user_id, role)
+    await data.create_refresh_token(
+        _refresh_record(refresh, family_id=refresh.claims.jti)
+    )
+    backoff.clear(key)
+    return _token_response(settings, access, refresh, user)
+
+
+@router.post("/api/v1/auth/refresh", response_model=TokenResponse)
+async def refresh(
+    request: Request,
+    payload: RefreshRequest | None = Body(default=None),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Response:
+    body_token = payload.refresh_token if payload is not None else None
+    encoded = _optional_refresh_token(request, settings, body_token)
+    if not encoded:
+        raise _auth_error("Refresh token required")
+
+    try:
+        claims = decode_token(encoded, settings, expected_type="refresh")
+    except TokenExpiredError as exc:
+        raise _auth_error("Refresh token expired") from exc
+    except TokenValidationError as exc:
+        raise _auth_error("Invalid refresh token") from exc
+
+    try:
+        record = await data.get_refresh_token(claims.jti)
+    except DataNotFound as exc:
+        raise _auth_error("Invalid refresh token") from exc
+    if (
+        bool(record.get("revoked", record.get("consumed", False)))
+        or record.get("revoked_at") is not None
+        or record.get("replaced_by_jti") is not None
+    ):
+        raise _auth_error("Refresh token revoked")
+    record_user_id = str(record.get("user_id", claims.sub))
+    if record_user_id != claims.sub:
+        raise _auth_error("Invalid refresh token")
+    stored_hash = record.get("token_hash")
+    if not isinstance(stored_hash, str) or not hmac.compare_digest(
+        stored_hash.encode("ascii", errors="ignore"),
+        _token_hash(encoded).encode("ascii"),
+    ):
+        raise _auth_error("Invalid refresh token")
+
+    try:
+        user = await data.get_user(claims.sub)
+    except DataNotFound as exc:
+        raise _auth_error("User is unavailable") from exc
+    if not _user_is_active(user):
+        raise _auth_error("User is inactive")
+
+    user_id = _user_id(user)
+    role = _user_role(user)
+    access, new_refresh = _issue_pair(settings, user_id, role)
+    family_id = str(record.get("family_id") or claims.jti)
+    await data.rotate_refresh_token(
+        claims.jti,
+        _refresh_record(
+            new_refresh,
+            family_id=family_id,
+            rotated_from_jti=claims.jti,
+        ),
+    )
+    return _token_response(settings, access, new_refresh, user)
+
+
+@router.post("/api/v1/auth/logout", status_code=204)
+async def logout(
+    request: Request,
+    payload: LogoutRequest | None = Body(default=None),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Response:
+    access_encoded = _extract_bearer(request) or request.cookies.get(
+        settings.access_cookie_name
+    )
+    if access_encoded:
+        try:
+            access = decode_token(access_encoded, settings, expected_type="access")
+        except TokenValidationError:
+            access = None
+        if access is not None:
+            await data.revoke_access_token(
+                access.jti,
+                {
+                    "user_id": access.sub,
+                    "expires_at": utc_iso_from_epoch(access.exp),
+                    "reason": "logout",
+                },
+            )
+
+    body_token = payload.refresh_token if payload is not None else None
+    refresh_encoded = _optional_refresh_token(request, settings, body_token)
+    if refresh_encoded:
+        try:
+            refresh_claims = decode_token(
+                refresh_encoded,
+                settings,
+                expected_type="refresh",
+            )
+        except TokenValidationError:
+            refresh_claims = None
+        if refresh_claims is not None:
+            try:
+                await data.revoke_refresh_token(refresh_claims.jti)
+            except DataNotFound:
+                pass
+
+    response = Response(status_code=204)
+    _clear_auth_cookies(response, settings)
+    return response

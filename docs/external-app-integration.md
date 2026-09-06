@@ -13,7 +13,7 @@
 
 ## 1. 범위와 기준
 
-이 문서는 별도 외부 사용자 애플리케이션이 AI_CCTV 중앙 서버에 연동하는 공개 계약의 정본이다. 모바일 네이티브 앱과 Web UI 자체는 이 저장소의 구현 범위가 아니며, 앱은 Edge에 직접 접속하지 않는다.
+이 문서는 외부 사용자 애플리케이션이 AI_CCTV 중앙 서버에 연동하는 공개 계약의 정본이다. Android 앱은 `mobile/`에 통합되어 있으며, 앱은 Edge에 직접 접속하지 않는다. 선택적 FCM 등록·발송 계약과 설정은 [모바일 푸시](mobile-push.md)에 정의한다. Web UI와 iOS 제품화는 현재 검증 범위가 아니다.
 
 ```text
 External App
@@ -23,10 +23,10 @@ External App
        ├─ /hls/* → auth_request → MediaMTX HLS
        └─ /playback/* → auth_request → MediaMTX Playback
 
-MediaMTX ── internal RTSP ──> Inference Service
+MediaMTX ── internal RTSP ──> Preprocessing Service
 ```
 
-외부 앱에 제공하는 실시간 영상은 HLS다. RTSP는 Edge→중앙과 MediaMTX→Inference 내부 경로에만 사용한다.
+외부 앱에 제공하는 실시간 영상은 HLS다. RTSP는 Edge→중앙과 MediaMTX→Preprocessing 내부 경로에만 사용한다.
 
 ## 2. Base URL과 OpenAPI
 
@@ -193,7 +193,7 @@ GET /api/v1/events?camera_id=cam-001&event_type=person_appeared&from=2026-08-23T
 
 | Event Type | 의미 | 대표 Metadata |
 | --- | --- | --- |
-| `person_appeared`, `person_disappeared` | 사람 Track 전이 | `track_id`, `confidence` |
+| `person_appeared`, `person_disappeared` | 사람 Track 전이 | `person_id`, `confidence`; 카메라 간 연결은 선택 필드 `global_person_id` |
 | `camera_input_lost`, `camera_input_restored` | Edge Camera Frame 중단·복구 | `reason`, `timeout_seconds` |
 | `central_connection_lost`, `central_connection_restored` | Edge Publisher↔중앙 연결; 자동 복구 권위 Event | `reason` |
 | `inference_stream_lost`, `inference_stream_restored` | 중앙 RTSP 추론 소비 중단·복구; 복구 비권위 | `reason` |
@@ -408,3 +408,7 @@ Authorization: Bearer <admin-access-token>
 ## 8. 현재와 Future 경계
 
 현재 상태 조회, Profile 제어와 복구는 인증된 HTTP다. MQTT Telemetry, Event, Availability(LWT/retained), Command/Result, QoS와 중복 처리는 Future 범위다. 외부 앱은 MQTT Broker에 직접 의존하지 않고 앞으로도 Versioned HTTPS API를 사용한다. 영상 경로는 MQTT 도입 여부와 무관하게 사용자 HLS/Playback, 내부 RTSP를 유지한다.
+
+## 실시간 객체 위치와 추가 분석
+
+인증·Camera ACL이 적용되는 `GET /api/v1/cameras/{camera_id}/objects`를 추가했다. 객체 계약과 이벤트 metadata 확장은 [객체 처리 설계](object-processing.md)를 따른다.

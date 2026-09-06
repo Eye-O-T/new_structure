@@ -1,0 +1,31 @@
+CREATE TABLE mobile_devices (
+    device_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    family_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'viewer')),
+    token TEXT NOT NULL UNIQUE,
+    platform TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    event_types_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX idx_mobile_devices_user ON mobile_devices(user_id, family_id);
+
+CREATE TABLE push_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL REFERENCES mobile_devices(device_id) ON DELETE CASCADE,
+    state TEXT NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending','sending','sent','failed','cancelled')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    lease_id TEXT,
+    lease_until TEXT,
+    last_error_code TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(event_id, device_id)
+);
+CREATE INDEX idx_push_deliveries_due ON push_deliveries(state, next_attempt_at);

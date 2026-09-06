@@ -241,17 +241,19 @@ services:
       - internal
     logging: *service-logging
 
-  inference:
+  preprocessing:
     build:
       context: ..
-      dockerfile: server/services/inference/Dockerfile
-    image: ai-cctv-inference:${AI_CCTV_VERSION:-0.3.0}
+      dockerfile: server/services/preprocessing/Dockerfile
+    image: ai-cctv-preprocessing:${AI_CCTV_VERSION:-0.3.0}
     user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
     init: true
     restart: unless-stopped
     env_file:
-      - ${INFERENCE_SECRETS_FILE:-./secrets/inference.env}
+      - ${PREPROCESSING_SECRETS_FILE:-./secrets/preprocessing.env}
     environment:
+      DETECTION_PLUGIN: ${DETECTION_PLUGIN:-server.services.preprocessing.processors.detection.yolo:YoloTracker}
+      IDENTITY_PLUGIN: ${IDENTITY_PLUGIN:-server.services.preprocessing.processors.identity:IdentityBlackBox}
       AI_CCTV_CONFIG_FILE: /app/config/config.yaml
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
       MEDIAMTX_RTSP_BASE_URL: rtsp://mediamtx:8554
@@ -287,6 +289,43 @@ services:
     healthcheck: *python-healthcheck
     networks:
       - internal
+    logging: *service-logging
+
+
+  analysis:
+    build:
+      context: ..
+      dockerfile: server/services/analysis/Dockerfile
+    image: ai-cctv-analysis:${AI_CCTV_VERSION:-0.3.0}
+    user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${ANALYSIS_SECRETS_FILE:-./secrets/analysis.env}
+    environment:
+      ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors:MetadataBlackBox}
+      DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
+      SNAPSHOTS_ROOT: /snapshots
+      TZ: UTC
+    volumes:
+      - type: bind
+        source: ${SNAPSHOTS_DIR:-./runtime/snapshots}
+        target: /snapshots
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MODELS_DIR:-./runtime/models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      nginx:
+        condition: service_healthy
+    expose: ["8000"]
+    healthcheck: *python-healthcheck
+    networks: [internal]
     logging: *service-logging
 
 networks:

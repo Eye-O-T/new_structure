@@ -19,7 +19,7 @@ CONTAINER_SCRIPT = textwrap.dedent(
 
     import httpx
 
-    from app.security import hash_password
+    from app.security.passwords import hash_password
 
     values = json.load(sys.stdin)
     token = os.environ["DATA_EXTERNAL_TOKEN"]

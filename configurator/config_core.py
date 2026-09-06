@@ -24,7 +24,8 @@ AI_CCTV_VERSION = "0.3.0"
 RELEASE_IMAGES = {
     "data": f"ai-cctv-data:{AI_CCTV_VERSION}",
     "external": f"ai-cctv-external:{AI_CCTV_VERSION}",
-    "inference": f"ai-cctv-inference:{AI_CCTV_VERSION}",
+    "preprocessing": f"ai-cctv-preprocessing:{AI_CCTV_VERSION}",
+    "analysis": f"ai-cctv-analysis:{AI_CCTV_VERSION}",
     "mediamtx": "ai-cctv-mediamtx:1.9.0",
     "mediamtx_upstream": "bluenviron/mediamtx:1.9.0",
     "nginx": "nginx:1.27.2-alpine",
@@ -61,7 +62,8 @@ class InstallResult:
     # Compatibility name: this is the Data service's least-privilege env file.
     secrets_path: Path
     external_secrets_path: Path
-    inference_secrets_path: Path
+    preprocessing_secrets_path: Path
+    analysis_secrets_path: Path
     media_secrets_path: Path
     compose_env_path: Path
     camera_credentials_path: Path
@@ -314,9 +316,7 @@ def initialize(request: InstallRequest) -> InstallResult:
     certificate_path = directories["certs"] / "tls.crt"
     private_key_path = directories["certs"] / "tls.key"
     tls_pair = _validate_tls_pair(request)
-    if tls_pair is None and (
-        certificate_path.exists() or private_key_path.exists()
-    ):
+    if tls_pair is None and (certificate_path.exists() or private_key_path.exists()):
         if not (certificate_path.is_file() and private_key_path.is_file()):
             raise ValueError(
                 "persistent TLS certificate/private key are incomplete; select both"
@@ -399,6 +399,8 @@ def initialize(request: InstallRequest) -> InstallResult:
     data_inference_token = secrets.token_urlsafe(48)
     data_media_token = secrets.token_urlsafe(48)
     data_recovery_token = secrets.token_urlsafe(48)
+    data_identity_token = secrets.token_urlsafe(48)
+    data_analysis_token = secrets.token_urlsafe(48)
     media_read_username = "inference-reader"
     media_read_password = secrets.token_urlsafe(48)
     data_secret_values = {
@@ -406,6 +408,8 @@ def initialize(request: InstallRequest) -> InstallResult:
         "DATA_INFERENCE_TOKEN": data_inference_token,
         "DATA_MEDIA_TOKEN": data_media_token,
         "DATA_RECOVERY_TOKEN": data_recovery_token,
+        "DATA_IDENTITY_TOKEN": data_identity_token,
+        "DATA_ANALYSIS_TOKEN": data_analysis_token,
         "INITIAL_ADMIN_USERNAME": request.admin_username,
         "INITIAL_ADMIN_PASSWORD_HASH": password_hash,
     }
@@ -418,7 +422,8 @@ def initialize(request: InstallRequest) -> InstallResult:
             credentials, separators=(",", ":")
         ),
     }
-    inference_secret_values = {
+    preprocessing_secret_values = {
+        "DATA_IDENTITY_TOKEN": data_identity_token,
         "DATA_INFERENCE_TOKEN": data_inference_token,
         "MEDIA_READ_USERNAME": media_read_username,
         "MEDIA_READ_PASSWORD": media_read_password,
@@ -429,19 +434,21 @@ def initialize(request: InstallRequest) -> InstallResult:
     secret_files = {
         directories["secrets"] / "data.env": data_secret_values,
         directories["secrets"] / "external.env": external_secret_values,
-        directories["secrets"] / "inference.env": inference_secret_values,
+        directories["secrets"] / "preprocessing.env": preprocessing_secret_values,
         directories["secrets"] / "media.env": media_secret_values,
+        directories["secrets"] / "analysis.env": {
+            "DATA_ANALYSIS_TOKEN": data_analysis_token
+        },
     }
     for path, values in secret_files.items():
         _backup_existing(path, private=True)
         payload = "".join(f"{key}={_dotenv(value)}\n" for key, value in values.items())
         _write_atomic(path, payload, 0o600)
-    (
-        secrets_path,
-        external_secrets_path,
-        inference_secrets_path,
-        media_secrets_path,
-    ) = secret_files
+    secrets_path = directories["secrets"] / "data.env"
+    external_secrets_path = directories["secrets"] / "external.env"
+    preprocessing_secrets_path = directories["secrets"] / "preprocessing.env"
+    analysis_secrets_path = directories["secrets"] / "analysis.env"
+    media_secrets_path = directories["secrets"] / "media.env"
     camera_credentials_path = directories["secrets"] / "camera-credentials.json"
     _backup_existing(camera_credentials_path, private=True)
     _write_atomic(
@@ -455,8 +462,9 @@ def initialize(request: InstallRequest) -> InstallResult:
         "CONFIG_FILE": config_path,
         "DATA_SECRETS_FILE": secrets_path,
         "EXTERNAL_SECRETS_FILE": external_secrets_path,
-        "INFERENCE_SECRETS_FILE": inference_secrets_path,
+        "PREPROCESSING_SECRETS_FILE": preprocessing_secrets_path,
         "MEDIA_SECRETS_FILE": media_secrets_path,
+        "ANALYSIS_SECRETS_FILE": directories["secrets"] / "analysis.env",
         "DATABASE_DIR": directories["database"],
         "RECORDINGS_DIR": directories["recordings"],
         "RECOVERED_DIR": directories["recovered"],
@@ -490,7 +498,8 @@ def initialize(request: InstallRequest) -> InstallResult:
         config_path=config_path,
         secrets_path=secrets_path,
         external_secrets_path=external_secrets_path,
-        inference_secrets_path=inference_secrets_path,
+        preprocessing_secrets_path=preprocessing_secrets_path,
+        analysis_secrets_path=analysis_secrets_path,
         media_secrets_path=media_secrets_path,
         compose_env_path=compose_env_path,
         camera_credentials_path=camera_credentials_path,

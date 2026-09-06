@@ -18,6 +18,8 @@ configurator = [
   "PyQt5==5.15.11",
 ]
 test = [
+  "opencv-python-headless==4.11.0.86",
+  "firebase-admin==7.1.0",
   "argon2-cffi==23.1.0",
   "fastapi==0.115.8",
   "httpx==0.28.1",
@@ -42,7 +44,7 @@ include = ["ai_cctv_core*", "configurator*"]
 addopts = "-ra"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["src", "edge/src", "."]
-testpaths = ["tests", "edge/tests"]
+testpaths = ["tests", "edge/tests", "server/services/data/tests", "server/services/external/tests", "server/services/preprocessing/tests", "server/services/analysis/tests"]
 
 [tool.ruff]
 target-version = "py311"

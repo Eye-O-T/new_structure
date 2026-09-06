@@ -22,6 +22,8 @@ class Settings:
     data_inference_token: str | None = None
     data_media_token: str | None = None
     data_recovery_token: str | None = None
+    data_identity_token: str | None = None
+    data_analysis_token: str | None = None
     busy_timeout_ms: int = 5_000
     retention_days: int = 7
     maintenance_interval_seconds: int = 3_600
@@ -73,14 +75,10 @@ class Settings:
         except json.JSONDecodeError as exc:
             raise ValueError("EDGE_AUTH_TOKENS_JSON must be valid JSON") from exc
         if not isinstance(edge_auth_tokens, dict) or any(
-            not isinstance(key, str)
-            or not isinstance(value, str)
-            or len(value) < 32
+            not isinstance(key, str) or not isinstance(value, str) or len(value) < 32
             for key, value in edge_auth_tokens.items()
         ):
-            raise ValueError(
-                "EDGE_AUTH_TOKENS_JSON must map Edge device IDs to tokens"
-            )
+            raise ValueError("EDGE_AUTH_TOKENS_JSON must map Edge device IDs to tokens")
         return cls(
             database_path=database_path,
             storage_root=storage_root,
@@ -91,6 +89,8 @@ class Settings:
                 or os.getenv("INTERNAL_SERVICE_TOKEN")
                 or ""
             ),
+            data_identity_token=os.getenv("DATA_IDENTITY_TOKEN") or None,
+            data_analysis_token=os.getenv("DATA_ANALYSIS_TOKEN") or None,
             data_external_token=os.getenv("DATA_EXTERNAL_TOKEN") or None,
             data_inference_token=os.getenv("DATA_INFERENCE_TOKEN") or None,
             data_media_token=os.getenv("DATA_MEDIA_TOKEN") or None,
@@ -142,16 +142,14 @@ class Settings:
             recovery_retry_base_seconds=int(
                 os.getenv("RECOVERY_RETRY_BASE_SECONDS", "30")
             ),
-            recovery_settle_seconds=int(
-                os.getenv("RECOVERY_SETTLE_SECONDS", "15")
-            ),
-            recovery_timeout_seconds=float(
-                os.getenv("RECOVERY_TIMEOUT_SECONDS", "30")
-            ),
+            recovery_settle_seconds=int(os.getenv("RECOVERY_SETTLE_SECONDS", "15")),
+            recovery_timeout_seconds=float(os.getenv("RECOVERY_TIMEOUT_SECONDS", "30")),
             central_recording_segment_seconds=int(
                 os.getenv(
                     "CENTRAL_RECORDING_SEGMENT_SECONDS",
-                    str(shared_config.recording.segment_seconds if shared_config else 60),
+                    str(
+                        shared_config.recording.segment_seconds if shared_config else 60
+                    ),
                 )
             ),
             recovery_data_base_url=os.getenv(
@@ -174,14 +172,12 @@ class Settings:
             "inference": self.data_inference_token,
             "media": self.data_media_token,
             "recovery": self.data_recovery_token,
+            "identity": self.data_identity_token,
+            "analysis": self.data_analysis_token,
         }
         if any(scoped_tokens.values()):
-            return {
-                scope: token or "" for scope, token in scoped_tokens.items()
-            }
-        return {
-            scope: self.internal_token for scope in scoped_tokens
-        }
+            return {scope: token or "" for scope, token in scoped_tokens.items()}
+        return {scope: self.internal_token for scope in scoped_tokens}
 
     def prepare_directories(self) -> None:
         scoped_tokens = (
@@ -197,6 +193,11 @@ class Settings:
                     "and DATA_RECOVERY_TOKEN must be configured together"
                 )
             normalized_tokens = [str(token) for token in scoped_tokens]
+            normalized_tokens += [
+                token
+                for token in (self.data_identity_token, self.data_analysis_token)
+                if token
+            ]
             if any(len(token) < 32 for token in normalized_tokens):
                 raise ValueError("scoped Data API tokens must contain 32+ characters")
             if len(set(normalized_tokens)) != len(normalized_tokens):

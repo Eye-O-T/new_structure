@@ -1,0 +1,15 @@
+# Opt-in overlay: docker compose -f server/compose.yml -f server/compose.push.yml ...
+# Run with --env-file pointing to the Configurator-generated compose.env.
+services:
+  external:
+    environment:
+      PUSH_ENABLED: "true"
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?Set FIREBASE_PROJECT_ID}
+      FIREBASE_CREDENTIALS_FILE: /run/secrets/firebase-service-account.json
+    volumes:
+      - type: bind
+        source: ${FIREBASE_SERVICE_ACCOUNT_FILE:?Set FIREBASE_SERVICE_ACCOUNT_FILE}
+        target: /run/secrets/firebase-service-account.json
+        read_only: true
+        bind:
+          create_host_path: false

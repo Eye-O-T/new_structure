@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Mapping
 from urllib.parse import urlsplit
 
-
 CAMERA_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
@@ -132,6 +131,10 @@ class Settings:
     media_control_timeout_seconds: float = 5.0
     edge_status_poll_interval_seconds: float = 5.0
     edge_event_page_limit: int = 100
+    push_enabled: bool = False
+    firebase_project_id: str | None = None
+    firebase_credentials_file: str | None = None
+    push_poll_interval_seconds: float = 5.0
     battery_low_percent: int = 20
     battery_critical_percent: int = 10
     storage_warning_percent: int = 85
@@ -143,6 +146,12 @@ class Settings:
     )
 
     def __post_init__(self) -> None:
+        if self.push_enabled and (
+            not self.firebase_project_id or not self.firebase_credentials_file
+        ):
+            raise RuntimeError("Push requires Firebase project and credentials file")
+        if self.push_poll_interval_seconds <= 0:
+            raise RuntimeError("Push poll interval must be positive")
         _validate_http_url("DATA_BASE_URL", self.data_base_url)
         _validate_http_url("DATA_HEALTH_URL", self.data_health_url)
         _validate_http_url("MEDIA_CONTROL_URL", self.media_control_url)
@@ -268,6 +277,12 @@ class Settings:
                 "EDGE_STATUS_POLL_INTERVAL_SECONDS", 5.0
             ),
             edge_event_page_limit=_read_positive_int("EDGE_EVENT_PAGE_LIMIT", 100),
+            push_enabled=_read_bool("PUSH_ENABLED", False),
+            firebase_project_id=os.getenv("FIREBASE_PROJECT_ID") or None,
+            firebase_credentials_file=os.getenv("FIREBASE_CREDENTIALS_FILE") or None,
+            push_poll_interval_seconds=_read_positive_float(
+                "PUSH_POLL_INTERVAL_SECONDS", 5
+            ),
             battery_low_percent=_read_positive_int("BATTERY_LOW_PERCENT", 20),
             battery_critical_percent=_read_positive_int("BATTERY_CRITICAL_PERCENT", 10),
             storage_warning_percent=_read_positive_int("STORAGE_WARNING_PERCENT", 85),

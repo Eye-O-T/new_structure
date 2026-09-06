@@ -13,8 +13,8 @@
 - `recordings/`: MediaMTX read/write, Data Service read/write
 - `recovered/`: Host에서는 별도 bind source이며 Data 컨테이너 안에서는
   `/recordings/recovered`로 마운트
-- `snapshots/`: Inference read/write, Data Service read/write
-- `models/`: Inference read-only
+- `snapshots/`: Preprocessing read/write, Data Service read/write
+- `models/`: Preprocessing read-only
 
 Data Service의 쓰기 권한은 새 미디어를 생성하기 위한 것이 아니다. Data Service가
 보존 기간 삭제와 DB-파일 reconciliation을 함께 수행하고, readiness에서 저장소
@@ -58,7 +58,7 @@ Data Service가 시작되지 않는 장애 상황에서는 다음 보수적 절�
 `detected`, 실제 게시 복구를 수집하면 `waiting_for_recovery`가 되고, Worker가
 `downloading`, `indexing`, `completed` 순서로 진행한다. 실패는 `failed`와 안전한
 오류를 기록하고 설정된 최대 횟수까지 지수 Backoff로 재시도한다. 같은 장애를 여러
-수집기가 순서가 바뀌어 보고해도 시작 최솟값과 종료 최댓값을 병합한다. Restore 뒤 기본 15초 settle 기간을 두어 Edge splitmux가 마지막 Segment를 닫은 다음에만 Job을 claim하며, 더 늦은 Restore 경계가 들어오면 종료와 claim 시각을 함께 연장한다. Inference
+수집기가 순서가 바뀌어 보고해도 시작 최솟값과 종료 최댓값을 병합한다. Restore 뒤 기본 15초 settle 기간을 두어 Edge splitmux가 마지막 Segment를 닫은 다음에만 Job을 claim하며, 더 늦은 Restore 경계가 들어오면 종료와 claim 시각을 함께 연장한다. Preprocessing
 소비자의 `inference_stream_lost/restored`는 Edge 업로드 단절이 아니므로 복구 작업을
 만들지 않는다.
 
@@ -82,7 +82,7 @@ Recovery token은 명령행 인자로 전달하지 않는다. 다음 예시는 h
 EDGE_RECOVERY_TOKEN="$(< /secure/ai-cctv/cam-001-recovery.token)" \
 docker compose --env-file server/.env -f server/compose.yml exec -T \
   -e EDGE_RECOVERY_TOKEN data \
-  python -m app.recovery_coordinator \
+  python -m app.workers.recovery \
     --edge-url http://192.0.2.41:8002 \
     --camera-id cam-001 \
     --start 2026-08-22T08:00:00Z \

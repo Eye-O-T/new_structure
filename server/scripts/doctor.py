@@ -59,8 +59,9 @@ def main() -> int:
     secret_defaults = {
         "data": ("DATA_SECRETS_FILE", "./secrets/data.env"),
         "external": ("EXTERNAL_SECRETS_FILE", "./secrets/external.env"),
-        "inference": ("INFERENCE_SECRETS_FILE", "./secrets/inference.env"),
+        "preprocessing": ("PREPROCESSING_SECRETS_FILE", "./secrets/preprocessing.env"),
         "media": ("MEDIA_SECRETS_FILE", "./secrets/media.env"),
+        "analysis": ("ANALYSIS_SECRETS_FILE", "./secrets/analysis.env"),
     }
     secret_paths = {
         service: deployment_path(server_dir, deployment_env.get(variable, default))
@@ -119,7 +120,7 @@ def main() -> int:
         ),
         report(
             len(set(secrets_paths)) == len(secrets_paths),
-            "Data, External, Inference, and Media use distinct secret files",
+            "Data, External, Preprocessing, Media, and Analysis use distinct secret files",
         ),
     ]
     checks.extend(report(path.is_file(), f"file: {path}") for path in required_files)
@@ -148,6 +149,8 @@ def main() -> int:
                 "DATA_INFERENCE_TOKEN",
                 "DATA_MEDIA_TOKEN",
                 "DATA_RECOVERY_TOKEN",
+                "DATA_IDENTITY_TOKEN",
+                "DATA_ANALYSIS_TOKEN",
                 "EDGE_AUTH_TOKENS_JSON",
                 "INITIAL_ADMIN_USERNAME",
                 "INITIAL_ADMIN_PASSWORD_HASH",
@@ -159,12 +162,14 @@ def main() -> int:
                 "MEDIA_READ_PASSWORD",
                 "MEDIA_PUBLISH_CREDENTIALS_JSON",
             },
-            "inference": {
+            "preprocessing": {
                 "DATA_INFERENCE_TOKEN",
+                "DATA_IDENTITY_TOKEN",
                 "MEDIA_READ_USERNAME",
                 "MEDIA_READ_PASSWORD",
             },
             "media": {"DATA_MEDIA_TOKEN"},
+            "analysis": {"DATA_ANALYSIS_TOKEN"},
         }
         for service, values in secret_values.items():
             forbidden = sorted(set(values) - allowed_keys[service])
@@ -180,6 +185,8 @@ def main() -> int:
             "inference": "DATA_INFERENCE_TOKEN",
             "media": "DATA_MEDIA_TOKEN",
             "recovery": "DATA_RECOVERY_TOKEN",
+            "identity": "DATA_IDENTITY_TOKEN",
+            "analysis": "DATA_ANALYSIS_TOKEN",
         }
         data_tokens: dict[str, str] = {}
         for scope, key in scoped_keys.items():
@@ -191,23 +198,30 @@ def main() -> int:
                     f"data.env contains a 32+ character {key}",
                 )
             )
-        for service in ("external", "inference", "media"):
-            key = scoped_keys[service]
-            consumer_value = secret_values[service].get(key, "")
-            checks.append(
-                report(
-                    len(consumer_value) >= 32,
-                    f"{service}.env contains a 32+ character {key}",
+        consumers = {
+            "external": ("external",),
+            "preprocessing": ("inference", "identity"),
+            "media": ("media",),
+            "analysis": ("analysis",),
+        }
+        for service, scopes in consumers.items():
+            for scope in scopes:
+                key = scoped_keys[scope]
+                value = secret_values[service].get(key, "")
+                checks.append(
+                    report(
+                        len(value) >= 32,
+                        f"{service}.env contains a 32+ character {key}",
+                    )
                 )
-            )
-            checks.append(
-                report(
-                    bool(consumer_value)
-                    and bool(data_tokens[service])
-                    and hmac.compare_digest(consumer_value, data_tokens[service]),
-                    f"{key} matches between data.env and {service}.env",
+                checks.append(
+                    report(
+                        bool(value)
+                        and bool(data_tokens[scope])
+                        and hmac.compare_digest(value, data_tokens[scope]),
+                        f"{key} matches between data.env and {service}.env",
+                    )
                 )
-            )
         configured_tokens = [value for value in data_tokens.values() if value]
         checks.append(
             report(
@@ -226,13 +240,13 @@ def main() -> int:
         external_read_username = secret_values["external"].get(
             "MEDIA_READ_USERNAME", ""
         )
-        inference_read_username = secret_values["inference"].get(
+        preprocessing_read_username = secret_values["preprocessing"].get(
             "MEDIA_READ_USERNAME", ""
         )
         external_read_password = secret_values["external"].get(
             "MEDIA_READ_PASSWORD", ""
         )
-        inference_read_password = secret_values["inference"].get(
+        preprocessing_read_password = secret_values["preprocessing"].get(
             "MEDIA_READ_PASSWORD", ""
         )
         checks.extend(
@@ -242,34 +256,34 @@ def main() -> int:
                     "external.env contains MEDIA_READ_USERNAME",
                 ),
                 report(
-                    bool(inference_read_username),
-                    "inference.env contains MEDIA_READ_USERNAME",
+                    bool(preprocessing_read_username),
+                    "preprocessing.env contains MEDIA_READ_USERNAME",
                 ),
                 report(
                     bool(external_read_username)
-                    and bool(inference_read_username)
+                    and bool(preprocessing_read_username)
                     and hmac.compare_digest(
                         external_read_username.encode("utf-8"),
-                        inference_read_username.encode("utf-8"),
+                        preprocessing_read_username.encode("utf-8"),
                     ),
-                    "MEDIA_READ_USERNAME matches between external.env and inference.env",
+                    "MEDIA_READ_USERNAME matches between external.env and preprocessing.env",
                 ),
                 report(
                     len(external_read_password) >= 32,
                     "external.env contains a 32+ character MEDIA_READ_PASSWORD",
                 ),
                 report(
-                    len(inference_read_password) >= 32,
-                    "inference.env contains a 32+ character MEDIA_READ_PASSWORD",
+                    len(preprocessing_read_password) >= 32,
+                    "preprocessing.env contains a 32+ character MEDIA_READ_PASSWORD",
                 ),
                 report(
                     bool(external_read_password)
-                    and bool(inference_read_password)
+                    and bool(preprocessing_read_password)
                     and hmac.compare_digest(
                         external_read_password.encode("utf-8"),
-                        inference_read_password.encode("utf-8"),
+                        preprocessing_read_password.encode("utf-8"),
                     ),
-                    "MEDIA_READ_PASSWORD matches between external.env and inference.env",
+                    "MEDIA_READ_PASSWORD matches between external.env and preprocessing.env",
                 ),
             )
         )

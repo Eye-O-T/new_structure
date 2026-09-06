@@ -9,9 +9,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from configurator.edge_discovery import parse_advertisement
-from mock_edge.app import MockEdgeService, create_control_app, create_recovery_app
-from mock_edge.protocol import build_advertisement
-from mock_edge.runtime import (
+from tools.mock_edge.app import MockEdgeService, create_control_app, create_recovery_app
+from tools.mock_edge.protocol import build_advertisement
+from tools.mock_edge.runtime import (
     CentralTarget,
     VIDEO_PROFILES,
     build_publisher_command,

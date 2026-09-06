@@ -10,6 +10,7 @@ from ai_cctv_core.config import CameraBootstrap
 from .config_core import InstallRequest, initialize
 from .compose_adapter import (
     ComposeAdapter,
+    START_ARGUMENTS,
     default_data_root,
     default_server_dir,
 )
@@ -247,7 +248,7 @@ def run() -> int:
                 default_server_dir(), data_root / "config" / "compose.env"
             )
             arguments = {
-                "start": ("up", "-d", "--build", "--wait"),
+                "start": START_ARGUMENTS,
                 "stop": ("down",),
                 "restart": ("restart",),
                 "status": ("ps",),
@@ -657,7 +658,8 @@ def run() -> int:
                 f"Created {result.config_path}\n"
                 f"Data secrets: {result.secrets_path}\n"
                 f"External secrets: {result.external_secrets_path}\n"
-                f"Inference secrets: {result.inference_secrets_path}\n"
+                f"Preprocessing secrets: {result.preprocessing_secrets_path}\n"
+                f"Analysis secrets: {result.analysis_secrets_path}\n"
                 f"Media secrets: {result.media_secrets_path}\n"
                 f"Camera credentials: {result.camera_credentials_path}\n"
                 f"Release manifest: {result.release_manifest_path}\n"

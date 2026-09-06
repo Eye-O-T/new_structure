@@ -46,7 +46,19 @@ py -3.11 server/scripts/generate_dev_cert.py
 py -3.11 server/scripts/doctor.py
 ```
 
-`generate_secrets.py`는 Windows DACL 또는 POSIX `0600`으로 보호한 `data.env`, `external.env`, `inference.env`, `media.env`를 생성하며 기존 파일을 기본적으로 덮어쓰지 않는다. Data에는 서로 다른 `DATA_EXTERNAL_TOKEN`, `DATA_INFERENCE_TOKEN`, `DATA_MEDIA_TOKEN`, `DATA_RECOVERY_TOKEN`을 저장하고 각 호출 서비스에는 자신의 Token 하나만 주입한다. 또한 Inference 전용 `MEDIA_READ_USERNAME`/`MEDIA_READ_PASSWORD`를 한 번 생성하여 External과 Inference 파일에만 같은 값으로 저장한다. `doctor.py`는 필수 Key, Data와 호출자 간 일치, 네 Token의 상호 차이, reader 쌍의 일치와 32자 이상 password, 서비스별 allowlist를 검증한다. 단일 `SECRETS_FILE`/`internal-client.env` 배포는 더 이상 허용하지 않으며, 런타임의 `INTERNAL_SERVICE_TOKEN` fallback은 직접 개발·기존 테스트 호환용이다. `--camera-id`가 만드는 정적 게시 자격증명은 최초 Bootstrap 전용이며 DB에 저장된 운영 자격증명을 회전하지 않는다. 신규 운영 등록에는 Configurator의 `edge-register`를 사용하고, 일회성 게시 자격증명은 지정한 보호 파일을 통해 `ai-cctv-edge setup --publish-credentials-file <file>`로 전달한다.
+`generate_secrets.py`는 Windows DACL 또는 POSIX `0600`으로 파일을 보호하며 기존 파일을 기본적으로 덮어쓰지 않는다.
+
+새 설치는 `data.env`, `external.env`, `preprocessing.env`, `analysis.env`, `media.env` 다섯 비밀 설정 파일을 생성한다.
+
+| 파일 | 비밀 설정 |
+|---|---|
+| `data.env` | 서로 다른 `DATA_EXTERNAL_TOKEN`, `DATA_INFERENCE_TOKEN`, `DATA_IDENTITY_TOKEN`, `DATA_ANALYSIS_TOKEN`, `DATA_MEDIA_TOKEN`, `DATA_RECOVERY_TOKEN`, 초기 관리자 Hash |
+| `external.env` | `DATA_EXTERNAL_TOKEN`, JWT Secret, Bootstrap 게시 자격 증명, RTSP reader 쌍 |
+| `preprocessing.env` | 감지용 `DATA_INFERENCE_TOKEN`, 인물 연결용 `DATA_IDENTITY_TOKEN`, External과 같은 `MEDIA_READ_USERNAME`/`MEDIA_READ_PASSWORD` |
+| `analysis.env` | `DATA_ANALYSIS_TOKEN` |
+| `media.env` | `DATA_MEDIA_TOKEN` |
+
+한 Preprocessing 컨테이너 안에서도 감지와 인물 연결의 Data 토큰은 서로 다르다. Data API는 각 토큰의 허용 경로를 검사한다. `doctor`는 키 누락·불일치·상호 중복·서비스별 허용 목록·32자 이상 RTSP reader 비밀번호를 검증한다. 기존 설치는 `server/scripts/enable_object_processing.py --env-file <compose.env>`로 기존 토큰을 보존하며 파일을 이관한 다음 컨테이너를 재생성한다. 새 설치는 별도 `identity.env`를 사용하지 않는다.
 
 ## 3. Network bind 검증
 
@@ -59,20 +71,22 @@ py -3.11 server/scripts/doctor.py
 - Linux의 `AI_CCTV_UID`, `AI_CCTV_GID`: Runtime Directory를 소유한 Host 사용자
 - `PUBLIC_BASE_URL`: 운영 환경의 공개 HTTPS Origin. 설정하면 Live와 Playback API가 Absolute HTTPS URL을 반환
 - `RECORDING_SEGMENT_SECONDS`: 10~300초. MediaMTX 녹화와 Data Reconciliation이 함께 사용하는 Segment 길이
-- `DATA_SECRETS_FILE`, `EXTERNAL_SECRETS_FILE`, `INFERENCE_SECRETS_FILE`, `MEDIA_SECRETS_FILE`: 서비스별 최소권한 Secret 파일. 네 경로는 서로 달라야 한다.
+- `DATA_SECRETS_FILE`, `EXTERNAL_SECRETS_FILE`, `PREPROCESSING_SECRETS_FILE`, `ANALYSIS_SECRETS_FILE`, `MEDIA_SECRETS_FILE`: 서비스별 최소권한 Secret 파일. 다섯 경로는 서로 달라야 한다.
 
 Profile 적용 시간 제한의 기본 연쇄는 Edge apply/rollback 최대 60초, External `EDGE_CONTROL_TIMEOUT_SECONDS=75`, Nginx 공개 API 85초, Configurator 90초다. Edge의 `apply_timeout_seconds`를 늘리면 모든 상위 제한도 같은 순서로 더 크게 조정하여 Client가 결과를 모른 채 재시도하지 않게 한다. 상태 Poll은 별도 `EDGE_STATUS_TIMEOUT_SECONDS=5`를 사용한다.
 
-Configurator GUI/CLI도 RTSP bind를 `127.0.0.1`로 생성한다. 원격 Edge가 없다면 그대로 유지한다. 원격 Edge가 있다면 `0.0.0.0` 대신 Edge가 도달할 중앙 서버의 신뢰 LAN IP 하나를 지정하고 OS 방화벽에서 Edge 대역만 8554/TCP로 허용한다. RTSP 8554를 공인 IP 또는 Internet-facing NIC에 Bind하지 않는다. Data, External, Inference, MediaMTX의 8888/9996/9997과 Nginx의 내부 8080은 Host Port로 공개하지 않는다.
+Configurator GUI/CLI도 RTSP bind를 `127.0.0.1`로 생성한다. 원격 Edge가 없다면 그대로 유지한다. 원격 Edge가 있다면 `0.0.0.0` 대신 Edge가 도달할 중앙 서버의 신뢰 LAN IP 하나를 지정하고 OS 방화벽에서 Edge 대역만 8554/TCP로 허용한다. RTSP 8554를 공인 IP 또는 Internet-facing NIC에 Bind하지 않는다. Data, External, Preprocessing, MediaMTX의 8888/9996/9997과 Nginx의 내부 8080은 Host Port로 공개하지 않는다.
 
-Inference의 RTSP URL에는 `MEDIA_READ_USERNAME`과 `MEDIA_READ_PASSWORD`가 percent-encoded userinfo로 런타임에만 결합된다. URL 전체나 password를 로그, 오류 출력, 운영 명령행에 기록하지 않는다. 두 값은 `external.env`와 `inference.env`에만 있어야 하며 Data/Media 파일에 복사하지 않는다.
+Preprocessing의 RTSP URL에는 `MEDIA_READ_USERNAME`과 `MEDIA_READ_PASSWORD`가 percent-encoded userinfo로 런타임에만 결합된다. URL 전체나 password를 로그, 오류 출력, 운영 명령행에 기록하지 않는다. 두 값은 `external.env`와 `preprocessing.env`에만 있어야 하며 Data/Media 파일에 복사하지 않는다.
 
 ## 4. 빌드와 시작
+
+기존 설치는 먼저 [환경 파일 이관](../object-processing.md#배포)을 실행한다. 기존 `COMPOSE_PROJECT_NAME`을 유지하고 `up --remove-orphans`로 같은 프로젝트의 이전 서비스 컨테이너를 정리한다. Bind Mount의 DB·영상은 보존된다.
 
 ```bash
 docker compose --env-file server/.env -f server/compose.yml config --quiet
 docker compose --env-file server/.env -f server/compose.yml build
-docker compose --env-file server/.env -f server/compose.yml up -d --wait --wait-timeout 120
+docker compose --env-file server/.env -f server/compose.yml up -d --wait --wait-timeout 120 --remove-orphans
 docker compose --env-file server/.env -f server/compose.yml ps
 ```
 
@@ -95,7 +109,7 @@ curl -kfsS https://127.0.0.1/healthz
 
 ```bash
 docker compose --env-file server/.env -f server/compose.yml down
-docker compose --env-file server/.env -f server/compose.yml up -d --wait
+docker compose --env-file server/.env -f server/compose.yml up -d --wait --remove-orphans
 ```
 
 `down`은 Bind-mounted Runtime Data를 보존한다. `down -v`나 `server/runtime` 삭제를 운영 절차에 사용하지 않는다.
@@ -107,7 +121,8 @@ docker compose --env-file server/.env -f server/compose.yml up -d --wait
 ```bash
 ! docker compose --env-file server/.env -f server/compose.yml port data 8000
 ! docker compose --env-file server/.env -f server/compose.yml port external 8000
-! docker compose --env-file server/.env -f server/compose.yml port inference 8000
+! docker compose --env-file server/.env -f server/compose.yml port preprocessing 8000
+! docker compose --env-file server/.env -f server/compose.yml port analysis 8000
 ! docker compose --env-file server/.env -f server/compose.yml port mediamtx 8888
 ! docker compose --env-file server/.env -f server/compose.yml port mediamtx 9996
 ! docker compose --env-file server/.env -f server/compose.yml port mediamtx 9997

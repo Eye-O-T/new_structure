@@ -102,7 +102,10 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
 
     data_secrets = result.secrets_path.read_text(encoding="utf-8")
     external_secrets = result.external_secrets_path.read_text(encoding="utf-8")
-    inference_secrets = result.inference_secrets_path.read_text(encoding="utf-8")
+    preprocessing_secrets = result.preprocessing_secrets_path.read_text(
+        encoding="utf-8"
+    )
+    analysis_secrets = result.analysis_secrets_path.read_text(encoding="utf-8")
     media_secrets = result.media_secrets_path.read_text(encoding="utf-8")
     assert "a-strong-password" not in data_secrets
     assert "INITIAL_ADMIN_PASSWORD_HASH='$argon2" in data_secrets
@@ -113,19 +116,19 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
     assert "JWT_SECRET=" in external_secrets
     assert "MEDIA_PUBLISH_CREDENTIALS_JSON=" in external_secrets
     assert "INITIAL_ADMIN_PASSWORD_HASH=" not in external_secrets
-    assert inference_secrets.startswith("DATA_INFERENCE_TOKEN=")
+    assert "DATA_INFERENCE_TOKEN=" in preprocessing_secrets
     assert media_secrets.startswith("DATA_MEDIA_TOKEN=")
-    assert "JWT_SECRET=" not in inference_secrets
+    assert "JWT_SECRET=" not in preprocessing_secrets
     assert "JWT_SECRET=" not in media_secrets
     assert "MEDIA_READ_USERNAME=" not in media_secrets
     assert "MEDIA_READ_PASSWORD=" not in media_secrets
     assert _env_value(external_secrets, "MEDIA_READ_USERNAME") == _env_value(
-        inference_secrets, "MEDIA_READ_USERNAME"
+        preprocessing_secrets, "MEDIA_READ_USERNAME"
     )
     assert _env_value(external_secrets, "MEDIA_READ_PASSWORD") == _env_value(
-        inference_secrets, "MEDIA_READ_PASSWORD"
+        preprocessing_secrets, "MEDIA_READ_PASSWORD"
     )
-    assert len(_env_value(inference_secrets, "MEDIA_READ_PASSWORD")) >= 32
+    assert len(_env_value(preprocessing_secrets, "MEDIA_READ_PASSWORD")) >= 32
     scoped_tokens = {
         key: _env_value(data_secrets, key)
         for key in (
@@ -133,15 +136,25 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
             "DATA_INFERENCE_TOKEN",
             "DATA_MEDIA_TOKEN",
             "DATA_RECOVERY_TOKEN",
+            "DATA_IDENTITY_TOKEN",
+            "DATA_ANALYSIS_TOKEN",
         )
     }
-    assert len(set(scoped_tokens.values())) == 4
+    assert len(set(scoped_tokens.values())) == 6
+    assert (
+        _env_value(preprocessing_secrets, "DATA_IDENTITY_TOKEN")
+        == scoped_tokens["DATA_IDENTITY_TOKEN"]
+    )
+    assert (
+        _env_value(analysis_secrets, "DATA_ANALYSIS_TOKEN")
+        == scoped_tokens["DATA_ANALYSIS_TOKEN"]
+    )
     assert (
         _env_value(external_secrets, "DATA_EXTERNAL_TOKEN")
         == scoped_tokens["DATA_EXTERNAL_TOKEN"]
     )
     assert (
-        _env_value(inference_secrets, "DATA_INFERENCE_TOKEN")
+        _env_value(preprocessing_secrets, "DATA_INFERENCE_TOKEN")
         == scoped_tokens["DATA_INFERENCE_TOKEN"]
     )
     assert (
@@ -154,7 +167,8 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
     if os.name != "nt":
         assert stat.S_IMODE(result.secrets_path.stat().st_mode) == 0o600
         assert stat.S_IMODE(result.external_secrets_path.stat().st_mode) == 0o600
-        assert stat.S_IMODE(result.inference_secrets_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(result.preprocessing_secrets_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(result.analysis_secrets_path.stat().st_mode) == 0o600
         assert stat.S_IMODE(result.media_secrets_path.stat().st_mode) == 0o600
         assert stat.S_IMODE(result.camera_credentials_path.stat().st_mode) == 0o600
     assert result.camera_credentials_path.read_text(encoding="utf-8").startswith("{")
@@ -170,7 +184,10 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
     assert "PUBLIC_BASE_URL=https://cctv.example.com\n" in compose_text
     assert "DATA_SECRETS_FILE=" in compose_text
     assert "EXTERNAL_SECRETS_FILE=" in compose_text
-    assert "INFERENCE_SECRETS_FILE=" in compose_text
+    assert "PREPROCESSING_SECRETS_FILE=" in compose_text
+    assert "ANALYSIS_SECRETS_FILE=" in compose_text
+    assert "\nINFERENCE_SECRETS_FILE=" not in compose_text
+    assert "\nIDENTITY_SECRETS_FILE=" not in compose_text
     assert "MEDIA_SECRETS_FILE=" in compose_text
     assert "\nSECRETS_FILE=" not in compose_text
     expected_models_dir = _dotenv(str(tmp_path / "data" / "models"))
@@ -179,6 +196,9 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
     assert manifest["schema_version"] == 1
     assert manifest["application_version"] == "0.3.0"
     assert manifest["images"]["mediamtx"] == "ai-cctv-mediamtx:1.9.0"
+    assert manifest["images"]["preprocessing"] == "ai-cctv-preprocessing:0.3.0"
+    assert manifest["images"]["analysis"] == "ai-cctv-analysis:0.3.0"
+    assert "inference" not in manifest["images"]
     assert manifest["model"] == {
         "filename": "selected-model.pt",
         "sha256": hashlib.sha256(b"model-content").hexdigest(),
@@ -286,7 +306,8 @@ def test_manual_secret_generator_splits_service_privileges(
 
     data = (output_dir / "data.env").read_text(encoding="utf-8")
     external = (output_dir / "external.env").read_text(encoding="utf-8")
-    inference = (output_dir / "inference.env").read_text(encoding="utf-8")
+    inference = (output_dir / "preprocessing.env").read_text(encoding="utf-8")
+    analysis = (output_dir / "analysis.env").read_text(encoding="utf-8")
     media = (output_dir / "media.env").read_text(encoding="utf-8")
     scoped_tokens = {
         key: _env_value(data, key)
@@ -295,9 +316,19 @@ def test_manual_secret_generator_splits_service_privileges(
             "DATA_INFERENCE_TOKEN",
             "DATA_MEDIA_TOKEN",
             "DATA_RECOVERY_TOKEN",
+            "DATA_IDENTITY_TOKEN",
+            "DATA_ANALYSIS_TOKEN",
         )
     }
-    assert len(set(scoped_tokens.values())) == 4
+    assert len(set(scoped_tokens.values())) == 6
+    assert (
+        _env_value(inference, "DATA_IDENTITY_TOKEN")
+        == scoped_tokens["DATA_IDENTITY_TOKEN"]
+    )
+    assert (
+        _env_value(analysis, "DATA_ANALYSIS_TOKEN")
+        == scoped_tokens["DATA_ANALYSIS_TOKEN"]
+    )
     assert (
         _env_value(external, "DATA_EXTERNAL_TOKEN")
         == scoped_tokens["DATA_EXTERNAL_TOKEN"]
@@ -325,18 +356,17 @@ def test_manual_secret_generator_splits_service_privileges(
     output = capsys.readouterr().out
     assert "bootstrap-only publish credentials" in output
     assert all(token not in output for token in scoped_tokens.values())
-    assert len(restricted) == 4
+    assert len(restricted) == 5
 
     compose = Path("server/compose.yml").read_text(encoding="utf-8")
     assert "${DATA_SECRETS_FILE:-./secrets/data.env}" in compose
     assert "${EXTERNAL_SECRETS_FILE:-./secrets/external.env}" in compose
-    assert "${INFERENCE_SECRETS_FILE:-./secrets/inference.env}" in compose
+    assert "${PREPROCESSING_SECRETS_FILE:-./secrets/preprocessing.env}" in compose
     assert "${MEDIA_SECRETS_FILE:-./secrets/media.env}" in compose
     assert "${SECRETS_FILE" not in compose
     assert "INTERNAL_CLIENT_SECRETS_FILE" not in compose
     assert (
-        "CENTRAL_RECORDING_SEGMENT_SECONDS: "
-        "${RECORDING_SEGMENT_SECONDS:-60}" in compose
+        "CENTRAL_RECORDING_SEGMENT_SECONDS: ${RECORDING_SEGMENT_SECONDS:-60}" in compose
     )
     assert (
         "MTX_PATHDEFAULTS_RECORDSEGMENTDURATION: "
@@ -375,7 +405,7 @@ def _prepare_doctor_deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     (server_dir / ".env").write_text(
         "DATA_SECRETS_FILE=./secrets/data.env\n"
         "EXTERNAL_SECRETS_FILE=./secrets/external.env\n"
-        "INFERENCE_SECRETS_FILE=./secrets/inference.env\n"
+        "PREPROCESSING_SECRETS_FILE=./secrets/preprocessing.env\n"
         "MEDIA_SECRETS_FILE=./secrets/media.env\n",
         encoding="utf-8",
     )
@@ -415,14 +445,14 @@ def test_server_doctor_validates_scoped_tokens_and_secret_allowlists(
     )
     assert server_doctor.main() == 0
 
-    inference_path = server_dir / "secrets" / "inference.env"
+    inference_path = server_dir / "secrets" / "preprocessing.env"
     original = inference_path.read_text(encoding="utf-8")
     inference_path.write_text(
         original.replace(_env_value(original, "DATA_INFERENCE_TOKEN"), "m" * 40),
         encoding="utf-8",
     )
     assert server_doctor.main() == 1
-    assert "matches between data.env and inference.env" in capsys.readouterr().out
+    assert "matches between data.env and preprocessing.env" in capsys.readouterr().out
 
     inference_path.write_text(
         original + f"DATA_EXTERNAL_TOKEN={'x' * 40}\n", encoding="utf-8"
@@ -438,7 +468,7 @@ def test_server_doctor_validates_scoped_tokens_and_secret_allowlists(
     )
     assert server_doctor.main() == 1
     assert (
-        "MEDIA_READ_PASSWORD matches between external.env and inference.env"
+        "MEDIA_READ_PASSWORD matches between external.env and preprocessing.env"
         in capsys.readouterr().out
     )
 
@@ -450,7 +480,7 @@ def test_server_doctor_validates_scoped_tokens_and_secret_allowlists(
     )
     assert server_doctor.main() == 1
     assert (
-        "MEDIA_READ_USERNAME matches between external.env and inference.env"
+        "MEDIA_READ_USERNAME matches between external.env and preprocessing.env"
         in capsys.readouterr().out
     )
 
@@ -460,7 +490,7 @@ def test_server_doctor_validates_scoped_tokens_and_secret_allowlists(
     )
     assert server_doctor.main() == 1
     assert (
-        "inference.env contains a 32+ character MEDIA_READ_PASSWORD"
+        "preprocessing.env contains a 32+ character MEDIA_READ_PASSWORD"
         in capsys.readouterr().out
     )
 
@@ -562,9 +592,7 @@ def test_initialize_rejects_invalid_runtime_settings_before_writing(
     assert not (tmp_path / "data").exists()
 
 
-def test_local_model_install_is_atomic_bounded_and_manifest_free(
-    tmp_path, monkeypatch
-):
+def test_local_model_install_is_atomic_bounded_and_manifest_free(tmp_path, monkeypatch):
     source = tmp_path / "downloaded-model.onnx"
     source.write_bytes(b"locally-downloaded-model")
     installed = install_local_model(source, tmp_path / "persistent" / "models")
@@ -653,9 +681,7 @@ def test_initialize_rejects_incomplete_or_encrypted_tls_pair(tmp_path):
         initialize(InstallRequest(tls_private_key_path=encrypted_key, **common))
 
 
-def test_frozen_configurator_discovers_programdata_compose_env(
-    tmp_path, monkeypatch
-):
+def test_frozen_configurator_discovers_programdata_compose_env(tmp_path, monkeypatch):
     program_data = tmp_path / "ProgramData"
     expected = program_data / "AI_CCTV" / "config" / "compose.env"
     expected.parent.mkdir(parents=True)
@@ -697,9 +723,9 @@ def test_gui_and_frozen_cli_expose_consumer_local_model_flow():
     assert "Choose model manifest" not in gui_source
     assert "self.cameras = QLineEdit()" in gui_source
     assert "tls_certificate_path" in gui_source
-    init_help = build_parser()._subparsers._group_actions[0].choices[
-        "init"
-    ].format_help()
+    init_help = (
+        build_parser()._subparsers._group_actions[0].choices["init"].format_help()
+    )
     assert "--model MODEL" in init_help
     assert "--model-manifest" not in init_help
     assert build_parser().parse_args(

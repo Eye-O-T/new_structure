@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
-import re
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from ai_cctv_core.identifiers import validate_camera_id, validate_stream_path
-from ai_cctv_core.time import parse_utc
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -19,9 +17,29 @@ from pydantic import (
     model_validator,
 )
 
+from ai_cctv_core.contracts.objects import ObjectObservation
+from ai_cctv_core.identifiers import validate_camera_id, validate_stream_path
+from ai_cctv_core.time import parse_utc
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class MobileDevicePut(StrictModel):
+    device_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    user_id: int = Field(gt=0)
+    refresh_jti: str = Field(min_length=1, max_length=128)
+    token: str = Field(min_length=20, max_length=4096, pattern=r"^\S+$")
+    platform: Literal["android", "ios"]
+    enabled: bool
+    event_types: list[str] | None = Field(max_length=100)
+
+
+class PushCompletion(StrictModel):
+    lease_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    outcome: Literal["sent", "retry", "invalid_token", "permanent_failure"]
+    error_code: str | None = Field(default=None, max_length=64, pattern=r"^[A-Z_]+$")
 
 
 class Role(str, Enum):
@@ -187,6 +205,7 @@ class CameraUpdate(StrictModel):
     def validate_edge_url(cls, value: str | None) -> str | None:
         return _management_url(value)
 
+
 def _management_url(value: str | None) -> str | None:
     if value is None:
         return None
@@ -319,11 +338,12 @@ class RecordingSegmentCreate(StrictModel):
 
 
 class EventCreate(StrictModel):
+    object_observation: ObjectObservation | None = None
     camera_id: str
     event_type: EventType | str = Field(min_length=1, max_length=128)
     occurred_at: datetime
     person_id: str | None = Field(default=None, max_length=256)
-    track_id: str | None = Field(default=None, max_length=256)
+    global_person_id: str | None = Field(default=None, max_length=256)
     confidence: float | None = Field(default=None, ge=0, le=1)
     recording_segment_id: int | None = Field(default=None, ge=1)
     recording_segment_ids: list[int] = Field(default_factory=list)
