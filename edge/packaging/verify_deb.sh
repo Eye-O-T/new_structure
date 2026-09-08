@@ -1,4 +1,6 @@
 #!/bin/sh
+# 완성된 .deb를 임시 폴더에 풀어 필수 파일·CPU 구조·권한·비밀 정보 혼입 여부를 검사한다.
+# 패키지를 장치에 설치하거나 Edge 서비스를 실행하는 시험과는 별개의 구조 검사다.
 set -eu
 
 usage() {
@@ -31,6 +33,7 @@ expected_version=$(sed -n \
 [ "$(dpkg-deb -f "$package" Architecture)" = "arm64" ] || \
     fail "Debian architecture is not arm64"
 
+# 일반 파일 영역과 Debian 설치 스크립트 영역을 따로 풀어 두 영역 모두 검증한다.
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 dpkg-deb -x "$package" "$work/root"
@@ -47,15 +50,18 @@ for path in \
     [ -f "$path" ] || fail "required package payload is missing: $path"
 done
 
+# 0755는 소유자에게 쓰기, 나머지 사용자에게 읽기·실행을 허용하는 실행 파일 권한이다.
 [ "$(stat -c '%a' "$work/root/usr/bin/ai-cctv-edge")" = 755 ] || \
     fail "Edge CLI launcher is not mode 0755"
 [ "$(stat -c '%a' "$work/root/usr/lib/ai-cctv-edge/mediamtx")" = 755 ] || \
     fail "MediaMTX is not mode 0755"
 sh -n "$work/control/postinst"
 sh -n "$work/control/prerm"
+# conffile 선언은 사용자가 편집한 설정을 업그레이드 때 Debian이 별도로 다루게 한다.
 grep -Fxq /etc/ai-cctv-edge/config.toml "$work/control/conffiles" || \
     fail "config.toml is not declared as a conffile"
 
+# ARM64 장치에서 로드할 수 없는 x86용 바이너리 의존성이 섞였는지 확인한다.
 set -- "$work/root/usr/lib/ai-cctv-edge/wheels"/ai_cctv_edge-*.whl
 [ "$#" -eq 1 ] && [ -f "$1" ] || fail "expected exactly one Edge application wheel"
 if find "$work/root/usr/lib/ai-cctv-edge/wheels" -type f -name '*x86*' | grep -q .; then
@@ -65,6 +71,7 @@ find "$work/root/usr/lib/ai-cctv-edge/wheels" -type f \
     -name 'pydantic_core-*aarch64.whl' | grep -q . || \
     fail "ARM64 pydantic-core wheel is missing"
 
+# 각 장치의 인증 정보는 설치·초기 설정 중 생성해야 하며 공통 배포 파일에 넣으면 안 된다.
 for secret in recovery.token publish.password; do
     [ ! -e "$work/root/etc/ai-cctv-edge/$secret" ] || \
         fail "generated secret was embedded in the package: $secret"

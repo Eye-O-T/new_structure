@@ -1,3 +1,4 @@
+# 분야별 저장 코드를 하나의 저장소 객체로 묶어 공통 DB 관리 객체를 사용하게 한다.
 """Domain repositories sharing one database and transaction boundary.
 
 Events enqueue push and object jobs using the same connection before commit.

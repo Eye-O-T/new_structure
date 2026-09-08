@@ -1,3 +1,6 @@
+# 운영 설정·파일·컨테이너 상태를 읽어 설치 문제를 진단한다.
+# 모델 파일 존재와 서비스 응답 확인을 실제 영상·모델 정확도 검증과 구분한다.
+
 from __future__ import annotations
 
 import json
@@ -27,6 +30,7 @@ def _deployment_env(path: Path) -> dict[str, str]:
     return values
 
 
+# Compose 버전에 따라 여러 줄 JSON 또는 JSON 배열이 올 수 있어 같은 목록으로 정규화한다.
 def _compose_rows(raw: str) -> list[dict]:
     text = raw.strip()
     if not text:

@@ -1,0 +1,106 @@
+# compose.yml 위에 적용하는 개발 설정. 전용 개발 env·저장소를 사용한다.
+services:
+  data:
+    build:
+      target: development
+    image: ai-cctv-data:${AI_CCTV_VERSION:-0.3.0}-dev
+    working_dir: /workspace
+    environment:
+      PYTHONPATH: /workspace:/workspace/lib:/workspace/edge/src:/app
+    volumes:
+    - type: bind
+      source: ..
+      target: /workspace
+      read_only: true
+      bind:
+        create_host_path: false
+    command:
+    - uvicorn
+    - server.services.data.app.main:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8000'
+    - --reload
+    - --reload-dir
+    - /workspace/server/services/data
+    - --reload-dir
+    - /workspace/lib
+  external:
+    build:
+      target: development
+    image: ai-cctv-external:${AI_CCTV_VERSION:-0.3.0}-dev
+    working_dir: /workspace
+    environment:
+      PYTHONPATH: /workspace:/workspace/lib:/workspace/edge/src:/app
+    volumes:
+    - type: bind
+      source: ..
+      target: /workspace
+      read_only: true
+      bind:
+        create_host_path: false
+    command:
+    - uvicorn
+    - server.services.external.app.main:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8000'
+    - --reload
+    - --reload-dir
+    - /workspace/server/services/external
+    - --reload-dir
+    - /workspace/lib
+  preprocessing:
+    build:
+      target: development
+    image: ai-cctv-preprocessing:${AI_CCTV_VERSION:-0.3.0}-dev
+    working_dir: /workspace
+    environment:
+      PYTHONPATH: /workspace:/workspace/lib:/workspace/edge/src:/app
+    volumes:
+    - type: bind
+      source: ..
+      target: /workspace
+      read_only: true
+      bind:
+        create_host_path: false
+    command:
+    - uvicorn
+    - server.services.preprocessing.app.main:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8000'
+    - --reload
+    - --reload-dir
+    - /workspace/server/services/preprocessing
+    - --reload-dir
+    - /workspace/lib
+  analysis:
+    build:
+      target: development
+    image: ai-cctv-analysis:${AI_CCTV_VERSION:-0.3.0}-dev
+    working_dir: /workspace
+    environment:
+      PYTHONPATH: /workspace:/workspace/lib:/workspace/edge/src:/app
+    volumes:
+    - type: bind
+      source: ..
+      target: /workspace
+      read_only: true
+      bind:
+        create_host_path: false
+    command:
+    - uvicorn
+    - server.services.analysis.app.main:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8000'
+    - --reload
+    - --reload-dir
+    - /workspace/server/services/analysis
+    - --reload-dir
+    - /workspace/lib

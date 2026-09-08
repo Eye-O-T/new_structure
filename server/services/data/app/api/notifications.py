@@ -1,3 +1,4 @@
+# 단말 등록 정보와 알림 대기열을 관리한다. 실제 FCM 발송은 External에 맡긴다.
 """Internal notifications API."""
 
 from __future__ import annotations

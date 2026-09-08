@@ -782,7 +782,7 @@ def test_media_auth_separates_publish_rtsp_read_and_internal_hls(service):
     assert wrong_rtsp_read.status_code == 401
     assert internal_hls.status_code == 204
     assert disabled_rtsp_read.status_code == 401
-    mediamtx = Path("server/mediamtx/mediamtx.yml").read_text(encoding="utf-8")
+    mediamtx = Path("server/services/mediamtx/mediamtx.yml").read_text(encoding="utf-8")
     assert "  - action: read" not in mediamtx
 
 
@@ -1396,7 +1396,7 @@ def test_hls_manifest_and_segment_expiry_then_refresh_cookie_recovery(
 
 
 def test_nginx_hls_auth_subrequest_forwards_bearer_and_cookie() -> None:
-    nginx = Path("server/nginx/nginx.conf").read_text(encoding="utf-8")
+    nginx = Path("server/services/nginx/nginx.conf").read_text(encoding="utf-8")
     hls = nginx.split("location ^~ /hls/ {", 1)[1].split("# Range is preserved", 1)[0]
     auth = nginx.split("location = /_auth {", 1)[1].split("}", 1)[0]
     assert "auth_request /_auth;" in hls
@@ -2049,7 +2049,7 @@ async def test_edge_control_timeout_covers_slow_profile_apply_contract(
         "server/compose.yml"
     ).read_text(encoding="utf-8")
     nginx_api = (
-        Path("server/nginx/nginx.conf")
+        Path("server/services/nginx/nginx.conf")
         .read_text(encoding="utf-8")
         .split("location ^~ /api/ {", 1)[1]
         .split("}", 1)[0]

@@ -1,3 +1,4 @@
+# External API와 Edge 상태 수집·선택적 푸시 발송 작업의 시작·종료를 관리한다.
 """External service lifecycle and public/internal router composition."""
 
 from __future__ import annotations

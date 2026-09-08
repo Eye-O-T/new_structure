@@ -1,6 +1,9 @@
+# 중앙 서버가 누락된 녹화 구간을 가져갈 수 있도록 로컬 녹화 복구 API를 별도로 실행한다.
+# 영상 수집 프로세스의 재시작이 복구 API의 수명 주기에 직접 묶이지 않게 한다.
 [Unit]
 Description=AI_CCTV edge recording recovery API
 After=network.target
+# 실제 장치 설정이 끝나기 전에는 API를 시작하지 않는다.
 ConditionPathExists=/etc/ai-cctv-edge/.configured
 
 [Service]
@@ -8,6 +11,7 @@ Type=simple
 User=ai-cctv-edge
 Group=ai-cctv-edge
 ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml serve-recovery
+# API의 예기치 않은 종료 뒤 서비스를 복구하기 위해 3초 간격으로 다시 시작한다.
 Restart=always
 RestartSec=3
 TimeoutStopSec=15
@@ -16,6 +20,7 @@ RuntimeDirectoryPreserve=yes
 StateDirectory=ai-cctv-edge
 LogsDirectory=ai-cctv-edge
 ConfigurationDirectory=ai-cctv-edge
+# 서비스 전용 계정과 제한된 기본 파일 권한을 사용하고 시스템·사용자 홈 접근을 보호한다.
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true
@@ -23,4 +28,5 @@ ProtectHome=true
 ProtectSystem=full
 
 [Install]
+# enable된 서비스가 일반 부팅 단계에서 시작되도록 하는 연결 대상이다.
 WantedBy=multi-user.target

@@ -1,3 +1,5 @@
+// API 서버와 영상 주소를 검증한다. 인증 헤더가 다른 서버로 전달되지 않도록
+// 영상 URL도 로그인 서버와 같은 HTTPS 호스트·포트로 제한한다.
 class ApiConfig {
   static const String initialOrigin = String.fromEnvironment('API_BASE_URL');
 

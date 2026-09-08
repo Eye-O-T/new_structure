@@ -1,3 +1,4 @@
+# 사용자의 로그인·토큰 갱신·로그아웃을 처리하고 토큰 이력은 Data에 저장한다.
 from __future__ import annotations
 
 import hashlib
@@ -91,6 +92,7 @@ def _issue_pair(settings: Settings, user_id: str, role: str) -> tuple[Any, Any]:
 
 
 def _token_hash(encoded: str) -> str:
+    # DB에는 토큰 원문 대신 지문을 남겨, 제출된 토큰과 일치하는지만 비교한다.
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -283,6 +285,7 @@ async def refresh(
     role = _user_role(user)
     access, new_refresh = _issue_pair(settings, user_id, role)
     family_id = str(record.get("family_id") or claims.jti)
+    # 토큰을 갱신할 때마다 교체하되 로그인 계열은 유지한다. 교체 원자성은 Data가 보장한다.
     await data.rotate_refresh_token(
         claims.jti,
         _refresh_record(

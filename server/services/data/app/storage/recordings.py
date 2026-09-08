@@ -1,3 +1,4 @@
+# 실제 녹화 파일과 DB 목록을 대조하고 누락·손상·등록되지 않은 파일 상태를 정리한다.
 """Storage recordings operations."""
 
 from __future__ import annotations

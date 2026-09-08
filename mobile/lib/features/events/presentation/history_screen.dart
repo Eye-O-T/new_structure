@@ -1,3 +1,4 @@
+// 날짜와 접근 가능한 카메라를 선택해 이벤트를 살펴보는 화면이다. 실제 조회는 ViewModel이 맡는다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';

@@ -1,3 +1,4 @@
+# 내부 서비스 토큰을 확인하고 토큰별로 허용한 API만 실행하도록 제한한다.
 """Authenticate internal requests and enforce per-service route scopes."""
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from fastapi import (
 from .config import Settings
 from .errors import ApiError
 
+# 같은 내부 네트워크에 있어도 각 서비스가 필요한 API만 사용할 수 있도록 권한을 나눈다.
 _ROUTE_SCOPES: dict[tuple[str, str], frozenset[str]] = {
     ("POST", "/internal/v1/object-jobs/analysis/requeue-unconfigured"): frozenset(
         {"analysis"}
@@ -45,6 +47,7 @@ def require_internal_token(
     configured_tokens = settings.data_api_tokens()
     route = request.scope.get("route")
     route_path = getattr(route, "path", request.url.path)
+    # 별도 권한을 지정하지 않은 관리 API는 External 토큰만 허용한다.
     allowed_scopes = _ROUTE_SCOPES.get(
         (request.method.upper(), route_path), frozenset({"external"})
     )

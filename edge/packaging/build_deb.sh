@@ -1,4 +1,6 @@
 #!/bin/sh
+# Raspberry Pi용 코드·의존성·서비스 정의를 ARM64 Debian 설치 패키지로 묶는다.
+# 첫 줄의 shebang은 이 파일을 실행할 셸을 지정하므로 반드시 맨 앞에 둔다.
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
@@ -17,6 +19,7 @@ for command in awk basename chmod dpkg-deb find install mktemp rm sha256sum \
 done
 python3 -m pip --version >/dev/null 2>&1 || fail "python3 pip module is required"
 
+# Python 확장 모듈과 MediaMTX 실행 파일은 CPU 구조에 맞아야 하므로 ARM64에서 빌드한다.
 [ "$(uname -m)" = "aarch64" ] || \
     fail "build on Raspberry Pi OS ARM64 or another trusted aarch64 builder"
 [ -n "${MEDIAMTX_BINARY:-}" ] || fail "set MEDIAMTX_BINARY"
@@ -27,6 +30,7 @@ case "$MEDIAMTX_SHA256" in
     *[!0-9A-Fa-f]*) fail "MEDIAMTX_SHA256 must be hexadecimal" ;;
 esac
 
+# 외부 바이너리는 별도로 확인한 해시와 비교해 의도한 MediaMTX 파일인지 확인한다.
 actual_mediamtx_sha256=$(sha256sum "$MEDIAMTX_BINARY" | awk '{print $1}')
 [ "$(printf '%s' "$actual_mediamtx_sha256" | tr 'A-F' 'a-f')" = \
   "$(printf '%s' "$MEDIAMTX_SHA256" | tr 'A-F' 'a-f')" ] || \
@@ -39,6 +43,7 @@ package_version=$(sed -n \
 [ "$(sed -n 's/^Version: //p' "$edge_root/packaging/debian/control")" = \
   "$package_version" ] || fail "Debian control version does not match pyproject.toml"
 
+# 파일 시각·지역 설정·해시 난수 시드를 맞춰 같은 입력으로 만든 결과를 비교하기 쉽게 한다.
 if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
     if command -v git >/dev/null 2>&1; then
         SOURCE_DATE_EPOCH=$(git -C "$repo_root" log -1 --format=%ct 2>/dev/null || true)
@@ -57,6 +62,7 @@ export PYTHONHASHSEED=0
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 umask 022
 
+# 임시 경로에 설치 후 파일 배치를 구성한다. 실제 OS 경로에는 설치하지 않는다.
 package_root=$(mktemp -d)
 trap 'rm -rf "$package_root"' EXIT INT TERM
 root="$package_root/ai-cctv-edge_${package_version}_arm64"
@@ -85,6 +91,8 @@ case "$mediamtx_version_output" in
     *) fail "MediaMTX reports '$mediamtx_version_output'; expected $expected_mediamtx_version" ;;
 esac
 
+# wheel은 설치 가능한 Python 패키지 파일이다. 필요한 의존성까지 패키지에 넣어
+# Edge 설치 단계가 인터넷에서 Python 패키지를 내려받지 않도록 준비한다.
 python3 -m pip wheel \
     --constraint "$edge_root/packaging/constraints.txt" \
     --wheel-dir "$root/usr/lib/ai-cctv-edge/wheels" \
@@ -94,6 +102,7 @@ printf '%s\n' '#!/bin/sh' \
     > "$root/usr/bin/ai-cctv-edge"
 chmod 0755 "$root/usr/bin/ai-cctv-edge"
 
+# 문제가 발생했을 때 어떤 소스와 바이너리로 빌드했는지 추적할 정보를 함께 남긴다.
 source_revision=unknown
 source_state=unknown
 if command -v git >/dev/null 2>&1; then
@@ -117,14 +126,14 @@ fi
     printf 'mediamtx_sha256=%s\n' "$actual_mediamtx_sha256"
 } > "$root/usr/share/doc/ai-cctv-edge/build-info"
 
-# Normalize all payload timestamps. dpkg-deb also consumes SOURCE_DATE_EPOCH for
-# the archive headers, making repeated builds comparable when every input wheel
-# and the MediaMTX binary are identical.
+# 내용뿐 아니라 파일 시각과 압축 파일 헤더 시각도 맞춘다. 모든 wheel과 MediaMTX 입력이
+# 같다는 조건 아래에서 반복 빌드 결과를 비교할 수 있게 하기 위한 정규화다.
 find "$root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 rm -f "$artifact" "$artifact.sha256"
 dpkg-deb --build --root-owner-group --uniform-compression -Zxz -z9 \
     "$root" "$artifact"
 sh "$edge_root/packaging/verify_deb.sh" "$artifact" "$actual_mediamtx_sha256"
+# 완성된 패키지를 검사한 뒤 배포 파일의 무결성 비교에 사용할 SHA-256 파일을 만든다.
 (
     cd "$output_dir"
     sha256sum "$(basename "$artifact")" > "$(basename "$artifact").sha256"

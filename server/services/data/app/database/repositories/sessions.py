@@ -1,3 +1,4 @@
+# 토큰의 발급·교체·폐기 이력을 저장하여 이미 로그아웃한 세션의 재사용을 막는다.
 """Sessions persistence and SQL operations."""
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ class SessionsRepositoryMixin:
     database: Database
 
     def issue_refresh_token(self, values: dict[str, Any]) -> dict[str, Any]:
+        # 새 토큰 저장과 이전 토큰 폐기를 함께 확정하여 같은 갱신 토큰의 동시 재사용을 막는다.
         now = _now()
         with self.database.transaction() as connection:
             rotated_from = values.get("rotated_from_jti")
@@ -65,6 +67,7 @@ class SessionsRepositoryMixin:
             )
 
     def delete_refresh_token(self, jti: str) -> bool:
+        # 같은 로그인 계열(family)의 단말 등록도 지워 로그아웃 후 알림 예약이 계속 생기지 않게 한다.
         with self.database.transaction() as connection:
             connection.execute(
                 "DELETE FROM mobile_devices WHERE family_id IN "

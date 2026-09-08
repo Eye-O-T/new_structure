@@ -1,3 +1,6 @@
+# 기존 감지·인물 연결 설정을 현재 Preprocessing·Analysis 구성으로 이관한다.
+# 운영 토큰을 새로 바꾸지 않고 일치 여부를 확인하며 누락된 역할의 토큰만 보충한다.
+
 """Migrate split secrets to preprocessing and analysis without rotating credentials."""
 
 import argparse
@@ -65,6 +68,7 @@ def _source(path: Path, allowed_keys: set[str]) -> dict[str, str]:
     return values
 
 
+# 여러 파일에 같은 역할의 토큰이 있으면 값이 모두 같아야 한다. 충돌을 임의 선택하지 않는다.
 def _agree(key: str, candidates: list[dict[str, str]]) -> str | None:
     values = {candidate[key] for candidate in candidates if candidate.get(key)}
     if len(values) > 1:
@@ -72,6 +76,7 @@ def _agree(key: str, candidates: list[dict[str, str]]) -> str | None:
     return next(iter(values), None)
 
 
+# 모든 입력·경로·토큰을 검증한 다음 파일별로 교체한다. 중간 중단 뒤 재실행해도 토큰을 재사용한다.
 def enable(server_dir: Path, env_file: Path) -> None:
     server_dir, env_file = server_dir.resolve(), env_file.resolve()
     values = read_deployment_env(env_file)

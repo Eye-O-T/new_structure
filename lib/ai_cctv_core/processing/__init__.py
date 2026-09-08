@@ -1,0 +1,2 @@
+"""Shared durable job execution; model implementations belong to each service."""
+# 반복 조회·시간초과·결과 보고처럼 모델 종류와 무관한 작업 실행 코드를 모은 패키지다.

@@ -1,3 +1,6 @@
+# 비밀 파일을 설치 계정과 관리자만 읽을 수 있게 제한한다.
+# Linux의 0600 권한과 Windows의 DACL(사용자별 접근 목록)은 설정 방법이 다르다.
+
 from __future__ import annotations
 
 import os

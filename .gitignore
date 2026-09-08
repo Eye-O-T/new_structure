@@ -15,8 +15,6 @@ dist/
 .env
 *.env
 !*.env.example
-.proj_env
-!*.proj_env.example
 config/config.yaml
 config/secrets.env
 server/config/config.yaml

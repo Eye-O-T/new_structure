@@ -1,3 +1,4 @@
+# 로컬 TS 백업을 보관 시간, 총 용량 순서로 정리해 Edge 디스크가 계속 차는 것을 막는다.
 from __future__ import annotations
 
 import time
@@ -25,6 +26,7 @@ def enforce_retention(
         files.append((stat.st_mtime, stat.st_size, path))
 
     protected = None
+    # 캡처 중에는 가장 최근 파일이 아직 열려 있을 수 있어 용량 한도보다 파일 보호를 우선한다.
     if preserve_newest and files:
         protected = max(files, key=lambda item: (item[0], item[2].as_posix()))[2]
 

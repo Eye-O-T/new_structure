@@ -1,6 +1,9 @@
 #!/bin/sh
+# Debian이 파일 배치를 마친 뒤 실행하는 설치 후 처리다.
+# 전용 계정·Python 환경·데이터 권한을 준비하되 최초 설치만으로 영상 전송을 시작하지 않는다.
 set -eu
 
+# 관리자 계정으로 상시 실행하지 않도록 전용 서비스 계정을 만들고 카메라 장치 접근 권한을 준다.
 if ! getent group ai-cctv-edge >/dev/null; then
     addgroup --system ai-cctv-edge
 fi
@@ -13,20 +16,26 @@ if getent group render >/dev/null; then
     usermod -a -G render ai-cctv-edge || true
 fi
 
+# Python 의존성은 전용 가상환경에 설치한다. OS가 제공하는 카메라·GStreamer 관련
+# 바인딩도 읽을 수 있도록 system-site-packages를 허용한다.
 python3 -m venv --system-site-packages /usr/lib/ai-cctv-edge/venv
 set -- /usr/lib/ai-cctv-edge/wheels/ai_cctv_edge-*.whl
 if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
     echo "Expected exactly one bundled ai-cctv-edge wheel." >&2
     exit 1
 fi
+# no-index로 인터넷 패키지 저장소를 조회하지 않고 패키지에 포함된 wheel만 사용한다.
 /usr/lib/ai-cctv-edge/venv/bin/pip install --no-index --force-reinstall \
     --find-links /usr/lib/ai-cctv-edge/wheels "$1"
 
+# 녹화와 상태 저장소는 서비스 계정이 쓰고 다른 일반 사용자는 접근하지 못하도록 제한한다.
 install -d -m 0750 -o ai-cctv-edge -g ai-cctv-edge \
     /var/lib/ai-cctv-edge/recordings /var/lib/ai-cctv-edge/state
 chown root:ai-cctv-edge /etc/ai-cctv-edge
 chmod 0750 /etc/ai-cctv-edge
 if [ ! -s /etc/ai-cctv-edge/recovery.token ]; then
+    # 기존 인증 값은 보존한다. 처음 생성할 때도 임시 파일을 완성하고 권한을 설정한 뒤
+    # 교체해 내용이 일부만 쓰인 토큰이나 다른 사용자에게 공개된 파일이 남지 않게 한다.
     umask 0077
     token_temp=$(mktemp /etc/ai-cctv-edge/.recovery.token.XXXXXX)
     trap 'rm -f "$token_temp"' EXIT INT TERM
@@ -40,8 +49,8 @@ fi
 chown root:ai-cctv-edge /etc/ai-cctv-edge/recovery.token
 chmod 0640 /etc/ai-cctv-edge/recovery.token
 
-# v0.3.0 enabled units during package installation. Preserve already configured
-# upgrades without treating the packaged example config as a completed setup.
+# 예전 버전은 설치 중 서비스를 활성화했다. 이미 설정된 장치의 업그레이드는 유지하되
+# 예제 설정만 설치된 새 장치를 초기 설정이 끝난 장치로 취급하지 않도록 구분한다.
 configured_marker=/etc/ai-cctv-edge/.configured
 if [ -n "${2:-}" ] && [ -s /etc/ai-cctv-edge/publish.password ] && \
     [ ! -e "$configured_marker" ]; then
@@ -54,11 +63,11 @@ if [ -n "${2:-}" ] && [ -s /etc/ai-cctv-edge/publish.password ] && \
     trap - EXIT INT TERM
 fi
 
+# systemd가 갱신된 서비스 정의를 다시 읽게 한다. 새 장치의 자동 시작 활성화는 초기 설정에서 한다.
 systemctl daemon-reload
 if [ -n "${2:-}" ]; then
-    # Package upgrades replace the wheel and generated virtual environment
-    # while existing processes keep the old code mapped. Existing enablement is
-    # preserved; restart only units that were already active.
+    # 파일을 교체해도 실행 중인 프로세스에는 이전 코드가 남아 있다. 업그레이드에서는
+    # 원래 실행 중이던 서비스만 재시작하며, 사용자가 꺼 둔 서비스는 임의로 켜지 않는다.
     systemctl try-restart ai-cctv-edge.service \
         ai-cctv-edge-control.service ai-cctv-edge-recovery.service
 fi

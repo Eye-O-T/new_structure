@@ -1,3 +1,4 @@
+# 프로세스 생존 여부와 DB·저장소 사용 가능 여부를 서로 다른 점검으로 제공한다.
 """Liveness and readiness probes."""
 
 from __future__ import annotations

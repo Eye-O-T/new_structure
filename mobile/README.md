@@ -9,7 +9,7 @@
 
 - 중앙 HTTPS 로그인, 안전한 세션 저장, 단일 refresh 갱신, 서버 로그아웃
 - 카메라 목록, 보호된 Live HLS, 장치 상태, 관리자 HD/FHD 변경
-- 실시간 사람 박스·카메라 내 인물 ID·연결된 전역 ID 표시 ([시차와 좌표 계약](../docs/object-processing.md))
+- 실시간 사람 박스·카메라 내 인물 ID·연결된 전역 ID 표시 ([시차와 좌표 계약](../docs/openapi.yaml))
 - 로컬 날짜별 이벤트 검색, UTC 쿼리, 페이지 처리, 이벤트 상세·연결 녹화 재생
 - FCM 기기 등록·토큰 갱신·권한 처리, 모든 이벤트 기본 수신
 - 포그라운드 알림·목록 갱신, 백그라운드/종료 상태 알림 클릭, 앱 복귀 재조회
@@ -50,7 +50,7 @@ Flutter SDK 경로에 공백이 있으면 일부 native build hook 도구가 실
 
 ## Firebase와 배포
 
-[중앙 FCM 설정 및 인수 시험](../docs/mobile-push.md)을 따른다.
+[중앙 FCM 설정 및 인수 시험](../README.md#모바일과-푸시)을 따른다.
 `android/app/google-services.json`이 없으면 Firebase 연결만 비활성 상태로 시작한다.
 실제 푸시를 받으려면 기존 프로젝트의 Android 설정과 중앙 서비스 계정이 모두 필요하다.
 앱은 최초 로그인 때 Android 알림 권한을 요청한다.

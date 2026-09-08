@@ -1,3 +1,4 @@
+# API 요청과 별개로 주기적으로 녹화 목록을 대조하고 보관 정책을 적용한다.
 """Periodic storage reconciliation and retention."""
 
 from __future__ import annotations

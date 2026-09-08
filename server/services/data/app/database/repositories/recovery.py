@@ -1,3 +1,4 @@
+# 연결 끊김·복구 이벤트를 복구 시간 구간으로 묶고 작업의 진행 상태와 재시도를 기록한다.
 """Recovery persistence and SQL operations."""
 
 from __future__ import annotations
@@ -280,6 +281,7 @@ class RecoveryRepositoryMixin:
         )
         with self.database.transaction() as connection:
             revision_clause = (
+                # 복구 구간이 늘어나면 revision도 바뀐다. 예전 구간의 완료 보고로 덮어쓰지 않는다.
                 " AND revision = ?" if expected_revision is not None else ""
             )
             parameters: tuple[Any, ...] = (

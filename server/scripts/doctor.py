@@ -1,3 +1,6 @@
+# 소스 배포가 사용할 파일·저장소·서비스별 인증 설정을 점검한다.
+# 설정 내용을 출력하지 않고 정상 여부를 보고하며, 구성 오류가 있으면 기동 전에 알린다.
+
 """Preflight checks for the central Docker Compose deployment."""
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ def read_deployment_env(path: Path) -> dict[str, str]:
     return values
 
 
+# 상대 경로는 현재 터미널 위치가 아니라 server 폴더를 기준으로 해석한다.
 def deployment_path(server_dir: Path, raw_value: str) -> Path:
     value = Path(raw_value).expanduser()
     return value.resolve() if value.is_absolute() else (server_dir / value).resolve()
@@ -80,8 +84,8 @@ def main() -> int:
         server_dir / "compose.yml",
         config_path,
         *secrets_paths,
-        server_dir / "nginx" / "nginx.conf",
-        server_dir / "mediamtx" / "mediamtx.yml",
+        server_dir / "services" / "nginx" / "nginx.conf",
+        server_dir / "services" / "mediamtx" / "mediamtx.yml",
         tls_dir / "tls.crt",
         tls_dir / "tls.key",
     )

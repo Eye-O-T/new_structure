@@ -1,0 +1,73 @@
+# Edge의 RTSP 영상을 받아 앱용 HLS와 중앙 녹화를 제공하는 미디어 서버 설정이다.
+logLevel: info
+logDestinations: [stdout]
+readTimeout: 10s
+writeTimeout: 10s
+writeQueueSize: 512
+
+# RTSP 게시자·읽기 계정은 External에 물어 인증한다. 앱의 HLS·재생 권한은
+# 앞단의 Nginx가 요청마다 검사하므로 미디어 내부 포트를 호스트에 직접 공개하지 않는다.
+authMethod: http
+authHTTPAddress: http://external:8000/internal/media-auth
+authHTTPExclude:
+  - action: playback
+  - action: api
+  - action: metrics
+  - action: pprof
+
+# 9997은 영상 재생 포트가 아니라 경로·세션을 관리하는 내부 제어 API다.
+api: yes
+apiAddress: :9997
+apiEncryption: no
+apiAllowOrigin: ""
+
+metrics: no
+pprof: no
+
+playback: yes
+playbackAddress: :9996
+playbackEncryption: no
+playbackAllowOrigin: ""
+
+rtsp: yes
+protocols: [tcp]
+encryption: "no"
+rtspAddress: :8554
+rtspAuthMethods: [basic]
+
+# 필요한 RTSP → HLS 경로만 열고 사용하지 않는 전송 프로토콜은 끈다.
+rtmp: no
+hls: yes
+hlsAddress: :8888
+hlsEncryption: no
+hlsAllowOrigin: ""
+hlsAlwaysRemux: no
+hlsVariant: fmp4
+hlsSegmentCount: 7
+hlsSegmentDuration: 2s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 50M
+hlsDirectory: ""
+hlsMuxerCloseAfter: 60s
+webrtc: no
+srt: no
+
+# 경로 하나가 카메라 하나에 대응한다. 서버가 영상을 당겨오지 않고 Edge가 게시한다.
+pathDefaults:
+  source: publisher
+  sourceOnDemand: no
+  maxReaders: 0
+  record: yes
+  recordPath: /recordings/%path/%Y/%m/%d/%Y%m%dT%H%M%S-%fZ
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 60s
+
+  # 파일 삭제와 DB 상태가 어긋나지 않도록 보관 기간 삭제는 Data가 맡는다.
+  recordDeleteAfter: 0s
+  overridePublisher: no
+  # 녹화 파일 한 구간이 완성되면 Hook(완료 시 호출할 프로그램)으로 Data에 알린다.
+  runOnRecordSegmentComplete: /usr/local/bin/recording-complete-hook
+
+paths:
+  all_others:

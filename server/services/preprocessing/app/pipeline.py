@@ -1,3 +1,5 @@
+# 카메라 한 대의 RTSP 영상 수신 → 사람 탐지·추적 → 실시간 좌표/이벤트 전송 흐름이다.
+# 사람의 전역 식별과 추가 속성 분석은 여기서 기다리지 않고 별도 작업자가 수행한다.
 from __future__ import annotations
 
 import logging
@@ -57,6 +59,8 @@ class CameraWorker(threading.Thread):
         self.stop_event.set()
 
     def _event(self, event_type: str, **metadata: Any) -> None:
+        # person_id는 현재 카메라·세션에서의 추적 번호다. 아직 카메라 간 동일 인물
+        # 판정은 끝나지 않았으므로 global_person_id는 비워 Data에 전달한다.
         occurred_at = format_utc(utc_now())
         person_id = metadata.pop("person_id", None)
         snapshot_path = metadata.pop("snapshot_path", None)
@@ -76,7 +80,7 @@ class CameraWorker(threading.Thread):
         }
         try:
             self.data_client.create_event(payload)
-        except Exception as exc:  # event failure must not terminate video consumption
+        except Exception as exc:  # 이벤트 전송 실패가 영상 읽기까지 중단시키지 않게 한다.
             LOGGER.warning(
                 "event delivery failed",
                 extra={"camera_id": self.camera_id, "error_code": "EVENT_DELIVERY"},
@@ -100,6 +104,8 @@ class CameraWorker(threading.Thread):
         downstream consumer must not create or truncate an Edge recovery job.
         """
 
+        # 이 장애는 MediaMTX → 탐지 소비자 구간의 장애다. Edge → 중앙 서버 구간의
+        # 장애와 구별하며, 여기서 Edge 녹화 복구 작업을 생성하거나 끝내지 않는다.
         if self._failure_reported:
             return
         self._status("offline")
@@ -113,6 +119,8 @@ class CameraWorker(threading.Thread):
         self._failure_reported = False
 
     def _snapshot(self, frame: Any, person_id: str) -> str | None:
+        # 이벤트 화면용 원본 이미지를 저장하고 컨테이너 내부 절대 경로 대신
+        # snapshots 공유 저장소 기준 상대 경로를 전달한다.
         try:
             import cv2
 
@@ -140,6 +148,8 @@ class CameraWorker(threading.Thread):
     def _run(self) -> None:
         import cv2
 
+        # 탐지는 현재 프레임의 사람 위치를 찾고, 추적은 연속 프레임의 사람에 ID를 붙인다.
+        # 모델 로드에 실패해도 영상 연결 상태 감시는 계속할 수 있도록 따로 처리한다.
         tracker = None
         if self.settings.inference_enabled:
             try:
@@ -179,10 +189,13 @@ class CameraWorker(threading.Thread):
                 self._inference_stream_lost("rtsp_open_failed")
                 capture.release()
                 self.stop_event.wait(delay)
+                # 재접속 간격을 최대 15초까지 늘려 연결 장애 중 과도한 요청을 피한다.
                 delay = min(delay * 2, 15.0)
                 continue
 
             stream_confirmed = False
+            # 재접속하면 추적기의 번호가 재사용될 수 있다. 새 세션 ID와 함께 초기화해
+            # 이전 세션의 person_id를 같은 인물의 연속 관측으로 잘못 연결하지 않는다.
             self.tracking_session_id = uuid.uuid4().hex
             state = TrackState(self.settings.disappear_seconds)
             if tracker is not None and hasattr(tracker, "reset"):
@@ -192,9 +205,8 @@ class CameraWorker(threading.Thread):
                 if not ok:
                     break
                 if not stream_confirmed:
-                    # Some RTSP backends report an opened socket before media
-                    # arrives.  Close the outage only after a decodable frame,
-                    # otherwise automatic recovery can truncate the gap.
+                    # RTSP 연결 성공만으로 영상이 도착했다고 볼 수 없다.
+                    # 실제 프레임을 읽은 뒤에만 탐지 구간의 장애가 복구되었다고 알린다.
                     self._inference_stream_restored()
                     self._status("online")
                     delay = 1.0
@@ -202,6 +214,7 @@ class CameraWorker(threading.Thread):
                 now = time.monotonic()
                 self.status.last_frame_at = format_utc(utc_now())
                 if tracker is None or now - last_analysis < frame_interval:
+                    # 모든 프레임은 계속 읽되 모델은 설정된 빈도로만 호출해 처리 부하를 줄인다.
                     continue
                 last_analysis = now
                 try:
@@ -221,6 +234,8 @@ class CameraWorker(threading.Thread):
                         [item.model_dump() for item in result.objects], width, height
                     )
                     if self._publisher is not None and now - last_publish >= 0.5:
+                        # 모바일 박스용 최신 좌표는 최대 초당 2번 보낸다. 영상 전송과
+                        # 별개이므로 모바일에서 보이는 영상 프레임과 정확히 동기화되지는 않는다.
                         self._publisher.submit(
                             {
                                 "tracking_session_id": self.tracking_session_id,
@@ -236,6 +251,8 @@ class CameraWorker(threading.Thread):
                         snapshot_path = None
                         observation = None
                         if transition.event_type == "person_appeared":
+                            # 첫 등장 때 잘라낸 사람 이미지와 관측 정보를 이벤트에 붙인다.
+                            # Data는 이 정보를 저장한 뒤 식별·추가 분석 작업의 입력으로 사용한다.
                             snapshot_path = self._snapshot(frame, transition.person_id)
                             try:
                                 observation = save_observation(

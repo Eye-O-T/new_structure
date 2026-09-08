@@ -1,3 +1,4 @@
+# 모바일 등 외부 클라이언트와 주고받는 JSON의 필드·형식을 정의한다.
 from __future__ import annotations
 
 from datetime import datetime

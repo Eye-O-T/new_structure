@@ -1,3 +1,4 @@
+# MediaMTX의 기존 송출 연결을 끊어 카메라 비활성화나 자격 증명 교체를 반영한다.
 from __future__ import annotations
 
 import asyncio

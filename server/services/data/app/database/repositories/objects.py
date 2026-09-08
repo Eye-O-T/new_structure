@@ -1,3 +1,4 @@
+# 인물 식별·추가 분석의 작업 대기열, 최신 객체 좌표, 카메라 간 인물 연결을 저장한다.
 """Durable independent identity/analysis jobs; only Data owns SQLite."""
 
 import json
@@ -10,6 +11,7 @@ from ai_cctv_core.time import format_utc, utc_now
 
 class ObjectRepositoryMixin:
     def requeue_unconfigured_objects(self, stage):
+        # 아직 모델이 없는 작업은 실패와 구분한다. 모델 연결 후 이 목록을 다시 대기 상태로 옮긴다.
         now = format_utc(utc_now())
         with self.database.transaction() as connection:
             result = connection.execute(
@@ -36,6 +38,7 @@ class ObjectRepositoryMixin:
                 "SELECT l.* FROM live_objects l JOIN cameras c ON c.camera_id=l.camera_id WHERE l.camera_id=? AND c.enabled=1",
                 (camera_id,),
             ).fetchone()
+            # 3초보다 오래된 좌표는 화면에 남기지 않는다. 미래 시각도 비정상으로 보고 제외한다.
             if (
                 row is None
                 or not 0 <= (now - parse_utc(row["observed_at"])).total_seconds() <= 3
@@ -65,6 +68,8 @@ class ObjectRepositoryMixin:
             )
 
     def claim_object_job(self, stage):
+        # 임대(lease)는 일정 시간 동안 한 작업을 처리할 권한이다.
+        # 작업자가 중단돼도 5분 뒤 다시 가져갈 수 있어 작업이 영원히 멈추지 않는다.
         now = utc_now()
         stamp = format_utc(now)
         with self.database.transaction() as connection:
@@ -91,6 +96,7 @@ class ObjectRepositoryMixin:
             return result
 
     def complete_object_job(self, stage, job_id, completion: ObjectJobCompletion):
+        # 현재 임대 ID와 만료 시간을 함께 검사해 이전 작업자의 늦은 결과가 덮어쓰지 못하게 한다.
         now = utc_now()
         stamp = format_utc(now)
         with self.database.transaction() as connection:
@@ -106,12 +112,14 @@ class ObjectRepositoryMixin:
             if state == "retry":
                 state = "pending" if row["attempts"] < 5 else "failed"
             metadata = json.loads(row["metadata_json"])
+            # 두 단계가 독립적으로 끝나므로 DB의 최신 metadata에서 자기 단계의 결과만 바꾼다.
             metadata[stage] = {
                 "status": state,
                 "updated_at": stamp,
                 "result": completion.metadata,
             }
             if stage == "identity" and completion.global_person_id is not None:
+                # person_id는 재접속 후 다시 쓰일 수 있으므로 카메라와 추적 세션을 함께 식별한다.
                 session = metadata["object"]["tracking_session_id"]
                 existing = connection.execute(
                     "SELECT global_person_id FROM person_identity_links WHERE camera_id=? AND tracking_session_id=? AND person_id=?",

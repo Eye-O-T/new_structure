@@ -1,0 +1,86 @@
+# 단독으로 실행한다. compose.yml과 합치지 않으며 운영 env·호스트 저장소·공개 포트를 사용하지 않는다.
+name: ai-cctv-test
+
+x-runner: &runner
+  build:
+    context: ..
+    dockerfile: tests/runner/Dockerfile
+  image: ai-cctv-test-runner:local
+  init: true
+  read_only: true
+  tmpfs: [/tmp]
+  networks: [test]
+
+services:
+  tests:
+    <<: *runner
+
+  # 아래 세 서비스는 실제 HTTP 연동 시험 때만 실행한다.
+  data-test:
+    profiles: [integration]
+    build:
+      context: ..
+      dockerfile: server/services/data/Dockerfile
+      target: production
+    environment:
+      DATA_EXTERNAL_TOKEN: test-external-token-0000000000000000000000
+      DATA_INFERENCE_TOKEN: test-inference-token-000000000000000000000
+      DATA_ANALYSIS_TOKEN: test-analysis-token-0000000000000000000000
+      DATA_IDENTITY_TOKEN: test-identity-token-0000000000000000000000
+      DATA_MEDIA_TOKEN: test-media-token-0000000000000000000000000
+      DATA_RECOVERY_TOKEN: test-recovery-token-0000000000000000000000
+      DATA_DATABASE_PATH: /tmp/state/database/test.db
+      DATA_STORAGE_ROOT: /tmp/state/recordings
+      DATA_SNAPSHOT_ROOT: /tmp/state/snapshots
+      DATA_BACKUP_ROOT: /tmp/state/backups
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [test]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  external-test:
+    profiles: [integration]
+    build:
+      context: ..
+      dockerfile: server/services/external/Dockerfile
+      target: production
+    environment:
+      DATA_BASE_URL: http://data-test:8000/internal/v1
+      DATA_HEALTH_URL: http://data-test:8000/health/ready
+      DATA_EXTERNAL_TOKEN: test-external-token-0000000000000000000000
+      JWT_SECRET: test-jwt-secret-00000000000000000000000000
+      MEDIA_READ_USERNAME: test-reader
+      MEDIA_READ_PASSWORD: test-reader-password-00000000000000000000
+      COOKIE_SECURE: 'false'
+      PUSH_ENABLED: 'false'
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [test]
+    depends_on:
+      data-test:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  integration:
+    <<: *runner
+    profiles: [integration]
+    environment:
+      TEST_DATA_URL: http://data-test:8000/internal/v1
+      TEST_EXTERNAL_URL: http://external-test:8000/api/v1
+    command: [python, tests/runner/integration.py]
+    depends_on:
+      external-test:
+        condition: service_healthy
+
+networks:
+  # 테스트 프로세스가 외부 운영 API·FCM에 접속하지 않도록 차단한다.
+  test:
+    internal: true

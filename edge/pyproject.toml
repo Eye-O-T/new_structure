@@ -11,6 +11,9 @@ dependencies = [
   "uvicorn==0.34.0",
 ]
 
+[project.optional-dependencies]
+test = ["pytest==8.3.4", "httpx==0.28.1"]
+
 [project.scripts]
 ai-cctv-edge = "ai_cctv_edge.cli:main"
 
@@ -20,3 +23,8 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+
+[tool.pytest.ini_options]
+addopts = "-ra -p no:cacheprovider"
+pythonpath = ["src"]
+testpaths = ["tests"]

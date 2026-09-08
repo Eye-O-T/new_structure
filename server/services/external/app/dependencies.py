@@ -1,3 +1,4 @@
+# 요청에 필요한 설정·HTTP 클라이언트·로그인 제한·카메라 잠금을 공통 방식으로 제공한다.
 """Request-scoped settings, clients and camera lifecycle coordination."""
 
 from __future__ import annotations

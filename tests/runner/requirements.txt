@@ -1,0 +1,8 @@
+# 실제 서비스 의존성을 재사용한다. 모델 추론은 테스트 대역으로 검증한다.
+-r ../../server/services/data/requirements.txt
+-r ../../server/services/external/requirements.txt
+-r ../../server/services/analysis/requirements.txt
+opencv-python-headless==4.11.0.86
+pytest==8.3.4
+pytest-asyncio==0.25.3
+ruff==0.9.5

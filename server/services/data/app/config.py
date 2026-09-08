@@ -1,3 +1,4 @@
+# 환경 변수에서 DB 경로, 서비스별 인증 토큰, 보관·복구 정책을 읽어 실행 설정으로 묶는다.
 """Runtime settings for the Data Service."""
 
 from __future__ import annotations

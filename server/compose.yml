@@ -1,5 +1,8 @@
+# 여섯 서비스의 실행 방법을 한곳에서 정의한다. 폴더도 services/<서비스명>에 맞춘다.
+# ${변수:-기본값}은 배포 env에 값이 없을 때 오른쪽 기본값을 쓰는 Compose 문법이다.
 name: ${COMPOSE_PROJECT_NAME:-ai-cctv}
 
+# &이름은 공통 설정을 저장하고 *이름은 재사용한다. 네 Python 서비스의 준비 상태를 확인한다.
 x-python-healthcheck: &python-healthcheck
   test:
     - CMD
@@ -20,6 +23,7 @@ x-service-logging: &service-logging
     max-file: "5"
 
 services:
+  # DB 파일은 Data만 직접 연다. 다른 컨테이너는 인증된 내부 API로 요청한다.
   data:
     build:
       context: ..
@@ -35,7 +39,7 @@ services:
       AI_CCTV_DATABASE_PATH: /data/database/ai_cctv.db
       RECORDINGS_ROOT: /recordings
       SNAPSHOTS_ROOT: /snapshots
-      # Compatibility aliases for the current Data Service settings module.
+      # 기존 Data 설정 이름과 공통 설정 이름이 같은 호스트 저장소를 가리키게 한다.
       DATA_DATABASE_PATH: /data/database/ai_cctv.db
       DATA_STORAGE_ROOT: /recordings
       DATA_SNAPSHOT_ROOT: /snapshots
@@ -74,8 +78,8 @@ services:
           create_host_path: false
       - type: bind
         source: ${RECOVERED_DIR:-./runtime/recovered}
-        # Keep recovered media on its independently configurable host volume
-        # while exposing it under the Data Service's single storage namespace.
+        # 호스트의 복구 영상은 별도 폴더지만 Data 안에서는 녹화 폴더의 하위로 보인다.
+        # 따라서 호스트 백업 시 RECORDINGS_DIR와 RECOVERED_DIR를 각각 보존해야 한다.
         target: /recordings/recovered
         bind:
           create_host_path: false
@@ -84,6 +88,7 @@ services:
       - internal
     logging: *service-logging
 
+  # 앱의 로그인·권한·공개 API와 푸시 발송을 담당한다. SQLite는 마운트하지 않는다.
   external:
     build:
       context: ..
@@ -137,7 +142,7 @@ services:
 
   mediamtx:
     build:
-      context: ./mediamtx
+      context: ./services/mediamtx
       dockerfile: Dockerfile
       args:
         MEDIAMTX_UPSTREAM_IMAGE: ${MEDIAMTX_UPSTREAM_IMAGE:-bluenviron/mediamtx:1.9.0}
@@ -150,8 +155,7 @@ services:
       - ${MEDIA_SECRETS_FILE:-./secrets/media.env}
     environment:
       TZ: UTC
-      # MediaMTX environment overrides use the same setting that Data uses to
-      # infer completed segment bounds during hook reconciliation.
+      # 녹화 길이를 Data와 공유하여 완료 알림이 유실돼도 같은 시간 구간으로 복원한다.
       MTX_PATHDEFAULTS_RECORDSEGMENTDURATION: ${RECORDING_SEGMENT_SECONDS:-60}s
     ports:
       - target: 8554
@@ -164,7 +168,7 @@ services:
       - "9997"
     volumes:
       - type: bind
-        source: ./mediamtx/mediamtx.yml
+        source: ./services/mediamtx/mediamtx.yml
         target: /etc/mediamtx.yml
         read_only: true
         bind:
@@ -176,9 +180,8 @@ services:
           create_host_path: false
     depends_on:
       external:
-        # MediaMTX publish authentication becomes available as External reaches
-        # readiness. Starting it earlier avoids a boot cycle when External's
-        # readiness probe checks Data through the Nginx internal relay.
+        # External의 준비 검사는 Nginx를 사용한다. 여기서 준비 완료까지 기다리면
+        # 서로의 기동을 기다리는 순환이 생기므로 프로세스 시작만 확인한다.
         condition: service_started
     healthcheck:
       test:
@@ -196,6 +199,7 @@ services:
       - internal
     logging: *service-logging
 
+  # 외부 HTTPS와 내부 HTTP 중계 역할을 함께 맡지만 8080은 호스트에 공개하지 않는다.
   nginx:
     image: ${NGINX_IMAGE:-nginx:1.27.2-alpine}
     init: true
@@ -213,7 +217,7 @@ services:
       - "8080"
     volumes:
       - type: bind
-        source: ./nginx/nginx.conf
+        source: ./services/nginx/nginx.conf
         target: /etc/nginx/nginx.conf
         read_only: true
         bind:
@@ -241,6 +245,7 @@ services:
       - internal
     logging: *service-logging
 
+  # 감지와 인물 연결은 같은 컨테이너 안에서 독립 실행하며 서로 다른 Data 토큰을 쓴다.
   preprocessing:
     build:
       context: ..
@@ -292,6 +297,7 @@ services:
     logging: *service-logging
 
 
+  # 추가 분석은 별도 개발자가 모델을 넣는 영역이다. 모델·스냅샷은 읽기 전용이다.
   analysis:
     build:
       context: ..
@@ -329,6 +335,8 @@ services:
     logging: *service-logging
 
 networks:
+  # 이름이 internal이어도 네트워크 자체의 격리 옵션 internal: true를 뜻하지는 않는다.
+  # 컨테이너는 서비스 이름(data, nginx 등)을 DNS 이름으로 사용한다.
   internal:
     name: ${COMPOSE_PROJECT_NAME:-ai-cctv}_internal
     driver: bridge

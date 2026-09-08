@@ -1,3 +1,4 @@
+# Nginx의 영상 열람 확인과 MediaMTX의 송출·읽기 인증 요청을 대신 판단한다.
 from __future__ import annotations
 
 import asyncio
@@ -89,9 +90,8 @@ async def internal_auth_verify(
     original_path = parsed_original_uri.path
     decoded_original_path = unquote(original_path)
     if original_uri and (
-        # Proxies and MediaMTX can normalize/decode at different layers.
-        # Reject ambiguous path syntax before deciding which protected
-        # prefix it represents, including encoded prefix spellings.
+        # Nginx와 MediaMTX가 경로를 다르게 해석하면 권한 검사를 우회할 수 있다.
+        # 인코딩·중복 구분자처럼 해석이 모호한 경로는 카메라를 판단하기 전에 거절한다.
         "%" in original_path
         or "\\" in decoded_original_path
         or "//" in decoded_original_path
@@ -176,8 +176,8 @@ async def internal_media_auth(
     action = payload.action.lower()
     protocol = payload.protocol.lower()
     if action == "read" and protocol == "hls":
-        # HLS is Docker-network-only and every public request has already
-        # passed Nginx JWT/camera ACL auth_request.
+        # 현재 배포의 공개 HLS 요청은 Nginx에서 JWT와 카메라 권한을 먼저 검사한다.
+        # 이 허용은 HLS 포트를 외부에 직접 열지 않는 Compose 구성에 의존한다.
         return Response(status_code=204)
     if action not in {"publish", "read"}:
         # Playback/API/metrics/pprof are excluded by MediaMTX config and
@@ -188,10 +188,8 @@ async def internal_media_auth(
     if action == "read" and protocol != "rtsp":
         raise _auth_error("Media authentication failed")
 
-    # Hold the same lock used by lifecycle sagas from the enabled-state read
-    # until the 204 has actually been sent to MediaMTX. A subsequent
-    # disable/rotate/delete then closes admission before repeatedly checking
-    # and kicking a publisher attaching from that immediately preceding auth.
+    # 카메라 활성 상태 확인부터 인증 응답 전송까지 같은 잠금을 잡는다.
+    # 비활성화·키 교체·삭제 도중에 예전 인증으로 새 송출 연결이 끼어드는 것을 막기 위해서다.
     camera_lock = camera_lifecycle_lock(request, payload.path)
     await camera_lock.acquire()
     try:

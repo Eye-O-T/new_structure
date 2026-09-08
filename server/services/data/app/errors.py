@@ -1,3 +1,4 @@
+# 입력·DB·서버 오류를 일관된 HTTP 상태 코드와 JSON 오류 응답으로 바꾼다.
 """Stable JSON error contract."""
 
 from __future__ import annotations

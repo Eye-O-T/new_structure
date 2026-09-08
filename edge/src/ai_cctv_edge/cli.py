@@ -1,3 +1,5 @@
+# Edge 설치 설정, Pairing, 상태 확인, 서비스 제어 명령을 연결하는 CLI 진입점이다.
+# 인증값은 파일로 전달하고 실제 영상 실행과 HTTP 처리는 각 전용 모듈에 맡긴다.
 from __future__ import annotations
 
 import argparse

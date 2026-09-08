@@ -1,3 +1,4 @@
+# External이 SQLite에 직접 접근하지 않고 인증된 HTTP 요청으로 Data 기능을 이용하게 한다.
 from __future__ import annotations
 
 from typing import Any

@@ -936,23 +936,21 @@ def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
     assert set(project["dependencies"]).issubset(constraints)
     assert "sniffio==1.3.1" in constraints
 
-    deployment_doc = (
-        edge_root.parent / "docs/operations/edge-deployment.md"
-    ).read_text(encoding="utf-8")
+    root_readme = (edge_root.parent / "README.md").read_text(encoding="utf-8")
+    deployment_doc = root_readme.split("## Edge 연결", 1)[1].split(
+        "## 모바일과 푸시", 1
+    )[0]
     assert "AI_CCTV_CLI.exe edge-register" in deployment_doc
     assert "ai-cctv-server" not in deployment_doc
 
-    root_readme = (edge_root.parent / "README.md").read_text(encoding="utf-8")
-    project_guide = (
-        edge_root.parent / "docs/operations/project-guide.md"
-    ).read_text(encoding="utf-8")
+    handoff_guide = deployment_doc.split("### 수동 연결", 1)[1]
     handoff_steps = [
         "export-auth-token",
         "AI_CCTV_CLI.exe edge-register",
         "--publish-credentials-file",
     ]
-    positions = [project_guide.find(step) for step in handoff_steps]
+    positions = [handoff_guide.find(step) for step in handoff_steps]
     assert all(position >= 0 for position in positions)
     assert positions == sorted(positions)
-    assert "(docs/operations/edge-deployment.md)" in root_readme
-    assert "(docs/operations/project-guide.md)" in root_readme
+    assert "(docs/architecture.md)" in root_readme
+    assert "## 운영과 백업" in root_readme

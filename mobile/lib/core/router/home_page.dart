@@ -1,3 +1,4 @@
+// 실시간·히스토리·설정 화면에 공통 하단 메뉴를 제공하는 화면 틀이다.
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 

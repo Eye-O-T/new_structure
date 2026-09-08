@@ -1,3 +1,5 @@
+// 날짜·카메라 선택과 조회 결과를 연결한다. 선택이나 새로고침 알림이 바뀌면 API를 다시 조회한다.
+// autoDispose는 더 이상 보지 않는 조회 상태를 해제하며 계정 전환 시 초기화는 main.dart가 맡는다.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';
 import 'package:app/features/events/data/api_event_repository.dart';

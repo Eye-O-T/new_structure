@@ -1,3 +1,4 @@
+// 알림 수신 범위와 로그인 세션을 관리하는 화면이다. 저장·기기 등록은 알림/API 관리자에 맡긴다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';

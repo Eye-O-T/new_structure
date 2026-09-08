@@ -1,3 +1,4 @@
+// 현지 날짜 기준으로 한 주를 표시하고 선택 상태만 변경한다. UTC 변환은 조회 저장소에서 수행한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 

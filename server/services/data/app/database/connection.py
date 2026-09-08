@@ -1,3 +1,4 @@
+# Data가 소유한 SQLite 연결과 트랜잭션, 스키마 변경 및 DB 백업을 관리한다.
 """SQLite connection ownership, migration, health, and backup."""
 
 from __future__ import annotations
@@ -43,6 +44,8 @@ class Database:
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         with self.connection() as connection:
+            # 조회 후 갱신까지 쓰기 권한을 확보해, 두 작업자가 같은 대기 작업을 가져가지 않게 한다.
+            # 중간에 예외가 나면 전체를 취소하고, 정상 종료할 때만 변경을 확정한다.
             connection.execute("BEGIN IMMEDIATE")
             try:
                 yield connection
@@ -55,6 +58,7 @@ class Database:
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
+            # WAL은 변경 내용을 별도 로그에 기록하여 읽기와 쓰기가 서로 막히는 시간을 줄인다.
             mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
             if str(mode).lower() != "wal":
                 raise RuntimeError("SQLite WAL mode could not be enabled")
@@ -103,6 +107,7 @@ class Database:
         with self.connection() as source:
             destination_connection = sqlite3.connect(target)
             try:
+                # 실행 중인 DB는 파일 복사 대신 SQLite 백업 기능으로 일관된 사본을 만든다.
                 source.backup(destination_connection)
             finally:
                 destination_connection.close()

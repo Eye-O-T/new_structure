@@ -232,7 +232,7 @@ def test_internal_inference_and_media_calls_ignore_environment_proxies():
     finally:
         client.close()
 
-    hook = Path("server/mediamtx/recording-complete-hook.sh").read_text(
+    hook = Path("server/services/mediamtx/recording-complete-hook.sh").read_text(
         encoding="utf-8"
     )
     assert "--noproxy '*'" in hook

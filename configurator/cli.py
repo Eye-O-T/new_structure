@@ -1,3 +1,6 @@
+# 터미널 명령을 파싱해 설정 생성, Compose 실행, 중앙 관리자 API 호출로 연결한다.
+# 비밀번호는 보호 파일이나 숨김 입력으로 받고 조회 결과는 비밀값을 제거해 출력한다.
+
 from __future__ import annotations
 
 import argparse
@@ -117,6 +120,7 @@ def _print_failed_prerequisites(adapter: ComposeAdapter) -> bool:
     return bool(failed)
 
 
+# 사전 점검과 설정 생성을 통과한 뒤에만 서비스를 시작한다.
 def _install(args: argparse.Namespace) -> int:
     if _preflight(args.server_dir) != 0:
         print("[ERROR] INSTALLATION_BLOCKED: satisfy the prerequisites and retry.")
@@ -182,6 +186,7 @@ def _print_api_result(result: dict[str, Any]) -> None:
     print(json.dumps(redact_for_display(result), ensure_ascii=False, indent=2))
 
 
+# 카메라 등록·상태 조회 등 명령을 중앙 API로 전달하며 Edge 주소를 임의로 추론하지 않는다.
 def _api_command(args: argparse.Namespace) -> int:
     handoff_path: Path | None = None
     try:

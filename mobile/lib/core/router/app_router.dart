@@ -1,3 +1,4 @@
+// 로그인 상태에 따라 접근할 화면을 정한다. 최종 데이터 접근 권한은 서버에서도 검사한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -18,6 +19,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: api,
     redirect: (context, state) {
       final path = state.uri.path;
+      // 저장된 세션 복원이 끝나기 전에 로그아웃으로 오인해 로그인 화면으로 이동하지 않는다.
       if (api.restoring) return path == '/loading' ? null : '/loading';
       if (!api.signedIn) return path == '/login' ? null : '/login';
       if (path == '/login' || path == '/loading') return '/live';

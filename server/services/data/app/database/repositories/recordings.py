@@ -1,3 +1,4 @@
+# 녹화 파일의 경로·시간·상태를 저장하여 영상 검색과 이벤트 연결을 지원한다.
 """Recordings persistence and SQL operations."""
 
 from __future__ import annotations

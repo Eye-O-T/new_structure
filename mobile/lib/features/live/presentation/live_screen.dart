@@ -1,3 +1,4 @@
+// 서버가 현재 사용자에게 허용한 카메라 목록을 표시하고 개별 실시간 화면으로 연결한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';

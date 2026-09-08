@@ -1,3 +1,4 @@
+# 토큰과 현재 계정 상태를 확인한 뒤 관리자 권한·카메라 열람 권한을 검사한다.
 """Authenticated principal and camera ACL checks for public and media requests."""
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ async def get_current_principal(
     except TokenValidationError as exc:
         raise _unauthorized("Invalid access token") from exc
 
+    # 서명이 맞아도 로그아웃·계정 정지·권한 변경이 있었을 수 있어 현재 DB 상태를 다시 확인한다.
     if await data.is_access_token_revoked(claims.jti):
         raise _unauthorized("Access token revoked")
 
@@ -112,6 +114,7 @@ async def _ensure_camera_access(
     principal: Principal,
     camera_id: str,
 ) -> dict[str, Any]:
+    # 로그인 확인과 카메라 접근 허용은 별개다. 일반 사용자는 배정된 카메라만 열람할 수 있다.
     if not CAMERA_ID_PATTERN.fullmatch(camera_id):
         raise HTTPException(status_code=400, detail="Invalid camera ID")
     if principal.role != "admin":

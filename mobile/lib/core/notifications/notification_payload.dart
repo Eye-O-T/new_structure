@@ -1,3 +1,5 @@
+// 푸시로 받은 값은 외부 입력이므로 ID·시간 형식을 검증한 뒤 화면 이동에 사용한다.
+// 사용자 ID와 기기 ID는 잘못 도착한 알림을 거르는 용도이며 서버의 권한 검사를 대체하지 않는다.
 class NotificationPayload {
   const NotificationPayload({
     required this.eventId,

@@ -1,3 +1,4 @@
+# 이벤트와 관련 녹화, 알림·객체 작업을 함께 저장하여 일부만 기록되는 상황을 막는다.
 """Events persistence and SQL operations."""
 
 from __future__ import annotations
@@ -29,8 +30,7 @@ class EventsRepositoryMixin:
                 ).fetchone()
                 if existing is not None:
                     existing_id = int(existing["id"])
-                    # Finish the transaction before using get_event's separate
-                    # connection below.
+                    # 같은 Edge 이벤트를 다시 받으면 기존 결과를 반환하여 후속 작업 중복을 막는다.
                     return self.get_event(existing_id) or {}
             automatic = connection.execute(
                 """
@@ -94,6 +94,8 @@ class EventsRepositoryMixin:
                 ),
             )
             event_id = int(cursor.lastrowid)
+            # 이벤트와 발송·분석 예약을 같은 트랜잭션에 넣는다.
+            # 따라서 이벤트만 저장되고 후속 작업이 사라지는 중간 상태가 남지 않는다.
             self._enqueue_push(connection, event_id)
             self._enqueue_object_jobs(connection, event_id, values)
             connection.executemany(

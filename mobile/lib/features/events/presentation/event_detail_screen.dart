@@ -1,3 +1,5 @@
+// 이벤트 ID로 상세 정보를 다시 조회하고 이후 연결된 녹화·재식별·분석 상태를 보여준다.
+// unconfigured는 담당 모델이 아직 연결되지 않았다는 뜻이며 분석 완료로 표시하지 않는다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';

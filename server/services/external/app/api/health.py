@@ -1,3 +1,4 @@
+# External 실행 상태와 Data 연결 상태를 확인하고 사용자에게 시스템 상태를 제공한다.
 from __future__ import annotations
 
 from typing import Any

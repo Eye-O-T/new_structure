@@ -1,3 +1,5 @@
+# 설정 파일의 기본값 위에 환경변수 값을 적용해 컨테이너에서 사용할 설정을 만든다.
+# 배포 환경마다 달라지는 주소·비밀번호는 코드에 직접 적지 않고 환경변수로 받는다.
 from __future__ import annotations
 
 import os
@@ -48,6 +50,7 @@ class Settings:
         inference = config.inference if config is not None else None
 
         def configured(name: str, fallback: object) -> str:
+            # 우선순위는 환경변수, config.yaml 값, 코드 기본값 순서다.
             return os.getenv(name, str(fallback))
 
         return cls(
@@ -105,6 +108,7 @@ class Settings:
         )
 
     def validate(self) -> None:
+        # 연결 후 오류가 반복되기 전에 주소 형식, 인증 정보와 수치 범위를 확인한다.
         if not self.internal_service_token:
             raise ValueError(
                 "DATA_INFERENCE_TOKEN or legacy INTERNAL_SERVICE_TOKEN is required"
@@ -146,6 +150,8 @@ class Settings:
         normalized_path = stream_path.strip("/")
         if not normalized_path:
             raise ValueError("RTSP stream path must not be empty")
+        # URL에서 의미를 가지는 특수 문자를 인코딩해 경로와 인증 정보가 섞이지 않게 한다.
+        # 반환 URL에는 비밀번호가 들어 있으므로 로그에 출력하지 않는다.
         escaped_path = quote(normalized_path, safe="/-._~")
         base_path = parsed.path.rstrip("/")
         path = f"{base_path}/{escaped_path}"

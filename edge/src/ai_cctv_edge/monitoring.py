@@ -1,3 +1,5 @@
+# Linux가 제공하는 전원·CPU·메모리·디스크 정보를 읽고 상태 변화를 이벤트로 기록한다.
+# 장치 정보를 읽을 수 없으면 unknown/None으로 남겨 실제 측정값처럼 추측하지 않는다.
 from __future__ import annotations
 
 import shutil
@@ -154,6 +156,7 @@ class SystemMetricsCollector:
 
 
 class PowerEventDetector:
+    # 같은 저전력 상태가 이어질 때 매번 알림을 만들지 않고 단계가 바뀔 때만 이벤트를 만든다.
     def __init__(self, low_percent: int, critical_percent: int):
         self.low_percent = low_percent
         self.critical_percent = critical_percent
@@ -267,6 +270,7 @@ class CameraInputWatchdog:
         return "camera_input_restored" if previous == "offline" else None
 
     def poll(self) -> str | None:
+        # monotonic 시계는 시스템 시각 보정의 영향을 받지 않아 경과 시간 측정에 사용한다.
         if self.status != "offline" and (
             self.clock() - self.last_frame_at >= self.timeout_seconds
         ):

@@ -1,3 +1,4 @@
+# SQL 조회 행을 API용 값으로 바꾸고 저장 계층에서 함께 쓰는 오류와 시간을 정의한다.
 """Shared row conversion, timestamps, and repository domain errors."""
 
 from __future__ import annotations

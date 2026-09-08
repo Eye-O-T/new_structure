@@ -1,3 +1,4 @@
+# Edge를 주기적으로 조회해 상태와 이벤트를 중앙에 반영하고 연결 변화도 이벤트로 남긴다.
 """Periodic central collection of Edge runtime state and durable event journals."""
 
 from __future__ import annotations
@@ -155,10 +156,8 @@ class StatusCollector:
     ) -> None:
         details = {"source": "central_status_collector"}
         details.update(metadata or {})
-        # Runtime is updated only after every synthetic event succeeds. This
-        # fingerprint therefore remains stable if event creation or the later
-        # runtime write fails, while runtime_updated_at makes a future instance
-        # of the same transition distinct after the baseline advances.
+        # 상태 갱신은 관련 이벤트 저장이 모두 성공한 뒤에 한다.
+        # 이전 상태로 만든 지문은 재시도 때 같아서 중복 저장을 막고, 다음 변화에서는 달라진다.
         boundary = {
             key: baseline.get(key)
             for key in (
@@ -190,6 +189,8 @@ class StatusCollector:
         edge: EdgeHttpClient,
         target: dict[str, Any],
     ) -> tuple[int, set[str], str | None, bool]:
+        # cursor는 Edge 일지를 어디까지 읽었는지 나타낸다.
+        # 다시 읽힌 항목도 Edge 장치 ID와 이벤트 ID로 식별하므로 중앙에는 중복 저장하지 않는다.
         camera_id = str(target["camera_id"])
         edge_device_id = str(target["edge_device_id"])
         cursor = target.get("event_cursor")

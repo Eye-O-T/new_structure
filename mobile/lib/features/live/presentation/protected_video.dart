@@ -1,3 +1,5 @@
+// 인증이 필요한 실시간 HLS와 녹화 영상을 재생한다. 토큰이 교체되면 네이티브 플레이어도
+// 다시 만들어 새 Authorization 헤더를 재생 목록과 영상 조각 요청에 적용한다.
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -70,6 +72,7 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
     if (mounted) setState(() => _error = null);
     VideoPlayerController? next;
     final old = _player;
+    // 녹화는 보던 위치를 이어 가고 실시간 영상은 새 연결의 현재 지점에서 시작한다.
     final position = widget.live
         ? Duration.zero
         : old?.value.position ?? Duration.zero;
@@ -118,6 +121,7 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
       setState(() => _foreground = state == AppLifecycleState.resumed);
     }
     if (state == AppLifecycleState.resumed) {
+      // 앱 복귀 시 연결을 새로 만들고, 화면을 벗어나면 재생을 일시 정지한다.
       unawaited(_load());
     } else {
       unawaited(_player?.pause());
@@ -153,6 +157,7 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
                     fit: StackFit.expand,
                     children: [
                       VideoPlayer(player),
+                      // 재생 중인 전경 화면에서만 최신 좌표를 표시해 멈춘 영상 위의 박스를 피한다.
                       if (widget.live &&
                           widget.cameraId != null &&
                           _showObjects &&

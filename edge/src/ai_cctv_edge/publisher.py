@@ -1,5 +1,7 @@
 """Publish the capture shared-memory stream without exposing credentials in argv."""
 
+# 캡처 프로세스가 만든 공유 메모리 영상을 읽어 중앙 MediaMTX에 RTSP/TCP로 보낸다.
+# 인증값은 명령행 인수 대신 GStreamer 속성에 넣어 프로세스 목록 노출을 피한다.
 from __future__ import annotations
 
 import argparse
@@ -57,8 +59,7 @@ def publish(config_path: str | Path) -> int:
         f"rtsp://{config.rtsp.central_host}:{config.rtsp.central_port}/"
         f"{config.camera_id}"
     )
-    # The URI is safe to log because the credentials are applied directly to
-    # element properties and never placed in a command line or URI.
+    # 이 URI에는 인증값이 없으며 실제 사용자명과 암호는 아래의 요소 속성으로 전달한다.
     pipeline = Gst.parse_launch(
         "shmsrc name=source is-live=true do-timestamp=true "
         "! queue leaky=downstream max-size-buffers=120 "
@@ -110,6 +111,7 @@ def publish(config_path: str | Path) -> int:
         _write_status(config.camera_id, "offline", type(exc).__name__)
         raise
     finally:
+        # 정상 종료와 예외 모두에서 파이프라인을 해제해야 소켓과 영상 자원이 반환된다.
         pipeline.set_state(Gst.State.NULL)
     return result
 

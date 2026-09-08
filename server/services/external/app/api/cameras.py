@@ -1,3 +1,4 @@
+# 카메라 설정과 영상 조회를 처리하며 Data·Edge·MediaMTX 작업 순서를 조정한다.
 from __future__ import annotations
 
 import secrets
@@ -302,9 +303,8 @@ async def update_camera(
                 },
             )
             if not body["enabled"]:
-                # Persist disabled first so reconnect attempts fail closed. If
-                # MediaMTX is unavailable the camera remains disabled and the
-                # administrator can safely retry this idempotent request.
+                # 먼저 비활성 상태를 저장해 재접속을 차단한다.
+                # MediaMTX 연결 끊기에 실패해도 비활성 상태를 유지하므로 안전하게 재시도할 수 있다.
                 await _disconnect_camera_publisher(settings, camera_id)
         return _public_camera(updated)
 
@@ -327,9 +327,8 @@ async def delete_camera(
                 code="CAMERA_HAS_HISTORY",
             )
         previous = await data.get_camera(camera_id, user_id=principal.user_id)
-        # Disable admission before terminating the active publisher. Deletion
-        # happens only after the kick succeeds, leaving a retryable disabled
-        # record if MediaMTX control is temporarily unavailable.
+        # 새 송출을 막고 기존 연결을 끊은 뒤 삭제한다.
+        # 제어 통신이 실패하면 비활성 카메라 기록을 남겨 다음 요청에서 이어서 처리한다.
         await data.update_camera(camera_id, {"enabled": False, "status": "disabled"})
         await data.put_camera_runtime_status(
             camera_id,
@@ -390,8 +389,8 @@ async def rotate_camera_publish_credentials(
         camera = await data.get_camera(camera_id, user_id=principal.user_id)
         was_enabled = bool(camera.get("enabled", True))
 
-        # Block reconnects while the old publisher is terminated and its
-        # database credential is replaced. Failures leave the camera disabled.
+        # 기존 연결을 끊고 저장된 송출 비밀번호를 교체하는 동안 재접속을 막는다.
+        # 중간 실패 시 카메라는 비활성 상태로 남아 이전 비밀번호로 다시 송출하지 못한다.
         await data.update_camera(camera_id, {"enabled": False, "status": "disabled"})
         await data.put_camera_runtime_status(
             camera_id,

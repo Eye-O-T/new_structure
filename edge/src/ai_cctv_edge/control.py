@@ -1,3 +1,5 @@
+# 중앙에서 Edge 상태를 조회하고 영상 품질(HD/FHD)을 변경하는 관리 HTTP API다.
+# 품질 변경은 지원 여부 확인 → 시험 실행 → 실제 캡처 적용 확인 → 영구 저장 순서로 진행한다.
 from __future__ import annotations
 
 import json
@@ -568,6 +570,7 @@ class ProfileManager:
 
             remaining = max(0.0, timeout - (time.monotonic() - started))
             result = self.runtime.wait_for(requested, generation, remaining)
+            # 요청을 보낸 것과 적용 완료는 다르므로 실행 프로세스의 해당 세대 응답을 기다린다.
             if result.status == "applied":
                 try:
                     self.runtime.commit(requested, generation)
@@ -591,6 +594,7 @@ class ProfileManager:
                 failure_code = result.reason_code or "PIPELINE_START_FAILED"
 
             rollback_generation = generation + 1
+            # 실패한 설정을 재시작 후에도 남기지 않고 마지막으로 확정된 설정 복구를 시도한다.
             try:
                 self.runtime.activate(persisted, rollback_generation)
                 rollback = self.runtime.wait_for(

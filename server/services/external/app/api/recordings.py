@@ -1,3 +1,4 @@
+# 녹화 권한을 검사하고 재생 주소 또는 Data가 읽은 영상 바이트를 사용자에게 전달한다.
 from __future__ import annotations
 
 from datetime import datetime, timezone

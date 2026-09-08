@@ -1,3 +1,5 @@
+// Android FCM 수신, 서버의 기기 등록, 수신 설정, 알림을 눌렀을 때의 화면 이동을 조정한다.
+// Firebase 설정이 없는 빌드에서는 푸시 준비 실패를 표시하고 일반 서버 조회는 유지한다.
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -12,8 +14,8 @@ import 'notification_payload.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // The OS displays the notification payload. Fetch protected content after
-  // opening the app; no credentials, images or event details go into logs.
+  // 백그라운드 알림 표시는 OS에 맡긴다. 보호된 이벤트 상세는 앱을 열고 인증 후 조회한다.
+  // 인증값, 이미지, 상세 내용은 이 처리 과정에서 로그에 남기지 않는다.
   try {
     await Firebase.initializeApp();
   } catch (_) {
@@ -128,6 +130,7 @@ class NotificationController extends ChangeNotifier
   }
 
   void _authChanged() {
+    // 같은 단말에서도 계정이나 서버가 바뀔 수 있어 이전 알림과 중복 수신 기록을 비운다.
     final current = api.signedIn
         ? '${api.origin}|${api.userId}|$deviceId'
         : null;
@@ -157,12 +160,13 @@ class NotificationController extends ChangeNotifier
     allEvents = everyEvent;
     await api.store.write('push_enabled', '$enabled');
     await api.store.write('push_all_events', '$allEvents');
-    // Wait for an in-flight registration before applying the new preference.
+    // 이전 등록 요청이 새 수신 설정을 덮어쓰지 않도록 완료를 기다린 뒤 다시 등록한다.
     if (_syncing != null) await _syncing;
     await sync();
   }
 
   Future<void> sync() async {
+    // 토큰 변경과 설정 변경이 겹치면 등록 요청을 직렬화하고 마지막 변경까지 반영한다.
     if (_disposed || !ready || !api.signedIn) return;
     _syncRequested = true;
     if (_syncing != null) return _syncing!;
@@ -235,6 +239,7 @@ class NotificationController extends ChangeNotifier
   }
 
   Future<void> handleForeground(Map<String, dynamic> data) async {
+    // 현재 사용자·로그인 기기의 알림만 반영하고 같은 이벤트가 반복 도착하면 한 번만 표시한다.
     final payload = NotificationPayload.parse(data);
     if (!enabled ||
         payload == null ||
@@ -255,6 +260,7 @@ class NotificationController extends ChangeNotifier
     final payload = NotificationPayload.parse(data);
     if (payload == null) return;
     if (!api.signedIn) {
+      // 앱 시작 직후에는 세션 복원이 끝나지 않을 수 있으므로 탭한 알림을 잠시 보관한다.
       _pending = payload;
       return;
     }
@@ -280,6 +286,7 @@ class NotificationController extends ChangeNotifier
 
   @override
   void dispose() {
+    // 화면/앱 객체가 해제된 뒤 타이머와 스트림이 상태를 변경하지 않도록 연결을 정리한다.
     _disposed = true;
     _retry?.cancel();
     api.removeListener(_authChanged);

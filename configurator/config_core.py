@@ -1,3 +1,6 @@
+# 설치 화면·CLI의 입력을 실제 운영 설정, 모델, 인증 파일로 바꾸는 공통 로직이다.
+# 호스트 경로와 컨테이너 내부 경로를 구분하고, 파일별 임시 저장 후 교체로 불완전한 파일을 막는다.
+
 from __future__ import annotations
 
 import errno
@@ -73,6 +76,7 @@ class InstallResult:
     camera_credentials: dict[str, dict[str, str]]
 
 
+# 비밀번호 해시의 $를 Compose 변수로 오해하지 않도록 env 파일 값의 따옴표를 처리한다.
 def _dotenv(value: str | Path | int) -> str:
     text = str(value)
     if "\n" in text or "\r" in text:
@@ -85,6 +89,7 @@ def _dotenv(value: str | Path | int) -> str:
     return "'" + text.replace("'", "\\'") + "'"
 
 
+# 임시 파일에 쓰기와 디스크 반영을 마친 뒤 이름을 교체한다. 여러 파일 전체의 트랜잭션은 아니다.
 def _write_atomic(path: Path, content: str, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
@@ -180,6 +185,7 @@ def _validate_certificate_key_match(certificate: Path, private_key: Path) -> Non
         ) from exc
 
 
+# 인증서와 개인키를 읽을 수 있는지, 서로 한 쌍인지 확인한 뒤에만 운영 위치에 복사한다.
 def _validate_tls_files(certificate: Path, private_key: Path) -> tuple[Path, Path]:
     certificate = certificate.expanduser()
     private_key = private_key.expanduser()
@@ -257,6 +263,7 @@ def _validate_request(request: InstallRequest) -> Path:
     return model_source.resolve()
 
 
+# 입력 검증 → 운영 폴더·모델 준비 → 설정·인증 파일 생성 순서다. 기존 파일은 백업한다.
 def initialize(request: InstallRequest) -> InstallResult:
     """Validate once and atomically generate config, secrets and Compose env."""
 

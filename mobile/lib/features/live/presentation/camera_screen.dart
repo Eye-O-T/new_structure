@@ -1,3 +1,4 @@
+// 선택한 카메라의 영상·Edge 상태·지원 품질을 조회하고 관리자에게 품질 변경 기능을 제공한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';
@@ -38,6 +39,7 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
             '/api/v1/cameras/${Uri.encodeComponent(widget.cameraId)}/video-profile',
             body: {'profile': profile},
           );
+      // 요청값으로 화면을 미리 바꾸지 않고 서버가 확정한 품질과 상태를 다시 조회한다.
       ref.invalidate(videoProfileProvider(widget.cameraId));
       ref.invalidate(cameraStatusProvider(widget.cameraId));
     } catch (error) {

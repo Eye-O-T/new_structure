@@ -1,5 +1,8 @@
 """One container: camera detection threads and independent identity job consumer."""
 
+# preprocessing 컨테이너의 시작점이다. 카메라별 사람 탐지와 카메라 간 인물 식별을
+# 같은 컨테이너에서 실행하되, 한쪽의 작업 지연이 다른 쪽을 막지 않도록 따로 구동한다.
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -19,7 +22,8 @@ def create_app(settings: Settings | None = None):
     runtime_settings = settings or Settings.from_env()
 
     async def run_identity(app):
-        # Plugin loading/execution may fail or be slow without blocking cameras.
+        # 인물 식별 모델의 준비가 실패하면 일정 시간 뒤 다시 시도한다.
+        # 그동안 카메라 탐지는 독립적인 스레드에서 계속 실행한다.
         while True:
             try:
                 async with running_worker(
@@ -42,6 +46,7 @@ def create_app(settings: Settings | None = None):
 
     @asynccontextmanager
     async def lifespan(app):
+        # 시작 전에 설정을 검증하고 카메라 관리자와 식별 작업자를 함께 준비한다.
         runtime_settings.validate()
         if len(runtime_settings.identity_token) < 32:
             raise ValueError("DATA_IDENTITY_TOKEN requires at least 32 characters")
@@ -59,6 +64,7 @@ def create_app(settings: Settings | None = None):
         try:
             yield
         finally:
+            # 종료 순서를 명시해 백그라운드 작업과 영상 연결이 남지 않게 정리한다.
             identity_task.cancel()
             try:
                 await identity_task
@@ -94,6 +100,8 @@ def create_app(settings: Settings | None = None):
         state = status()
         if not state["data_ready"]:
             raise HTTPException(status_code=503, detail="Data Service is not ready")
+        # Data에 연결되면 HTTP 200을 유지할 수 있지만, 모델·식별 장애는 degraded로
+        # 표시한다. 따라서 HTTP 성공 여부만으로 모든 기능이 정상이라고 판단하면 안 된다.
         model_degraded = runtime_settings.inference_enabled and any(
             not worker["model_ready"] for worker in state["workers"].values()
         )

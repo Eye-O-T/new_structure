@@ -1,3 +1,4 @@
+# Data에서 발송할 알림을 가져와 FCM으로 보내고 성공·재시도 결과를 되돌려 준다.
 """Claim and complete durable deliveries through Data; send through the FCM adapter."""
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ class PushDispatcher:
         delivery = await self.data.claim_push()
         if delivery is None:
             return False
+        # FCM 전송과 Data 완료 기록은 서로 다른 통신이다.
+        # 전송 후 기록에 실패하면 다시 발송될 수 있으므로 이벤트 ID를 같은 알림 식별자로 사용한다.
         try:
             await self.sender.send(delivery)
         except PushSendError as exc:
@@ -43,7 +46,7 @@ class PushDispatcher:
                 except Exception:
                     LOGGER.warning("Push delivery temporarily unavailable")
                     dispatched = False
-                # Briefly yield between deliveries; wait only when queue is empty.
+                # 발송할 항목이 있으면 짧게 쉬고 계속 처리하며, 대기열이 비었을 때는 조회 간격을 늘린다.
                 await asyncio.sleep(
                     0.05 if dispatched else self.settings.push_poll_interval_seconds
                 )

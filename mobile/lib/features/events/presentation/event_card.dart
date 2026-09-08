@@ -1,3 +1,4 @@
+// 이벤트 요약과 현지 발생 시각을 표시한다. 탭하면 ID를 넘겨 상세 화면에서 최신 정보를 조회한다.
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../domain/event.dart';

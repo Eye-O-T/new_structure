@@ -165,6 +165,8 @@ def test_data_settings_preserve_legacy_runtime_token_fallback(monkeypatch) -> No
     for name in (
         "DATA_EXTERNAL_TOKEN",
         "DATA_INFERENCE_TOKEN",
+        "DATA_IDENTITY_TOKEN",
+        "DATA_ANALYSIS_TOKEN",
         "DATA_MEDIA_TOKEN",
         "DATA_RECOVERY_TOKEN",
         "DATA_INTERNAL_TOKEN",

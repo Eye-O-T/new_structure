@@ -1,3 +1,4 @@
+# JWT의 서명·만료·용도를 검사한다. JWT 내용 자체를 암호화하는 코드는 아니다.
 from __future__ import annotations
 
 import uuid
@@ -80,6 +81,7 @@ def decode_token(
     expected_type: TokenType,
 ) -> TokenClaims:
     try:
+        # 허용 알고리즘·발급자·수신 대상을 고정하여 다른 용도의 토큰을 받아들이지 않는다.
         payload = jwt.decode(
             token,
             settings.jwt_secret,

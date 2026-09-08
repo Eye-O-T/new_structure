@@ -1,3 +1,4 @@
+# 사용자가 접근할 수 있는 카메라의 이벤트를 조회하도록 권한을 확인한다.
 from __future__ import annotations
 
 from datetime import datetime

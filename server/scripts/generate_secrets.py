@@ -1,3 +1,6 @@
+# 새 소스 배포에 필요한 역할별 내부 토큰과 카메라 게시 계정을 생성한다.
+# 운영 중인 설치의 토큰 보존 이전에는 enable_object_processing 도구를 사용한다.
+
 """Generate local central-server secrets without writing them to stdout."""
 
 from __future__ import annotations
@@ -57,6 +60,7 @@ def single_quote(value: str) -> str:
     return f"'{value}'"
 
 
+# 완성된 임시 파일에 접근 권한을 적용한 다음 교체하여 일부만 저장된 비밀 파일을 피한다.
 def atomic_write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(

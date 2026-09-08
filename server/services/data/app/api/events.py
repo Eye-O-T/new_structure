@@ -1,3 +1,4 @@
+# 이벤트와 객체 관찰 정보를 검증하고 녹화 연결 및 후속 작업 저장을 요청한다.
 """Internal events API."""
 
 from __future__ import annotations

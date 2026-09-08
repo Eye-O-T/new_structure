@@ -1,3 +1,4 @@
+# 반복 로그인 실패 시 다음 시도까지 대기 시간을 늘려 비밀번호 무차별 대입을 늦춘다.
 from __future__ import annotations
 
 import math

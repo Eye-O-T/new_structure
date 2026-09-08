@@ -1,3 +1,5 @@
+# Edge의 실행 관리자: 카메라 캡처, 중앙 송출, 상태 기록, 오래된 백업 정리를 조정한다.
+# 중앙 연결이 끊겨도 캡처와 로컬 백업은 계속하고, 송출 프로세스만 재시작한다.
 from __future__ import annotations
 
 import json
@@ -111,6 +113,8 @@ class EdgeRunner:
         self.lock_handle.flush()
 
     def _load_effective_config(self) -> None:
+        # 확정된 영상 설정 위에 이번 실행 인스턴스에 해당하는 임시 변경만 적용한다.
+        # PID는 재사용될 수 있으므로 인스턴스 ID까지 비교해 오래된 요청을 구분한다.
         base = EdgeConfig.load(self.config_path)
         selected, generation = self.selection_store.read(base.video.profile)
         request = self.request_store.read()
@@ -305,6 +309,7 @@ class EdgeRunner:
     def _maintain_publisher(self) -> None:
         """Restart network publishing independently from capture and backup."""
 
+        # 재접속 간격을 최대 30초까지 늘려 장애 중 반복 접속으로 부하가 커지지 않게 한다.
         if self.config.rtsp.mode != "central_publish":
             return
         now = time.monotonic()
@@ -346,6 +351,8 @@ class EdgeRunner:
         return newest
 
     def _monitor_camera_input(self) -> None:
+        # 프로세스가 살아 있다는 사실만으로 영상 입력을 보장할 수 없다.
+        # 녹화 파일의 크기·수정 시각 변화로 실제 캡처 활동을 간접 확인한다.
         activity = self._recording_activity()
         if activity is not None and activity != self._last_activity:
             self._last_activity = activity

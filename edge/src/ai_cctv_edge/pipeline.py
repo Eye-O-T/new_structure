@@ -1,3 +1,4 @@
+# GStreamer 명령을 구성한다. 카메라 영상을 H.264로 압축한 뒤 저장·송출 경로로 나눈다.
 from __future__ import annotations
 
 import shlex
@@ -27,8 +28,7 @@ def _encoder_command(config: EdgeConfig) -> list[str]:
             "bframes=0",
         ]
     if config.video.encoder == "v4l2h264enc":
-        # video_bitrate is the standard V4L2 MPEG control exposed through the
-        # plugin. Device-specific register addresses are deliberately avoided.
+        # 플러그인이 제공하는 표준 V4L2 제어값을 써서 장치별 레지스터 주소에 의존하지 않는다.
         return [
             "v4l2h264enc",
             f"extra-controls=controls,video_bitrate={config.video.bitrate_kbps * 1000}",
@@ -64,6 +64,8 @@ def build_gstreamer_command(
     ]
     command.extend(_encoder_command(config))
 
+    # tee는 하나의 압축 영상을 두 갈래로 전달한다. 각 queue가 처리 속도 차이를 흡수한다.
+    # 송출 쪽은 밀린 프레임을 버려(leaky) 네트워크 지연이 로컬 녹화를 막지 않게 한다.
     command.extend(
         [
             "!",
@@ -93,6 +95,8 @@ def build_gstreamer_command(
     )
 
     if config.rtsp.mode == "central_pull":
+        # pull 방식은 Edge의 MediaMTX를 중앙이 읽고, publish 방식은 중앙으로 직접 보낸다.
+        # publish의 공유 메모리(shmsink)는 별도 송출 프로세스와 영상을 나누는 통로다.
         command.extend(
             [
                 "flvmux",

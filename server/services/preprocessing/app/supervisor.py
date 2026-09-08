@@ -1,3 +1,5 @@
+# Data의 활성 카메라 목록에 맞춰 카메라별 영상 처리 스레드를 관리한다.
+# 카메라 추가·중지 여부를 주기적으로 확인하므로 목록 변경에 서비스를 다시 띄울 필요가 없다.
 from __future__ import annotations
 
 import logging
@@ -49,6 +51,7 @@ class DetectionSupervisor:
             self._stop.wait(self.settings.refresh_seconds)
 
     def _reconcile(self, cameras: list[dict[str, Any]]) -> None:
+        # 원하는 목록과 실행 중인 목록의 차이를 맞춘다. 현재 설정 계약은 최대 4대다.
         desired = {str(camera["camera_id"]): camera for camera in cameras[:4]}
         for camera_id in set(self._workers) - set(desired):
             worker = self._workers.pop(camera_id)
@@ -56,6 +59,7 @@ class DetectionSupervisor:
             worker.join(timeout=10)
 
         for camera_id, camera in desired.items():
+            # 이미 살아 있는 스레드는 유지하고, 새 카메라나 종료된 스레드만 시작한다.
             current = self._workers.get(camera_id)
             if current is not None and current.is_alive():
                 continue

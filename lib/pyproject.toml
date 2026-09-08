@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools==75.3.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-cctv-core"
+version = "0.3.0"
+description = "Shared configuration and processing contracts for AI CCTV"
+requires-python = ">=3.11,<3.12"
+dependencies = ["pydantic==2.10.6", "PyYAML==6.0.2"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ai_cctv_core*"]

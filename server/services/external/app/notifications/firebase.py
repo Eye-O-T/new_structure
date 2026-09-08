@@ -1,3 +1,4 @@
+# 알림 대기열 항목을 FCM 메시지로 변환하고 실패가 재시도 가능한지 구분한다.
 """Optional Firebase adapter; never log recipient tokens or SDK exception text."""
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ class FirebaseSender:
         self._app: Any = None
 
     def _send(self, delivery: dict[str, Any]) -> None:
-        # Optional at runtime: deployments without push need no Firebase setup.
+        # 푸시를 사용하지 않는 배포는 Firebase 초기화가 필요 없으므로 발송 시점에만 불러온다.
         import firebase_admin
         from firebase_admin import credentials, exceptions, messaging
 
@@ -70,6 +71,7 @@ class FirebaseSender:
             )
             messaging.send(message, app=self._app)
         except messaging.UnregisteredError as exc:
+            # 더 이상 유효하지 않은 단말은 등록을 해제하고, 일시적인 통신 장애만 재시도한다.
             raise PushSendError("invalid_token", "UNREGISTERED") from exc
         except (
             messaging.SenderIdMismatchError,
@@ -77,11 +79,12 @@ class FirebaseSender:
         ) as exc:
             raise PushSendError("permanent_failure", "INVALID_RECIPIENT") from exc
         except Exception as exc:
-            # SDK exceptions can contain tokens/credential paths; never log them.
+            # SDK 예외에 단말 토큰·인증 파일 경로가 포함될 수 있어 고정된 오류 코드만 전달한다.
             raise PushSendError("retry", "FCM_UNAVAILABLE") from exc
 
     async def send(self, delivery: dict[str, Any]) -> None:
         try:
+            # 동기식 Firebase SDK 호출을 별도 스레드에서 실행해 다른 API 요청을 막지 않는다.
             await asyncio.wait_for(asyncio.to_thread(self._send, delivery), timeout=45)
         except TimeoutError as exc:
             raise PushSendError("retry", "FCM_TIMEOUT") from exc

@@ -1,3 +1,6 @@
+# 신뢰 LAN에서 Edge의 UDP 광고를 받아 초기 연결 대상을 찾는다.
+# 공유 Key로 만든 HMAC 서명과 시각을 확인하고 실제 패킷 발신 주소로 접속한다.
+
 """Discover HMAC-authenticated AI_CCTV Edge pairing advertisements."""
 
 from __future__ import annotations
@@ -53,6 +56,7 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
     ).encode("utf-8")
 
 
+# 광고를 곧바로 신뢰하지 않고 크기·필드·시각·서명을 검증한다. 오래된 광고의 재사용도 거부한다.
 def parse_advertisement(
     data: bytes,
     peer_address: str,

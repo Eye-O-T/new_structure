@@ -1,3 +1,4 @@
+# Argon2로 비밀번호를 해시하거나 검증한다. 저장된 해시에서 원래 비밀번호를 복원하지 않는다.
 from argon2 import PasswordHasher
 
 _PASSWORD_HASHER = PasswordHasher(

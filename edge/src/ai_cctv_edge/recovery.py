@@ -1,3 +1,5 @@
+# 중앙 서버가 장애 구간의 로컬 녹화를 가져갈 수 있도록 목록과 TS 파일을 제공한다.
+# 목록의 SHA-256은 전송 후 파일이 원본과 같은지 확인하는 지문이며 암호화는 아니다.
 from __future__ import annotations
 
 import hashlib
@@ -62,15 +64,12 @@ def _capture_may_write(camera_id: str) -> bool:
         os.kill(pid, 0)
         return True
     except ProcessLookupError:
-        # A vanished runner cannot still hold the splitmux output open. The
-        # final segment is immutable and must remain recoverable during an
-        # unclean capture-service outage.
+        # 캡처 실행 프로세스가 사라졌다면 마지막 파일도 더 이상 기록되지 않아 복구할 수 있다.
         return False
     except PermissionError:
         return True
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-        # Missing/ambiguous state must fail closed by withholding the newest
-        # segment. A definitely stopped/dead runner makes it immutable.
+        # 상태를 확인할 수 없으면 기록 중일 수 있다고 보고 마지막 파일의 공개를 보류한다.
         return True
 
 
@@ -92,9 +91,8 @@ def _recoverable_segments(
     if not candidates:
         return ()
     candidates.sort()
-    # splitmuxsink writes directly to its final `.ts` name. Withhold only while
-    # a live capture runner can append to it. Once capture is explicitly
-    # stopped/failed (or its PID is gone), the last file is immutable too.
+    # 쓰는 중인 파일을 내려받으면 목록의 크기·해시와 실제 내용이 달라질 수 있다.
+    # 캡처가 멈췄다고 확인될 때에만 마지막 파일까지 복구 대상으로 공개한다.
     selected = candidates[:-1] if capture_may_write else candidates
     return tuple(item[2] for item in selected)
 
@@ -152,6 +150,7 @@ def create_app(config_path: str | Path) -> FastAPI:
     def recovery_file(relative_path: str):
         root = camera_root.resolve()
         target = (root / relative_path).resolve()
+        # ../ 또는 심볼릭 링크로 녹화 폴더 밖 파일을 요청할 수 없도록 최종 경로를 검사한다.
         try:
             target.relative_to(root)
         except ValueError as exc:

@@ -1,3 +1,4 @@
+# 조회 시간 범위와 식별자를 검사하고 클라이언트가 사용할 영상 주소를 구성한다.
 """Validation shared by resource listing and protected media routes."""
 
 from __future__ import annotations

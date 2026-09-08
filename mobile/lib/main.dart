@@ -1,3 +1,4 @@
+// 앱의 시작점: 공용 API·라우터·알림 관리자를 연결한 뒤 저장된 로그인 정보를 복원한다.
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,6 +31,8 @@ void main() {
     api,
     onResume: refresh,
     onEvent: (payload, open) {
+      // 알림에는 이동에 필요한 ID만 있으므로 상세 내용은 로그인된 API로 다시 조회한다.
+      // 탭으로 열 때는 해당 카메라와 발생일을 선택해 히스토리 화면의 조건도 일치시킨다.
       if (open) {
         container
             .read(selectedDateProvider.notifier)
@@ -54,6 +57,7 @@ void main() {
       container.invalidate(selectedDateProvider);
     }
   });
+  // 화면을 먼저 띄우고 초기화를 진행한다. 라우터는 세션 복원 중 로딩 화면을 보여준다.
   runApp(UncontrolledProviderScope(container: container, child: const MyApp()));
   unawaited(api.restore());
   unawaited(notifications.start());

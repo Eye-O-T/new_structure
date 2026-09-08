@@ -1,3 +1,4 @@
+# 보관 기한이 지난 녹화를 정리하고 저장 공간의 용량과 쓰기 가능 여부를 확인한다.
 """Storage retention operations."""
 
 from __future__ import annotations
@@ -39,6 +40,8 @@ def retention_cleanup(
         _relative, target = normalize_relative_path(
             settings.storage_root, segment["relative_path"]
         )
+        # 파일 삭제와 DB 갱신은 하나의 트랜잭션으로 묶을 수 없다.
+        # 먼저 삭제 중 상태를 기록하여 중단되면 다음 파일 대조 작업이 이어서 처리하도록 한다.
         repository.set_segment_status(segment["id"], "deleting")
         try:
             target.unlink(missing_ok=True)

@@ -1,3 +1,5 @@
+// 모든 JSON API 요청의 로그인 토큰, 만료 갱신, 오류 변환을 한곳에서 처리한다.
+// 영상 데이터 자체의 재생은 ProtectedVideo가 맡으며 이 클래스는 주소와 인증을 제공한다.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -167,6 +169,8 @@ class ApiClient extends ChangeNotifier {
   }
 
   Future<void> refreshSession() async {
+    // 여러 화면의 요청이 동시에 만료되어도 갱신 요청 하나를 함께 기다린다.
+    // 서버에서 refresh 토큰을 교체하므로 같은 토큰으로 중복 갱신하지 않도록 한다.
     if (_refreshing != null) return _refreshing!;
     final future = _performRefresh();
     _refreshing = future;
@@ -179,6 +183,7 @@ class ApiClient extends ChangeNotifier {
 
   Future<void> _performRefresh() async {
     final generation = _generation;
+    // 로그인/로그아웃마다 세대 번호가 바뀐다. 이전 계정의 늦은 응답을 새 세션에 적용하지 않는다.
     final refresh = _refresh;
     if (refresh == null) throw const ApiException(401, '로그인이 필요합니다.');
     try {
@@ -238,6 +243,7 @@ class ApiClient extends ChangeNotifier {
       throw const ApiException(401, '세션이 변경되었습니다.');
     }
     if (response.statusCode == 401) {
+      // 다른 요청이 이미 토큰을 갱신했다면 재사용하고, 인증 실패 재시도는 한 번만 한다.
       if (_access == token) await refreshSession();
       if (body is Map<String, dynamic> && body.containsKey('refresh_token')) {
         body = {...body, 'refresh_token': _refresh};

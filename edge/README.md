@@ -1,42 +1,24 @@
-# AI_CCTV Raspberry Pi Edge
+# Raspberry Pi Edge
 
-## 목차
+카메라 영상을 H.264로 중앙 MediaMTX에 보내며 로컬에도 계속 기록한다. 중앙 연결 장애 중에도 로컬 백업을 유지한다. 대상은 Raspberry Pi OS Bookworm ARM64다. AI 모델은 중앙에서 실행한다.
 
-- [개요](#개요)
-- [빠른 설치](#빠른-설치)
-- [Pairing과 수동 Handoff](#pairing과-수동-handoff)
-- [추론 모델](#추론-모델)
+[설치·Pairing·업데이트](../README.md#edge-연결)와 [패키지 빌드](../README.md#패키지-빌드)를 따른다.
 
-## 개요
+| 위치 | 역할 |
+|---|---|
+| `src/ai_cctv_edge/` | 카메라 송출·설정·제어·복구 |
+| `tests/` | Edge 기능·배포 계약 테스트 |
+| `packaging/` | ARM64 패키지·서비스 설치 |
 
-Raspberry Pi Edge는 Camera 영상을 H.264로 취득해 중앙 MediaMTX에 게시하고, 중앙
-장애 중에는 제한된 MPEG-TS 백업을 유지한다. 소비자 배포 대상은 Raspberry Pi OS
-Bookworm 64-bit이며 설치 파일은 `ai-cctv-edge_<version>_arm64.deb`다.
+공통 테스트 실행은 [개발 안내](../README.md#개발과-검증)를 참고한다.
 
-설치, 중앙–Edge 자격증명 교환, GUI 없이 사용하는 CLI, 업그레이드·제거와 Release
-빌드·검증 절차는 [Edge 설치·배포 가이드](../docs/operations/edge-deployment.md)를
-따른다.
+## Edge 코드 검증
 
-## 빠른 설치
+Raspberry Pi 또는 Python 3.11 개발 환경에서 저장소 루트 기준으로 실행한다. 실제 카메라·GStreamer 검증은 Pi에서 따로 수행한다.
 
-```bash
-sha256sum -c ai-cctv-edge_0.3.0_arm64.deb.sha256
-sudo apt install ./ai-cctv-edge_0.3.0_arm64.deb
-sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-key
-# 중앙 Configurator에서 같은 Key 입력 → Discover Edge → Register Edge and camera
-sudo ai-cctv-edge doctor
-sudo ai-cctv-edge status
+```sh
+python -m pip install -e './edge[test]'
+python -m pytest -c edge/pyproject.toml edge/tests -q
 ```
 
-## Pairing과 수동 Handoff
-
-`pair`는 설정 전 상태에서만 UDP 37020으로 서명된 광고를 보내고 관리 Port 8003에
-임시 Pairing API를 연다. Configurator가 Camera를 등록하고 게시 자격증명을 전달하면
-설정을 원자 저장한 뒤 Pairing을 종료하고 Capture/Control/Recovery Service를 시작한다.
-Broadcast가 차단되면 `export-auth-token`과 `setup --publish-credentials-file`의 기존
-수동 Handoff 절차를 사용한다.
-
-## 추론 모델
-
-추론 모델은 Edge에 두지 않는다. 사용자가 내려받은 호환 모델 파일은 중앙 서버
-Configurator에서 로컬 경로로 선택한다.
+서버와의 프로토콜 연동은 서버 테스트 컨테이너에서도 확인한다. Edge의 OS 패키지·서비스 설치는 `.deb` 패키지가 담당한다.

@@ -1,5 +1,8 @@
 """Version 1 in-process BGR frame input and per-frame person detection output."""
 
+# 탐지 모델을 바꾸어도 카메라 처리 코드가 유지되도록 입력과 출력의 모양을 정한다.
+# 이 계약은 같은 프로세스 안에서 이미지를 전달하며, HTTP로 영상 배열을 보내는 형식은 아니다.
+
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
@@ -15,6 +18,8 @@ class DetectionFrame(BaseModel):
     camera_id: str
     tracking_session_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     observed_at: datetime
+    # OpenCV의 기본 영상은 높이 × 너비 × 3 배열이며 색 순서는 파랑·초록·빨강(BGR)이다.
+    # 큰 영상 배열은 JSON 직렬화와 객체 출력에서 제외한다.
     image: Any = Field(exclude=True, repr=False)
 
     @model_validator(mode="after")
@@ -41,6 +46,8 @@ class DetectionResult(BaseModel):
 
 
 class DetectionProcessor(Protocol):
+    # Protocol은 구현 클래스가 갖춰야 할 함수 모양을 나타낸다.
+    # reset은 영상 재접속 때 이전 추적 상태를 버리고, process는 한 프레임을 처리한다.
     def reset(self) -> None:
         """Discard tracking state when the camera stream starts a new session."""
         ...

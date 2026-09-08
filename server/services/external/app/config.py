@@ -1,3 +1,4 @@
+# 외부 API 주소, JWT, 영상 인증과 선택적 FCM 설정을 환경 변수에서 읽어 검증한다.
 from __future__ import annotations
 
 import json

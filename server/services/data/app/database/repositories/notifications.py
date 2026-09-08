@@ -1,3 +1,4 @@
+# 발송할 알림을 DB에 보관하고 수신 자격 확인과 재시도 일정을 관리한다.
 """Durable push storage owned exclusively by the Data Service.
 
 No Firebase calls occur in a database transaction. Delivery is at-least-once;
@@ -22,6 +23,7 @@ class PushRepositoryMixin:
 
     @staticmethod
     def _eligible_sql() -> str:
+        # 등록 당시 권한만 믿지 않고 현재 로그인·역할·카메라 권한·알림 설정을 다시 확인한다.
         return """
             d.enabled = 1 AND u.is_active = 1 AND u.role = d.role
             AND EXISTS (
@@ -59,8 +61,7 @@ class PushRepositoryMixin:
             ):
                 raise PermissionError("Session is unavailable")
             family = session["family_id"] or session["jti"]
-            # A token belongs to one installation/account. Rebinding cancels
-            # old deliveries rather than leaking a previous account's events.
+            # 단말이 다른 계정으로 바뀌면 이전 발송 예약을 취소해 이전 계정의 이벤트 노출을 막는다.
             connection.execute(
                 "DELETE FROM mobile_devices WHERE token = ? AND device_id != ?",
                 (values["token"], values["device_id"]),
@@ -134,6 +135,8 @@ class PushRepositoryMixin:
         )
 
     def claim_push(self) -> dict[str, Any] | None:
+        # 발송 직전에 수신 자격을 재검사하고 2분 동안 처리 권한을 임대한다.
+        # 실제 FCM 통신은 이 트랜잭션이 끝난 뒤 External에서 수행하여 DB 잠금을 오래 잡지 않는다.
         now = utc_now()
         params = {"now": format_utc(now)}
         with self.database.transaction() as connection:
@@ -191,6 +194,7 @@ class PushRepositoryMixin:
     def complete_push(
         self, delivery_id: int, lease_id: str, outcome: str, error_code: str | None
     ) -> bool:
+        # 작업이 재할당되면 임대 ID가 바뀌므로 이전 발송자의 늦은 완료 보고를 무시할 수 있다.
         now = utc_now()
         with self.database.transaction() as connection:
             row = connection.execute(
@@ -212,6 +216,7 @@ class PushRepositoryMixin:
                 if outcome == "permanent_failure" or row["attempt_count"] >= 8
                 else "pending"
             )
+            # 장애 동안 요청이 몰리지 않도록 재시도 간격을 두 배씩 늘리되 최대 15분으로 제한한다.
             delay = min(900, 30 * 2 ** (row["attempt_count"] - 1))
             connection.execute(
                 "UPDATE push_deliveries SET state=?,next_attempt_at=?,lease_id=NULL,"

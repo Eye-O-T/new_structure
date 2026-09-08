@@ -1,3 +1,6 @@
+# 설치·카메라 관리 화면이다. 버튼 입력을 공통 설정 로직과 관리자 API 호출로 연결한다.
+# 위젯 배치와 별개로 실제 저장·통신 규칙은 config_core와 server_api에 모아 둔다.
+
 from __future__ import annotations
 
 import json
@@ -29,6 +32,7 @@ from .server_api import (
 )
 
 
+# 비밀번호는 한 번만 반환되므로 먼저 저장 위치를 확인하고 교체 요청을 보낸다.
 def rotate_publish_credentials_to_file(
     client: ServerApiClient, camera_id: str, output_path: str | Path
 ) -> dict[str, Any]:
@@ -439,6 +443,7 @@ def run() -> int:
                 "endpoint match. Registration has not been changed.",
             )
 
+        # 중앙에 카메라 등록 후 Edge에 게시 계정을 전달한다. 자동 전달 실패 시 보호 파일로 인계한다.
         def register_edge(self):
             token = self.edge_auth_token.text()
             if not token:
@@ -583,6 +588,7 @@ def run() -> int:
                 )
             )
 
+        # 화면 값을 InstallRequest로 모아 CLI와 같은 초기화 함수를 호출한다.
         def submit(self):
             try:
                 if not self.model.text().strip():

@@ -1,3 +1,5 @@
+# TOML 설정을 타입이 있는 객체로 읽고, 영상 프로필·주소·포트의 유효성을 확인한다.
+# 여기서는 설정의 형식만 검증하며 실제 카메라 지원 여부는 control의 장치 점검이 맡는다.
 from __future__ import annotations
 
 import os
@@ -384,6 +386,8 @@ def render_toml(config: EdgeConfig) -> str:
 
 
 def write_atomic(path: str | Path, text: str, mode: int = 0o640) -> None:
+    # 같은 폴더의 임시 파일을 끝까지 기록한 뒤 교체하여 읽는 쪽에 반쪽짜리 설정이 보이지 않게 한다.
+    # 이 보장은 파일 하나에 대한 것이며 여러 설정 파일 전체를 한 번에 확정하는 기능은 아니다.
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(dir=target.parent, prefix=".tmp-")

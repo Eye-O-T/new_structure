@@ -1,3 +1,5 @@
+// 이벤트 API 응답을 화면에서 쓰는 자료형으로 변환한다. 시각은 UTC로 보관하고 표시할 때만 바꾼다.
+// globalPersonId와 metadata는 서버 작업 결과이며 미설정인 재식별·분석 결과를 앱이 채우지 않는다.
 class Event {
   final String id;
   final String cameraId;

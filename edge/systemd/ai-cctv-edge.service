@@ -1,7 +1,10 @@
+# systemd는 부팅과 프로세스 재시작을 관리하는 Linux 서비스 관리자다.
+# 영상 수집 프로세스를 관리하고 관리·복구 API도 별도 서비스로 함께 시작하도록 요청한다.
 [Unit]
 Description=AI_CCTV Raspberry Pi edge camera
 After=network.target
 Wants=ai-cctv-edge-control.service ai-cctv-edge-recovery.service
+# 초기 설정이 완료된 장치에서만 실행해 예제 주소·인증 값으로 송출하지 않게 한다.
 ConditionPathExists=/etc/ai-cctv-edge/.configured
 
 [Service]
@@ -9,6 +12,7 @@ Type=simple
 User=ai-cctv-edge
 Group=ai-cctv-edge
 ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml run
+# 비정상 종료 시 다시 시작하되 정상 종료 요청은 그대로 유지한다.
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=15
@@ -17,15 +21,17 @@ RuntimeDirectoryPreserve=yes
 StateDirectory=ai-cctv-edge
 LogsDirectory=ai-cctv-edge
 ConfigurationDirectory=ai-cctv-edge
+# 새 파일에 일반 사용자 접근 권한이 생기지 않도록 기본 권한을 제한한다.
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
-# /etc, /usr and boot remain read-only. Other filesystems stay writable so a
-# setup-selected backup mount such as /mnt/cctv can be used by the service.
+# 시스템 설정·프로그램·부팅 영역은 읽기 전용으로 보호한다. /mnt/cctv처럼 초기 설정에서
+# 고른 백업 저장소에는 쓸 수 있도록 그 밖의 파일 시스템까지 읽기 전용으로 만들지는 않는다.
 ProtectSystem=full
 SupplementaryGroups=video
 ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
+# 서비스가 enable된 경우 일반 다중 사용자 부팅 단계에서 자동 시작하도록 연결한다.
 WantedBy=multi-user.target

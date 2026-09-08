@@ -1,3 +1,4 @@
+# 제어·복구 HTTP API에서 사용하는 Bearer 토큰을 읽고 요청마다 검증한다.
 from __future__ import annotations
 
 import hmac
@@ -30,6 +31,7 @@ class BearerAuthenticator:
             scheme, separator, credentials = authorization.partition(" ")
             if separator and scheme.lower() == "bearer":
                 supplied = credentials
+        # 일반 문자열 비교 대신 비교 시간에 따른 토큰 추측을 줄이는 함수를 사용한다.
         if not any(hmac.compare_digest(supplied, token) for token in self.tokens):
             raise HTTPException(
                 status_code=401,

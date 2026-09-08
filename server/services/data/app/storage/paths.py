@@ -1,3 +1,4 @@
+# 받은 파일 경로가 지정된 저장소 안에 있는지 확인해 다른 파일 접근을 막는다.
 """Storage paths operations."""
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from ..errors import ApiError
 
 
 def normalize_relative_path(root: Path, raw_path: str) -> tuple[str, Path]:
-    # pathlib on Linux does not recognize a Windows drive or UNC path as absolute.
+    # Linux는 Windows 드라이브·공유 경로를 절대 경로로 보지 않으므로 별도로 검사한다.
     windows_path = PureWindowsPath(raw_path)
     if windows_path.is_absolute() or windows_path.drive:
         raise ApiError(422, "INVALID_STORAGE_PATH", "저장 경로는 상대 경로여야 합니다.")

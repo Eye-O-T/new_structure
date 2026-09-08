@@ -19,7 +19,7 @@
 
 `DataRepository`는 도메인별 mixin을 명시적으로 조합합니다. 이벤트 저장, 녹화 연결, 푸시 대기열 생성, 객체 분석 작업 생성은 하나의 연결과 트랜잭션에서 실행하며 어느 단계든 실패하면 함께 롤백합니다. 파일 작업·외부 HTTP 요청·Firebase 발송은 해당 트랜잭션 안에서 실행하지 않습니다.
 
-객체 관측과 작업 결과의 공통 계약은 `src/ai_cctv_core/contracts/objects.py`에 있습니다. DB를 다른 서비스에서 직접 읽거나 쓰지 않고 `/internal/v1` API를 사용합니다.
+객체 관측과 작업 결과의 공통 계약은 `lib/ai_cctv_core/contracts/objects.py`에 있습니다. DB를 다른 서비스에서 직접 읽거나 쓰지 않고 `/internal/v1` API를 사용합니다.
 
 ## 실행과 인증
 
@@ -31,10 +31,10 @@
 
 ## 검증
 
-저장소 루트에서 다음을 실행합니다.
+개발 Compose로 기동한 뒤 저장소 루트에서 다음을 실행합니다.
 
 ```text
-python -m pytest server/services/data/tests -q -p no:cacheprovider
+docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec data python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/data/tests -q
 ```
 
-서비스 간 연동·복구·푸시·객체 처리 테스트는 루트 `tests/`에서 함께 실행합니다. 운영 DB와 운영 저장소에 테스트를 실행하지 않습니다.
+서비스 간 연동·복구·푸시·객체 처리 테스트는 루트 `tests/automated/`에서 함께 실행합니다. 운영 DB와 운영 저장소에 테스트를 실행하지 않습니다.

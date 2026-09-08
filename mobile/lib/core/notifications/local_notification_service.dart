@@ -1,3 +1,5 @@
+// 앱이 화면에 떠 있을 때 받은 FCM도 Android 알림으로 보여주고 탭 정보를 다시 앱에 전달한다.
+// 잠금 화면에 사건 상세나 영상이 드러나지 않도록 알림 문구는 일반 안내만 사용한다.
 import 'dart:convert';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'notification_payload.dart';

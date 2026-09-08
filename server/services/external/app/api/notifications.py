@@ -1,3 +1,4 @@
+# 로그인한 사용자 자신의 단말만 알림 수신 대상으로 등록하거나 해제하도록 한다.
 """Authenticated device registration; clients cannot select another owner."""
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ class DeviceRegistration(BaseModel):
     refresh_token: SecretStr = Field(min_length=1, max_length=8192)
     platform: Literal["android", "ios"]
     enabled: bool
-    # null = all types; [] = none. The app supplies its selected preference.
+    # null은 모든 이벤트, 빈 목록은 수신 안 함을 뜻한다. 앱에서 선택한 설정을 그대로 받는다.
     event_types: list[str] | None = Field(max_length=100)
 
     @field_validator("token")
@@ -65,6 +66,7 @@ async def register_device(
     data: DataClient = Depends(get_data_client),
 ) -> dict:
     encoded = payload.refresh_token.get_secret_value()
+    # FCM 단말 토큰만으로는 소유자를 알 수 없어 현재 사용자의 로그인 세션까지 함께 확인한다.
     try:
         claims = decode_token(encoded, settings, expected_type="refresh")
         record = await data.get_refresh_token(claims.jti)

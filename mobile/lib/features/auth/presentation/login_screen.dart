@@ -1,3 +1,5 @@
+// 서버 주소·계정을 입력받아 공용 API 세션을 만든다. 성공 후 화면 이동은 라우터가 처리한다.
+// 비밀번호 입력값은 성공 시 비우며 로그인 유지에는 비밀번호 대신 토큰을 사용한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/config/api_config.dart';

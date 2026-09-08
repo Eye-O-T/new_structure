@@ -1,3 +1,6 @@
+# GUI와 CLI가 동일한 Docker Compose 명령을 만들도록 실행 방법을 모은 어댑터다.
+# 배포 env의 위치를 유지해야 새 프로젝트나 잘못된 저장소로 연결되는 일을 막을 수 있다.
+
 from __future__ import annotations
 
 import os
@@ -26,6 +29,7 @@ def default_data_root() -> Path:
     return Path.home() / ".local" / "share" / "AI_CCTV"
 
 
+# 소스 실행과 설치된 실행 파일의 설정 위치가 다르므로 명시한 경로를 우선 선택한다.
 def default_compose_env(server_dir: str | Path | None = None) -> Path:
     configured = os.getenv("AI_CCTV_COMPOSE_ENV_FILE")
     if configured:
@@ -136,6 +140,7 @@ class ComposeAdapter:
             else default_compose_env(self.server_dir)
         )
 
+    # FCM이 켜져 있으면 기본 env와 푸시 env를 함께 넣어 시작·중지·조회가 같은 구성을 사용하게 한다.
     def command(self, *arguments: str) -> list[str]:
         command = [
             "docker",
@@ -156,6 +161,7 @@ class ComposeAdapter:
             ]
         return [*command, *arguments]
 
+    # 서비스를 띄우기 전에 설정·모델·인증서가 실제 파일인지 확인한다. 실행 성공까지 보장하는 검사는 아니다.
     def deployment_prerequisites(self) -> list[Prerequisite]:
         results = installation_prerequisites(self.server_dir)
         if not self.env_file.is_file():

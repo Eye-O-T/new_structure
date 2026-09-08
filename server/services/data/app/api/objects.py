@@ -1,3 +1,4 @@
+# 최신 객체 좌표와 인물 식별·분석 작업의 가져오기, 완료 보고를 제공한다.
 """Internal objects API."""
 
 from __future__ import annotations

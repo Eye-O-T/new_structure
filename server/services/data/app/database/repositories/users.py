@@ -1,3 +1,4 @@
+# 계정과 카메라 열람 권한을 SQL로 관리한다. 비밀번호는 원문이 아닌 해시를 저장한다.
 """Users persistence and SQL operations."""
 
 from __future__ import annotations

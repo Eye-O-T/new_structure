@@ -1,3 +1,4 @@
+# 카메라 권한을 확인한 뒤 모바일의 박스·인물 ID 표시에 필요한 최신 객체 정보를 반환한다.
 from __future__ import annotations
 
 from typing import Any

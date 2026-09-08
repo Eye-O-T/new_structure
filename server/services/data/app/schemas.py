@@ -1,3 +1,4 @@
+# 내부 API 자료의 형식과 범위를 정의하여 잘못된 값이 DB에 들어가기 전에 거른다.
 """Validated request contracts for the internal Data API."""
 
 from __future__ import annotations

@@ -1,5 +1,7 @@
 """Authenticated LAN discovery and one-time Edge provisioning."""
 
+# 같은 LAN에서 Edge를 발견하고 중앙 주소·송출 인증을 한 번 등록하는 절차를 제공한다.
+# UDP 광고의 HMAC 서명은 변조를 확인하기 위한 것이며 광고 내용 자체를 암호화하지 않는다.
 from __future__ import annotations
 
 import hashlib
@@ -38,6 +40,7 @@ MAX_DISCOVERY_PACKET = 8192
 
 
 def _canonical_payload(message: dict[str, object]) -> bytes:
+    # 양쪽에서 JSON 키 순서와 공백을 같게 만들어야 같은 내용에 동일한 서명이 계산된다.
     return json.dumps(
         message,
         ensure_ascii=False,
@@ -262,6 +265,7 @@ class PairingSession:
             ),
         )
         config.validate()
+        # 완료 표시를 마지막에 남겨, 설정이 모두 기록되기 전에 서비스가 시작되지 않게 한다.
         write_atomic(password_file, request.publish_password + "\n", mode=0o640)
         write_atomic(self.config_path, render_toml(config), mode=0o640)
         write_atomic(self.marker_path, "configured\n", mode=0o644)

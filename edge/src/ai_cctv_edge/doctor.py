@@ -1,3 +1,5 @@
+# 실행 전에 필요한 시스템 명령·GStreamer 플러그인·경로를 점검하고 원인을 알려준다.
+# 이 점검 통과만으로 카메라 송출이나 중앙 서버와의 실제 통신까지 성공했다고 판단하지 않는다.
 from __future__ import annotations
 
 import shutil

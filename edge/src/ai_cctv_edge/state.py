@@ -1,3 +1,5 @@
+# 캡처와 제어 프로세스가 공유하는 상태 파일·영상 설정·이벤트 일지를 관리한다.
+# 재시작 후에도 필요한 확정 설정(state)과 현재 실행에만 유효한 요청(runtime)을 구분한다.
 from __future__ import annotations
 
 import json
@@ -210,6 +212,7 @@ class EventJournal:
 
     @contextmanager
     def _process_lock(self, *, exclusive: bool):
+        # 스레드 Lock은 같은 프로세스에만 적용되므로 Linux 파일 잠금으로 프로세스 사이도 조정한다.
         self.root.mkdir(parents=True, exist_ok=True)
         with self.lock_path.open("a+b") as handle:
             if fcntl is not None:
@@ -247,6 +250,7 @@ class EventJournal:
         return payload
 
     def _compact_if_needed(self) -> None:
+        # 일지는 무한 저장소가 아니다. 크기 제한을 넘으면 최근 기록을 남기고 앞부분을 정리한다.
         try:
             if self.path.stat().st_size <= self.max_bytes:
                 return

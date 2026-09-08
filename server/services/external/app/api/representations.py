@@ -1,3 +1,4 @@
+# Data의 사용자 정보에서 비밀번호 해시 등 비공개 값을 빼고 공개 응답을 만든다.
 """Public user fields, excluding credentials and private Data attributes."""
 
 from typing import Any

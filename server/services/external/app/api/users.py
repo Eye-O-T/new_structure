@@ -1,3 +1,4 @@
+# 관리자만 사용자 계정과 카메라별 열람 권한을 변경하도록 하는 공개 API이다.
 from __future__ import annotations
 
 from typing import Any

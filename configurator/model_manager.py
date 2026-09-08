@@ -1,3 +1,6 @@
+# 사용자가 준비한 모델 파일을 검증하고 운영 models 폴더로 복사한다.
+# 모델을 자동 다운로드하거나 추론 정확도를 검사하는 코드는 아니다.
+
 from __future__ import annotations
 
 import hashlib
@@ -31,6 +34,7 @@ def _validated_local_model(path: Path) -> Path:
     return source.resolve()
 
 
+# SHA-256은 파일 내용의 지문이다. 복사 전후 지문을 비교해 복사 중 변경·손상을 확인한다.
 def install_local_model(source_path: Path, models_root: Path) -> Path:
     """Atomically copy a user-selected model and verify the copied bytes.
 

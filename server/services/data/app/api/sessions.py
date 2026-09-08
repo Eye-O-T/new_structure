@@ -1,3 +1,4 @@
+# 로그인 갱신 토큰과 폐기된 접근 토큰을 저장하여 로그아웃과 토큰 교체를 지원한다.
 """Internal sessions API."""
 
 from __future__ import annotations

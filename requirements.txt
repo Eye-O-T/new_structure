@@ -1,2 +1,0 @@
-# Local Configurator and shared core. Server images use service requirements.
--e .[configurator]

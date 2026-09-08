@@ -1,3 +1,5 @@
+# Python 프로그램을 실행 파일로 묶은 뒤 Windows 설치 프로그램과 검증용 해시를 만든다.
+# 개발용 가상환경과 빌드용 가상환경을 분리해 개발 중 설치한 패키지의 영향을 줄인다.
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:\.\d+)?$')]
@@ -24,6 +26,7 @@ $cliSpec = Join-Path $packagingRoot 'ai_cctv_cli.spec'
 $innoScript = Join-Path $packagingRoot 'AI_CCTV_Server.iss'
 
 function Invoke-Checked {
+    # 외부 도구의 종료 코드를 확인해 앞 단계가 실패한 상태로 다음 빌드를 진행하지 않는다.
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string[]]$ArgumentList
@@ -41,7 +44,7 @@ function Find-BootstrapPython {
         }
         return (Resolve-Path -LiteralPath $PythonExecutable).Path
     }
-    $workspacePython = Join-Path $repositoryRoot '.venv\Scripts\python.exe'
+    $workspacePython = Join-Path $repositoryRoot 'configurator\.venv\Scripts\python.exe'
     if (Test-Path -LiteralPath $workspacePython) {
         return $workspacePython
     }
@@ -84,7 +87,15 @@ foreach ($requiredFile in @(
     $guiSpec,
     $cliSpec,
     $innoScript,
-    (Join-Path $repositoryRoot 'docs\operations\windows-installer.md')
+    (Join-Path $repositoryRoot 'lib\pyproject.toml'),
+    (Join-Path $repositoryRoot 'configurator\pyproject.toml'),
+    (Join-Path $repositoryRoot 'tests\runner\ruff.toml'),
+    (Join-Path $repositoryRoot 'README.md'),
+    (Join-Path $repositoryRoot 'mobile\README.md'),
+    (Join-Path $repositoryRoot 'docs\architecture.md'),
+    (Join-Path $repositoryRoot 'docs\SRS_interface_preprocessing.md'),
+    (Join-Path $repositoryRoot 'docs\SRS_interface_analysis.md'),
+    (Join-Path $repositoryRoot 'docs\openapi.yaml')
 )) {
     if (-not (Test-Path -LiteralPath $requiredFile)) {
         throw "Required packaging input is missing: $requiredFile"
@@ -94,6 +105,7 @@ foreach ($requiredFile in @(
 $compiler = Find-InnoCompiler
 New-Item -ItemType Directory -Force -Path $buildRoot, $distRoot, $installerDist | Out-Null
 $bootstrapPython = Find-BootstrapPython
+# 실행 파일에 포함될 Python 버전을 고정해야 빌드 PC마다 호환성이 달라지는 일을 줄일 수 있다.
 $bootstrapVersion = (& $bootstrapPython -c 'import sys; print(sys.version_info.major, sys.version_info.minor, sep=chr(46))').Trim()
 if ($LASTEXITCODE -ne 0 -or $bootstrapVersion -ne '3.11') {
     throw "Bootstrap Python must be version 3.11; found $bootstrapVersion."
@@ -118,7 +130,8 @@ if (-not $SkipDependencyInstall) {
     )
     Invoke-Checked $buildPython @(
         '-m', 'pip', 'install', '--disable-pip-version-check',
-        "${repositoryRoot}[configurator,test]"
+        (Join-Path $repositoryRoot 'lib'),
+        "$(Join-Path $repositoryRoot 'configurator')[test]"
     )
 }
 else {
@@ -131,15 +144,17 @@ Push-Location $repositoryRoot
 try {
     if (-not $SkipTests) {
         Invoke-Checked $buildPython @(
-            '-m', 'pytest', '-q',
-            'tests\test_configurator.py', 'tests\test_windows_packaging.py'
+            '-m', 'pytest', '-q', '-c', 'configurator\pyproject.toml',
+            'configurator\tests\test_configurator.py', 'configurator\tests\test_windows_packaging.py'
         )
         Invoke-Checked $buildPython @(
-            '-m', 'ruff', 'check', 'configurator',
-            'tests\test_configurator.py', 'tests\test_windows_packaging.py'
+            '-m', 'ruff', 'check', '--config', 'tests\runner\ruff.toml', 'configurator',
+            'configurator\tests\test_configurator.py', 'configurator\tests\test_windows_packaging.py'
         )
     }
 
+    # PyInstaller는 Python 실행 환경과 의존성을 함께 묶는다. GUI와 CLI는 진입점과
+    # 콘솔 사용 방식이 달라 각 spec 파일로 별도의 실행 파일을 만든다.
     foreach ($spec in @($guiSpec, $cliSpec)) {
         Invoke-Checked $buildPython @(
             '-m', 'PyInstaller', '--clean', '--noconfirm',
@@ -156,12 +171,14 @@ try {
         }
     }
 
+    # Inno Setup은 실행 파일, 서버 코드, 바로가기와 제거 절차를 하나의 설치 파일로 묶는다.
     Invoke-Checked $compiler @("/DMyAppVersion=$Version", $innoScript)
 
     $installer = Join-Path $installerDist "AI_CCTV_Server_Setup_${Version}_x64.exe"
     if (-not (Test-Path -LiteralPath $installer)) {
         throw "Inno Setup did not create the expected installer: $installer"
     }
+    # SHA-256은 배포 파일이 다운로드·복사 중 달라졌는지 비교할 수 있는 파일 지문이다.
     $checksumPath = "${installer}.sha256"
     $checksum = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
     Set-Content -LiteralPath $checksumPath -Encoding ascii -NoNewline -Value (

@@ -1,3 +1,6 @@
+# Configurator가 중앙 HTTPS 관리자 API를 호출하는 클라이언트다.
+# JWT는 요청 인증용이고 일회성 RTSP 계정은 Edge 전달용이므로 저장·표시 경로를 구분한다.
+
 """Authenticated management client shared by the Configurator GUI and CLI."""
 
 from __future__ import annotations
@@ -72,6 +75,7 @@ class ServerApiError(RuntimeError):
         self.details = details
 
 
+# 중첩된 응답에서도 비밀번호·토큰을 제거해 GUI와 콘솔에 노출되지 않게 한다.
 def redact_for_display(value: Any) -> Any:
     """Recursively remove secrets before a response reaches UI or console output."""
 
@@ -91,6 +95,7 @@ def redact_for_display(value: Any) -> Any:
     return value
 
 
+# 중앙이 비밀번호를 한 번만 돌려주므로 요청 전에 파일 저장 가능 여부를 확인한다.
 def prepare_private_output(path: Path) -> Path:
     """Validate a private output location before requesting a one-time secret."""
 
@@ -108,6 +113,7 @@ def prepare_private_output(path: Path) -> Path:
     return target
 
 
+# 응답의 카메라를 대조하고 필요한 게시 계정만 보호 파일로 저장한다.
 def write_publish_credentials(
     response: Mapping[str, Any], camera_id: str, path: Path
 ) -> Path:

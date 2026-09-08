@@ -1,3 +1,4 @@
+# Edge 상태·이벤트 조회와 영상 설정 요청을 보내고 통신 실패를 API용 오류로 바꾼다.
 """Authenticated HTTP client for Edge status, event and video control APIs."""
 
 from __future__ import annotations

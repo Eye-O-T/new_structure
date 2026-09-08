@@ -27,8 +27,8 @@
 저장소 루트에서 전체 중앙 서비스와 함께 실행합니다.
 
 ```sh
-docker compose --env-file server/.env -f server/compose.yml up --build external
-python -m pytest server/services/external/tests -q -p no:cacheprovider
+docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml up -d --build
+docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec external python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/external/tests -q
 ```
 
 설정 파일과 인증키는 실제 설치에서 생성한 값을 사용합니다. 컨테이너는 `app.main:app`을 실행하고, `/health/live`는 프로세스 상태, `/health/ready`는 Data 통신 상태를 확인합니다. 서비스 간 인증키·JWT·영상 자격 증명 설정은 `app/config.py`와 서버 설정 예시를 기준으로 합니다.
@@ -42,4 +42,4 @@ python -m pytest server/services/external/tests -q -p no:cacheprovider
 - FCM은 설정 시에만 실행합니다. SDK 오류·기기 토큰·서비스 계정 내용을 로그에 남기지 않습니다.
 - 실제 Firebase·Android 단말·영상 전송 검증은 자동 테스트와 별개입니다.
 
-관련 문서: [모바일/API 연동](../../../docs/external-app-integration.md), [FCM 설정](../../../docs/mobile-push.md), [설계](../../../docs/design/ARCHITECTURE.md).
+관련 문서: [모바일/API 연동](../../../docs/openapi.yaml), [FCM 설정](../../../README.md#모바일과-푸시), [설계](../../../docs/architecture.md).

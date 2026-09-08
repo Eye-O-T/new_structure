@@ -1,3 +1,4 @@
+# Edge에 남은 녹화를 복구한다. 수동 실행과 백그라운드 작업이 같은 복구 절차를 쓴다.
 """One-shot central coordinator for importing Edge recovery segments.
 
 Run this module inside the existing Data container.  It intentionally does not
@@ -363,6 +364,7 @@ class RecoveryCoordinator:
         return central_relative, destination
 
     def _download(self, item: ManifestItem, destination: Path) -> None:
+        # 내려받는 중인 파일은 .part로 분리해 불완전한 영상이 재생 목록에 나타나지 않게 한다.
         destination.parent.mkdir(parents=True, exist_ok=True)
         request = Request(
             (
@@ -422,6 +424,7 @@ class RecoveryCoordinator:
 
             if total != item.size:
                 raise RecoveryError("Edge file size does not match manifest")
+            # 크기뿐 아니라 내용의 지문(SHA-256)도 맞아야 정상 파일 이름으로 교체한다.
             if not hmac.compare_digest(digest.hexdigest(), item.sha256):
                 raise RecoveryError("Edge file SHA-256 verification failed")
             os.chmod(temporary, 0o640)
@@ -513,6 +516,7 @@ class RecoveryCoordinator:
             if not indexing_reported and self._progress_callback is not None:
                 self._progress_callback("indexing")
                 indexing_reported = True
+            # 검증된 파일이 준비된 뒤 DB에 등록한다. 같은 키로 재요청해도 중복 등록되지 않는다.
             indexed = self._index(item, central_relative)
             if isinstance(indexed, dict) and indexed.get("idempotent_replay") is True:
                 idempotent_replays += 1
@@ -667,8 +671,7 @@ def execute_recovery(
 
 
 async def recover_outages(repository: DataRepository, settings: Settings) -> None:
-    # Lifespan starts before Uvicorn accepts requests; the coordinator
-    # indexes through the loopback internal API, so allow it to open.
+    # 복구 결과는 자체 내부 API로 등록한다. 시작 직후에는 HTTP 서버가 열릴 시간을 준다.
     await asyncio.sleep(settings.recovery_poll_interval_seconds)
     while True:
         job = await asyncio.to_thread(repository.claim_due_recovery_job)

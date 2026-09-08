@@ -1,3 +1,4 @@
+# Data 서버의 시작·종료를 관리하고 내부 API와 녹화 정리·Edge 복구 작업을 실행한다.
 """FastAPI lifecycle and router composition for the Data service."""
 
 from __future__ import annotations
