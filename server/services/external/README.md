@@ -1,45 +1,37 @@
 # External 서비스
 
-모바일·Configurator의 공개 API, 사용자 인증, 카메라 접근 권한, Edge 상태 수집과 FCM 발송을 담당합니다. SQLite에 직접 접근하지 않고 `clients/data.py`를 통해 Data 내부 API를 호출합니다.
+모바일·Configurator가 사용하는 API다. 사용자 인증, 카메라 접근 권한, Edge 상태 수집과 Firebase Cloud Messaging(FCM) 푸시 발송을 담당한다. SQLite에 직접 접근하지 않고 Data 내부 API를 호출한다.
 
 ## 코드 구성
 
 | 경로 | 역할 |
 |---|---|
-| `app/main.py` | FastAPI 생성, 라우터·오류 처리 등록, 백그라운드 작업 시작·종료 |
+| `app/main.py` | 서버·백그라운드 작업 시작과 종료 |
 | `app/api/` | 인증·사용자·카메라·이벤트·녹화·객체·알림·영상 인증 API |
-| `app/api/validation.py` | 리소스 ID·시간 범위 등 공통 요청 검증 |
-| `app/api/representations.py` | 비밀번호 등 내부 필드를 제외한 공개 사용자 응답 |
-| `app/security/` | Argon2 비밀번호, JWT, 로그인 실패 지연, 사용자·카메라 권한 검사 |
+| `app/security/` | 비밀번호·토큰·사용자·카메라 권한 검사 |
 | `app/clients/` | Data·Edge·MediaMTX 통신과 응답 오류 변환 |
-| `app/notifications/firebase.py` | Firebase SDK에만 의존하는 발송 어댑터 |
+| `app/notifications/firebase.py` | Firebase 발송 연결부 |
 | `app/workers/` | Edge 상태·이벤트 수집, Data 푸시 대기열 발송 |
-| `app/camera_lifecycle.py` | 카메라 등록·비활성화·인증키 교체·미디어 게시 인증의 동시 실행 제어 |
-| `app/dependencies.py` | 요청에 설정·클라이언트·공유 잠금 제공 |
-| `app/errors.py` | 내부 오류·검증 입력의 민감 정보가 공개 응답에 유출되지 않도록 변환 |
+| `app/camera_lifecycle.py` | 카메라 변경과 영상 인증이 동시에 실행될 때의 순서 제어 |
 | `app/schemas.py` | 공개 API 요청·응답 모델 |
-| `tests/` | 서비스 동작·인증·영상 권한·동시 실행 검증 |
+| `tests/` | API·인증·영상 권한·동시 실행 검증 |
 
-`api/recordings.py`는 관리자 녹화 복구 작업 조회도 제공합니다. 시스템 상태 조회는 `api/health.py`에 있습니다. 앱 공개 계약은 `/api/v1/openapi.json`과 `/api/v1/docs`에서 확인합니다.
+모바일을 새로 구현할 때는 [OpenAPI](../../../docs/openapi.yaml)를 기준으로 한다. 실행 중인 서버에서는 공개 HTTPS 주소 뒤에 `/api/v1/docs`를 붙이면 요청·응답을 확인할 수 있다.
 
 ## 실행과 검증
 
-저장소 루트에서 전체 중앙 서비스와 함께 실행합니다.
+[개발 환경](../../../README.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```sh
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml up -d --build
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec external python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/external/tests -q
 ```
 
-운영과 분리한 개발용 설정·인증키를 사용합니다. `/health/live`는 프로세스 상태, `/health/ready`는 Data 통신 상태를 확인합니다. 서비스 간 인증키·JWT·영상 자격 증명 설정은 `app/config.py`와 서버 설정 예시를 기준으로 합니다.
+기본 비밀 설정 파일은 `server/secrets/external.env`다. `/health/live`는 프로세스 상태, `/health/ready`는 Data 통신 상태다. 이 내부 점검 주소가 아닌 공개 `/api/v1/system/status`는 관리자 인증 후 조회한다.
 
 ## 유지해야 하는 경계
 
-- Nginx의 영상 권한 확인과 MediaMTX의 게시·읽기 인증은 `api/media_auth.py`가 처리합니다. 허용 카메라·URI 검증을 우회하는 별도 공개 경로를 추가하지 않습니다.
-- 카메라 비활성화·삭제·게시 인증키 교체와 MediaMTX 인증은 같은 제한 크기 잠금 풀을 사용합니다. 카메라 제어 경로를 변경할 때 이 순서를 유지합니다.
-- 로그인은 보안 쿠키와 모바일용 토큰 응답을 지원합니다. 토큰 갱신은 Data의 회전 세션을 사용하고, 로그아웃은 관련 토큰·기기 수신을 해제합니다.
-- 이벤트 저장·푸시 작업 생성·발송 재시도 상태는 Data가 관리합니다. External은 발송 작업을 임대하고 결과만 반환합니다.
-- FCM은 설정 시에만 실행합니다. SDK 오류·기기 토큰·서비스 계정 내용을 로그에 남기지 않습니다.
-- 실제 Firebase·Android 단말·영상 전송 검증은 자동 테스트와 별개입니다.
+- Nginx·MediaMTX는 `app/api/media_auth.py`를 통해 영상 접근 권한을 확인한다. 카메라 변경·인증이 동시에 실행되어도 비활성 카메라가 허용되지 않도록 기존 순서 제어를 유지한다.
+- 이벤트·푸시 대기열·재시도 상태는 Data가 저장한다. External은 대기 작업을 받아 발송하고 결과를 보고한다.
+- FCM 발송은 별도 설정이 필요하다. 서버 기동만으로 푸시가 활성화되지는 않는다. 설정과 실제 단말 확인은 [모바일과 푸시](../../../README.md#모바일과-푸시)를 따른다.
 
-관련 문서: [모바일/API 연동](../../../docs/openapi.yaml), [FCM 설정](../../../README.md#모바일과-푸시), [설계](../../../docs/architecture.md).
+전체 통신 흐름은 [구조 문서](../../../docs/architecture.md), 서비스 간 검증은 [서버 자동 테스트](../../../README.md#서버-자동-테스트)를 따른다.

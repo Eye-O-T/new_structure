@@ -6,7 +6,7 @@ Raspberry Pi가 영상을 보내면 중앙 서버가 녹화·감지하고, Andro
 
 | 구성 | 역할 | 코드 |
 |---|---|---|
-| MediaMTX | RTSP 수신, HLS, 녹화·재생 | `server/services/mediamtx/` |
+| MediaMTX | 영상 수신(RTSP), 실시간 재생(HLS), 녹화·재생 | `server/services/mediamtx/` |
 | Preprocessing | 사람 감지·카메라별 추적·박스, 전역 인물 연결 | `server/services/preprocessing/` |
 | Analysis | 객체에 metadata 추가 | `server/services/analysis/` |
 | Data | SQLite, 이벤트·작업·파일 정보, 복구·보관 기간 관리 | `server/services/data/` |
@@ -15,7 +15,7 @@ Raspberry Pi가 영상을 보내면 중앙 서버가 녹화·감지하고, Andro
 
 Edge(`edge/`), Android 앱(`mobile/`), 설치 GUI/CLI(`configurator/`)는 별도 프로그램이다. `lib/ai_cctv_core/`에는 공유 설정·입출력 계약·객체 작업 실행기가 있다. `server/scripts/`에는 초기 설정 생성·진단·백업·이관 도구가 있다.
 
-감지는 YOLO/ByteTrack 기본 구현을 사용한다. **전역 인물 연결과 metadata 분석은 다른 담당자가 구현할 블랙박스**이며 기본 결과는 `unconfigured`다. 교체 대상은 [Preprocessing](SRS_interface_preprocessing.md), [Analysis](SRS_interface_analysis.md), [모바일](openapi.yaml)이다. 다른 중앙 컨테이너는 현행 구현을 유지하며 별도 교체 규약을 두지 않는다.
+감지는 YOLO/ByteTrack 기본 구현을 사용하며 모델 파일을 별도로 준비해야 한다. **전역 인물 연결과 metadata 분석은 입출력만 갖춘 블랙박스**로, 실제 알고리즘 대신 `unconfigured`를 반환한다. 다른 코드를 유지하며 교체할 수 있는 범위는 [Preprocessing](SRS_interface_preprocessing.md), [Analysis](SRS_interface_analysis.md), [모바일](openapi.yaml) 규약에 정리했다.
 
 ## 통신
 
@@ -32,7 +32,8 @@ flowchart LR
     App[Android] -->|HTTPS| Nginx
     Nginx --> External
     Nginx -->|HLS·재생| MediaMTX
-    External -->|FCM| App
+    External -->|알림 발송| FCM[Firebase 외부 서비스]
+    FCM -->|푸시| App
 ```
 
 그림은 기능 흐름이다. 실제 주소와 경유지는 다음과 같다.
@@ -49,7 +50,7 @@ flowchart LR
 | Data → Edge 복구 파일 | 기본 HTTP 8002, Edge Bearer 토큰 |
 | Data 내부 복구 작업 → Segment 등록 | 자기 컨테이너의 `127.0.0.1:8000/internal/v1` |
 
-하나의 Docker bridge를 공유한다. 내부 HTTP·RTSP는 암호화하지 않으며 모든 통신의 Nginx 경유를 네트워크가 강제하지는 않는다. 80/443과 필요한 신뢰 LAN의 8554만 호스트에 연결한다. Edge 8002/8003과 Pairing UDP 37020은 신뢰 LAN에서 사용한다. 기본 호스트 bind는 loopback이다.
+여섯 컨테이너는 하나의 Docker bridge 네트워크를 공유한다. 네트워크 이름 `internal`은 외부 통신 차단 설정이 아니며 External의 Firebase 접속도 이 네트워크를 사용한다. 내부 HTTP·RTSP는 암호화하지 않고 Nginx 경유를 네트워크가 강제하지는 않는다. 서버 호스트에는 80/443과 RTSP 8554만 연결하며 기본값은 해당 PC에서만 접속 가능한 `127.0.0.1`이다. Edge의 HTTP 8002/8003과 장치 검색용 Pairing UDP 37020은 신뢰 LAN에서 사용한다.
 
 Data 토큰은 External·감지·인물 연결·Analysis·Media·Recovery의 6개 역할로 분리한다. `data.env`는 검증용 전체 토큰, `preprocessing.env`는 감지·인물 연결 두 토큰, `analysis.env`·`external.env`·`media.env`는 각 역할 토큰을 받는다. RTSP 읽기 계정은 External과 Preprocessing이 공유하며 사용자 JWT·카메라 게시 계정과 별개다. 실제 파일 생성은 [설치 안내](../README.md#소스-배포)를 따른다.
 
@@ -64,7 +65,7 @@ Data 토큰은 External·감지·인물 연결·Analysis·Media·Recovery의 6�
 - 운영 카메라 정보는 Data DB가 기준이다. `config.yaml`의 카메라 목록은 초기 등록·복구 입력이다.
 - DB·영상·모델·설정은 호스트에 저장하여 컨테이너 재생성과 분리한다. 마운트 권한은 Compose, 보존·복원 절차는 [운영과 백업](../README.md#운영과-백업)을 따른다.
 
-MediaMTX는 1.9.0 기준으로 고정한다. 모델 장애 중에도 HLS와 녹화는 계속 동작해야 한다. 객체와 푸시 작업은 HTTP로 수신·완료 처리하며 별도 메시지 브로커는 없다. 인물 연결·분석의 완료 순서는 보장되지 않고, 후속 metadata 갱신은 새 이벤트나 추가 푸시를 만들지 않는다.
+MediaMTX는 1.9.0 기준으로 고정한다. 모델 장애 중에도 HLS와 녹화는 계속 동작한다. 객체 작업은 Preprocessing·Analysis가 Data의 HTTP API를 주기적으로 호출해 가져가고 결과를 보고한다. 푸시 작업도 External이 Data에서 가져가며 별도 메시지 브로커는 없다. 인물 연결·분석의 완료 순서는 보장되지 않고, 후속 metadata 갱신은 새 이벤트나 추가 푸시를 만들지 않는다.
 
 | 호스트 저장소 | 컨테이너의 접근 |
 |---|---|
@@ -96,9 +97,8 @@ MediaMTX는 1.9.0 기준으로 고정한다. 모델 장애 중에도 HLS와 녹�
 | 카메라 | 최대 4개 활성, 기본 HD 1280×720/30fps·2Mbps; 지원 장치만 FHD 1920×1080/30fps·4Mbps |
 | 영상 | 실시간 HLS, 중앙 녹화·복구 MPEG-TS 재생 |
 | 객체 | 카메라별 사람 추적, 박스·크롭, 전역 ID·metadata 확장 계약 |
-| 모바일 | Android 우선; 박스는 최신 좌표 표시이며 HLS 프레임과 정확히 동기화되지 않음 |
+| 모바일 | Android 우선, iOS 제품화 미완료; 박스는 최신 좌표 표시이며 HLS 프레임과 정확히 동기화되지 않음 |
 | 알림 | 선택적 FCM, 모든 이벤트 기본 수신; Firebase 파일·단말 연결 필요 |
-| 미구현 | 실제 재식별·metadata 알고리즘, Discord·MQTT, 저장 영상 암호화, iOS 제품화 |
 
 [개발·검증](../README.md#개발과-검증)에서 자동 테스트와 실제 장비 확인을 구분한다.
 

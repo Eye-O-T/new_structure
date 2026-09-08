@@ -2,6 +2,8 @@
 
 Analysis는 사람 이미지와 관측 정보를 받아 의상·행동 등 추가 분석 결과를 `metadata.analysis`에 기록하는 컨테이너다. 이 문서는 다른 언어·모델로 구현해도 나머지 서비스를 수정하지 않고 연결하기 위한 규약이다. 전체 흐름은 [구조 문서](architecture.md), 감지·전역 인물 연결은 [Preprocessing 규약](SRS_interface_preprocessing.md)을 따른다.
 
+현재 기본 분석기는 입출력만 갖춘 블랙박스로 `unconfigured`를 반환한다. 의상·행동 분석 모델은 포함되어 있지 않다.
+
 ## 1. 역할과 배포 경계
 
 - Data의 `analysis` 작업만 가져와 분석하고 결과를 돌려준다. SQLite를 직접 열거나 이벤트·푸시·실시간 좌표를 생성하지 않는다.
@@ -24,7 +26,7 @@ Analysis는 사람 이미지와 관측 정보를 받아 의상·행동 등 추�
 
 ## 2. 작업 가져오기와 입력
 
-아래 세 API는 모두 `DATA_SERVICE_URL` 뒤에 경로를 붙인 **POST**다. `claim`과 `requeue-unconfigured`에는 요청 본문이 없고, `complete`에는 JSON 본문을 보낸다. 모두 analysis 토큰이 필요하며 다른 단계·일반 Data API에는 이 토큰을 사용할 수 없다.
+처리기가 `claim`을 주기적으로 호출해 작업을 가져가는 방식이며 Data가 먼저 연결하지 않는다. 아래 세 API는 모두 `DATA_SERVICE_URL` 뒤에 경로를 붙인 **POST**다. `claim`과 `requeue-unconfigured`에는 요청 본문이 없고, `complete`에는 JSON 본문과 `Content-Type: application/json`을 보낸다. 모두 analysis 토큰이 필요하며 다른 단계·일반 Data API에는 이 토큰을 사용할 수 없다.
 
 ```http
 POST /internal/data/v1/object-jobs/analysis/claim HTTP/1.1

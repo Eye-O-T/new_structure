@@ -24,10 +24,9 @@ from server.services.external.app.security.permissions import require_admin  # n
 
 
 DESCRIPTION = """모바일 등 외부 클라이언트를 교체할 때 유지해야 할 공개 HTTP API이다.
-앱은 중앙 HTTPS origin에 접속하며 Data·Edge·MediaMTX의 내부 포트에 직접 연결하지 않는다.
-paths와 기존 요청·응답 모델은 External의 FastAPI 선언에서 생성한다. 한국어 사용 설명,
-Cookie 인증, Range 헤더 및 Any/dict로 선언된 세 응답은 실제 반환 코드를 근거로 보완한다.
-이 문서는 실행 서버의 /api/v1/openapi.json에 설명을 보강한 배포용 명세다.
+앱은 중앙 서버의 HTTPS 주소(도메인과 포트)에 접속한다. API 경로는 /api/v1로 시작하고,
+실시간·중앙 녹화 영상은 /hls·/playback을 사용한다. Data·Edge·MediaMTX의 내부 포트에는
+직접 연결하지 않는다. 이 파일을 OpenAPI 3.1을 지원하는 뷰어에서 열면 요청·응답 형식을 볼 수 있다.
 
 ### 로그인과 권한
 1. POST /api/v1/auth/login으로 access_token·refresh_token과 user를 받는다.
@@ -45,8 +44,9 @@ access Path=/, refresh Path=/api/v1/auth, 기본 수명은 각각 900초·604800
 실제 access 수명은 expires_in을 따른다. 토큰을 URL·로그에 기록하지 않는다.
 
 ### 영상 재생: Nginx 경로
-GET /cameras/{camera_id}/live의 url 또는 GET /recordings/{id}/playback의 playback_url을
-그대로 사용한다. PUBLIC_BASE_URL 설정 시 HTTPS 절대 URL, 없으면 API origin 기준 상대 URL이다.
+GET /api/v1/cameras/{camera_id}/live의 url 또는
+GET /api/v1/recordings/{segment_id}/playback의 playback_url을 그대로 사용한다.
+PUBLIC_BASE_URL 설정 시 HTTPS 절대 URL, 없으면 중앙 서버 주소 기준 상대 URL이다.
 라이브 기본 주소는 /hls/{camera_id}/index.m3u8이고 재생목록과 영상 조각을 받는 HLS이다.
 중앙 녹화 기본 주소는 /playback/get?path={camera_id}&start={UTC}&duration={초}&format=fmp4다.
 이 두 미디어 경로는 Nginx가 MediaMTX에 중계하며 FastAPI paths에 포함되지 않는다.
@@ -54,13 +54,14 @@ auth.method=cookie는 기본 플레이어 안내다. 네이티브 플레이어�
 최초 재생목록뿐 아니라 모든 하위 재생목록·영상 조각·재생 요청에 헤더를 보내야 한다.
 쿠키 방식도 영상 HTTP 클라이언트와 쿠키를 공유해야 한다. Nginx는 요청마다 로그인과
 카메라 권한을 확인한다. 재생 중 401이면 토큰 갱신 후 플레이어를 다시 연다.
-mpegts 녹화는 /api/v1/recordings/{id}/content를 사용하며 video/mp2t다.
+mpegts 녹화는 /api/v1/recordings/{segment_id}/content를 사용하며 video/mp2t다.
 모든 녹화를 HLS로 가정하지 않는다. /content는 Range·If-Range, 200·206·416을 지원한다.
 Nginx /playback도 Range·If-Range를 전달하지만 실제 형식·탐색 지원은 MediaMTX 응답에 따른다.
 미디어 및 프록시 오류는 JSON이 아닐 수 있으므로 HTTP 상태와 Content-Type을 먼저 확인한다.
 
 ### 시간·목록·사람 정보
 from·to는 시간대가 포함된 RFC 3339이며 함께 지정하면 from < to다.
+이벤트는 from 이상·to 미만, 녹화는 요청 구간과 겹치는 항목을 반환한다.
 서버는 UTC로 정규화하며 화면에서 현지 시각으로 바꾼다. 목록은 limit(기본 50, 최대 100),
 offset을 사용한다. items가 빌 때까지 offset을 증가시키며 총 개수 필드를 가정하지 않는다.
 person_id는 (camera_id, tracking_session_id) 안에서만 유효한 추적 번호다.
@@ -73,7 +74,7 @@ objects는 최신 좌표 조회 API이며 영상 프레임과 정확히 동기�
 snapshot_path 등 저장소 상대 경로를 공개 이미지 URL로 조합하지 않는다. 별도 스냅샷 API는 없다.
 
 ### FCM 수신 계약
-로그인 후 현재 refresh_token과 함께 PUT /notifications/devices로 기기를 등록한다.
+로그인 후 현재 refresh_token과 함께 PUT /api/v1/notifications/devices로 기기를 등록한다.
 event_types=null은 모든 이벤트, []는 수신 안 함, 문자열 목록은 지정 유형이다.
 refresh 회전은 기존 기기 등록을 유지한다. 등록 요청이 401이면 갱신 후 Body도 최신 refresh로 바꾼다.
 FCM 기기 토큰이 변경되면 새 token으로 PUT 요청을 다시 보내 등록을 갱신한다.
@@ -85,10 +86,11 @@ Android 앱은 알림 권한을 요청하고 cctv_events 채널을 생성한다.
 알림 탭은 백그라운드 복귀와 앱 종료 후 시작 모두 처리하고, 로그인 초기화 후 상세를 연다.
 알림에는 일반 안내만 있으며 영상·JWT·비밀번호는 없다.
 중복·지연 수신에 대비해 event_id로 중복 표시를 줄이고 현재 사용자·기기 ID를 확인한 뒤
-GET /events/{id}로 내용을 다시 조회한다. 권한 회수·로그아웃 뒤 도착한 알림을 그대로 신뢰하지 않는다.
+GET /api/v1/events/{event_id}로 내용을 다시 조회한다. 권한 회수·로그아웃 뒤 도착한 알림을 그대로 신뢰하지 않는다.
 발송은 이벤트 생성 시 등록된 수신자만 대상으로 하며 기존 이벤트를 새 기기에 소급 발송하지 않는다.
 최대 8회·생성 후 1시간 범위에서 재시도한다. FCM 접수와 단말 도착은 서로 다르다.
-Firebase 서버·Android 설정과 실기기 확인이 필요하며 notifications/status는 설정 여부만 나타낸다.
+Firebase 서버·Android 설정과 실기기 확인이 필요하다.
+GET /api/v1/notifications/status는 서버의 푸시 사용 설정만 나타낸다.
 
 ### 오류와 명세 한계
 일반 오류는 {detail: 문자열}, 422는 {detail: [{type, loc, msg}]}이다.
@@ -98,7 +100,8 @@ Firebase 서버·Android 설정과 실기기 확인이 필요하며 notification
 주요 코드: EDGE_OFFLINE, CAPABILITY_UNKNOWN, UNSUPPORTED_VIDEO_PROFILE, CONTROL_TIMEOUT,
 MEDIA_CONTROL_UNAVAILABLE, CAMERA_HAS_HISTORY, CAMERA_LIMIT_REACHED. 알 수 없는 코드도 처리한다.
 metadata·시스템 상태의 data 내부 필드는 자유 형식이다. 모든 장애 코드나 MediaMTX 미디어 형식을
-열거한 명세는 아니다. API 버전이나 이 문서 생성만으로 실제 푸시·영상·모델 검증을 보장하지 않는다.
+열거한 명세는 아니다. 이 파일은 실행 서버의 /api/v1/openapi.json에 사용 설명과 응답 형식을
+보완해 생성한 문서다. 생성·일치 검사는 파일 끝의 x-generation 명령을 사용한다.
 """
 
 
@@ -162,7 +165,7 @@ OPERATIONS = {
     ),
     "list_recordings": (
         "녹화 구간 검색",
-        "camera_id·from·to가 필요하다. 권한이 있는 카메라만 조회한다.",
+        "camera_id·from·to가 필요하다. 요청 시간 구간과 겹치는 녹화를 반환한다. 권한이 있는 카메라만 조회한다.",
     ),
     "get_recording": (
         "녹화 구간 조회",
@@ -182,7 +185,7 @@ OPERATIONS = {
     ),
     "list_events": (
         "이벤트 검색",
-        "viewer는 camera_id를 반드시 지정해야 한다. admin은 생략하여 전체 허용 범위를 검색할 수 있다. event_type·from·to는 선택이며 인물 연결·분석 결과는 나중에 갱신될 수 있다.",
+        "viewer는 camera_id를 반드시 지정해야 한다. admin은 생략하여 전체를 검색할 수 있다. event_type·from·to는 선택이며 시각 범위는 from 이상·to 미만이다. 인물 연결·분석 결과는 나중에 갱신될 수 있다.",
     ),
     "get_event": (
         "이벤트 상세",

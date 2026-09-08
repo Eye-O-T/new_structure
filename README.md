@@ -1,6 +1,6 @@
 # AI CCTV
 
-Raspberry Pi 영상을 중앙에서 녹화·분석하고 Android 앱으로 확인한다. 중앙은 Docker 컨테이너 6개다. 감지는 YOLO/ByteTrack을 사용하며 **전역 인물 연결과 metadata 분석은 아직 블랙박스**다.
+Raspberry Pi(Edge)가 보낸 영상을 중앙 서버에서 녹화·감지하고 Android 앱으로 확인한다. 중앙 서버는 Docker 컨테이너 6개로 구성된다. 사람 감지·추적은 YOLO/ByteTrack을 사용한다. **여러 카메라의 동일 인물 연결과 추가 정보(metadata) 분석은 인터페이스만 준비된 미구현 영역**이다.
 
 ## 문서
 
@@ -10,8 +10,6 @@ Raspberry Pi 영상을 중앙에서 녹화·분석하고 Android 앱으로 확�
 | [SRS_interface_preprocessing.md](docs/SRS_interface_preprocessing.md) | Preprocessing 컨테이너 교체 규약: 영상·감지·추적·전역 인물 연결 |
 | [SRS_interface_analysis.md](docs/SRS_interface_analysis.md) | Analysis 컨테이너 교체 규약: 객체 입력·metadata·작업 처리 |
 | [openapi.yaml](docs/openapi.yaml) | 모바일 교체용 공개 API 명세와 인증·영상·알림 사용 규칙 |
-
-서비스를 통째로 교체할 때는 HTTP·데이터·저장소·상태 규약을 유지한다. 기존 Python 플러그인은 참고 구현이며 다른 언어를 금지하지 않는다. 다른 중앙 컨테이너의 교체 규약은 관리하지 않는다.
 
 ```text
 server/
@@ -28,11 +26,11 @@ server/
 ├── compose.yml           # 운영
 ├── compose.dev.yml       # 개발용 코드 연결
 ├── compose.test.yml      # 독립 테스트 환경
-└── compose.push.yml
+└── compose.push.yml      # Firebase 푸시 추가 설정
 edge/                     # Raspberry Pi
 mobile/                   # Flutter 앱
-configurator/             # Windows GUI·CLI, pyproject.toml·uv.lock·tests/
-lib/                      # pyproject.toml과 ai_cctv_core 공통 패키지
+configurator/             # Windows 서버 설치·설정 GUI·CLI
+lib/                      # Python 공통 패키지 ai_cctv_core
 tests/                    # 개발·검증용 코드
 ├── automated/            # 공통·통합 자동 테스트
 ├── runner/               # 테스트 이미지·pytest·Ruff 설정
@@ -42,31 +40,33 @@ docs/                     # 위 네 문서
 
 ## 설치 선택
 
-Windows 설치 파일을 사용하면 다음 절을, 소스를 실행하면 [소스 배포](#소스-배포)를 따른다. 중앙 기동 후 [Edge](#edge-연결), [모바일·푸시](#모바일과-푸시)를 연결한다. 예시 주소·파일 경로는 실제 값으로 바꾼다.
+설치 EXE·Edge DEB·Android APK는 저장소에 포함하지 않는다. 배포 담당자에게 받은 파일을 사용하거나 [패키지 빌드](#패키지-빌드)와 [모바일 안내](mobile/README.md)에 따라 만든다. Windows 설치 파일이 있으면 다음 절을, 소스를 실행하면 [소스 배포](#소스-배포)를 따른다.
+
+아래 명령은 별도 표시가 없으면 **저장소 루트의 PowerShell**에서 실행한다. Windows 설치본에서 수동 Compose 명령을 쓸 때는 설치 폴더(기본 `C:\Program Files\AI_CCTV`)에서 실행한다. 예시 주소·경로는 실제 값으로 바꾼다.
 
 ### Windows 설치
 
-Windows 10/11 x64와 실행 중인 Docker Desktop·Compose v2가 필요하다.
+Windows 10/11 x64와 Linux 컨테이너 모드로 실행 중인 Docker Desktop·Compose v2 이상이 필요하다. Configurator는 이 여섯 컨테이너의 설정·시작·중지를 돕는 프로그램이다.
 
 1. `AI_CCTV_Server_Setup_<version>_x64.exe` 설치 후 **AI CCTV Configurator**를 연다.
 2. **Downloaded AI model**에서 호환 로컬 모델을 선택한다. 모델은 설치 프로그램에 포함되지 않는다.
 3. **TLS certificate / TLS private key**에 신뢰 인증서와 암호화되지 않은 PEM 키를 선택한다.
-4. 저장 경로·관리자 계정·공개 HTTPS origin·RTSP bind·감지 장치·녹화 정책을 입력한다.
+4. 저장 경로·관리자 계정·앱 접속 주소·서버의 수신 IP·감지 장치·녹화 정책을 입력한다. 실제 Edge·휴대폰 연결에는 **수신 IP**를 서버의 LAN IP로 지정한다. 기본 `127.0.0.1`은 PC 내부 접속용이며, **앱 접속 주소**는 인증서의 서버 이름과 맞춘다.
 5. **Validate and create configuration** → **Start services** → **Show service status**를 실행한다.
 
 설정 생성에는 관리자 권한이 필요하다. 기본 데이터 위치는 `C:\ProgramData\AI_CCTV`, 배포 env는 그 아래 `config\compose.env`다. 코드와 별도로 DB·영상·모델·인증 파일을 보존한다.
 
-GUI 대신 관리자 PowerShell에서 사용할 수 있다. 비밀번호는 숨김 입력으로 받는다.
+GUI 대신 설치 후 새로 연 관리자 PowerShell에서 사용할 수 있다. 아래 `192.0.2.10`은 서버 LAN IP의 예시다. 비밀번호는 숨김 입력으로 받는다.
 
 ```powershell
 AI_CCTV_CLI.exe preflight
-AI_CCTV_CLI.exe install --model 'D:\Models\person.pt' --tls-certificate 'D:\TLS\tls.crt' --tls-private-key 'D:\TLS\tls.key' --public-base-url 'https://cctv.example.com'
+AI_CCTV_CLI.exe install --model 'D:\Models\person.pt' --tls-certificate 'D:\TLS\tls.crt' --tls-private-key 'D:\TLS\tls.key' --public-base-url 'https://cctv.example.com' --public-bind 192.0.2.10 --rtsp-bind 192.0.2.10
 AI_CCTV_CLI.exe status
 ```
 
 ### 소스 배포
 
-저장소 루트에서 초기 설정 스크립트용 Python 3.11, Docker/Compose v2, 개발 인증서용 OpenSSL을 준비한다. 아래는 **새 개발 배포**용이다. 운영 설정을 예제로 덮어쓰지 않는다.
+초기 설정 스크립트용 Python 3.11, Docker/Compose v2 이상, 개발 인증서용 OpenSSL을 준비한다. 아래는 **기본 경로를 쓰는 새 개발 배포**용이다. 운영 설정을 예제로 덮어쓰지 않는다.
 
 ```powershell
 Copy-Item server/.env.example server/.env
@@ -76,14 +76,18 @@ python server/scripts/generate_secrets.py --camera-id cam-001
 python server/scripts/generate_dev_cert.py
 ```
 
-Linux에서는 `Copy-Item`을 `cp`, `python`을 Python 3.11의 `python3` 명령으로 바꾼다. `init_runtime.py`는 폴더만 만든다. `config.yaml`을 실제 카메라·정책에 맞추고 호환 모델을 `MODELS_DIR/MODEL_FILE`(기본 `server/runtime/models/default.pt`)에 둔다.
+Linux에서는 `Copy-Item`을 `cp`, `python`을 Python 3.11의 `python3` 명령으로 바꾼다. `init_runtime.py`는 폴더만 만든다. 저장 위치를 바꾸면 각 초기화 스크립트의 `--help`로 출력 경로도 맞춘다.
+
+포트·호스트 경로는 `server/.env`, 카메라·감지·보관 정책은 `server/config/config.yaml`, 서비스 간 인증값은 생성된 `server/secrets/*.env`에서 관리한다. `.env`의 상대 경로는 `server/` 기준이다. 최초에 여러 카메라를 준비한다면 하나의 생성 명령에 `--camera-id`를 카메라마다 반복한다. 운영 중 추가 등록은 [Edge 연결](#edge-연결)을 따른다.
+
+감지 모델은 별도로 준비해 `MODELS_DIR/MODEL_FILE`(기본 `server/runtime/models/default.pt`)에 둔다. 기본 구현은 사람 클래스 번호가 `0`인 Ultralytics 호환 모델을 사용한다. 모델 없이 영상·녹화 연결부터 시험하려면 `config.yaml`의 `inference.enabled`를 `false`로 설정한다. 이때 자동 사람 감지·박스 표시는 작동하지 않는다.
 
 `server/.env`에서 다음을 확인한다.
 
 | 설정 | 확인 사항 |
 |---|---|
-| `PUBLIC_BASE_URL` | 앱이 접속할 HTTPS origin, `/api/v1` 제외 |
-| `PUBLIC_BIND_ADDRESS` | 기본 loopback; 외부 제공 시 인터페이스·방화벽 설정 |
+| `PUBLIC_BASE_URL` | 앱 접속 주소. `https://서버주소[:포트]` 형식이며 `/api/v1` 제외 |
+| `PUBLIC_BIND_ADDRESS` | HTTPS 요청을 받을 서버 IP. 기본 `127.0.0.1`은 PC 내부 접속용 |
 | `RTSP_BIND_ADDRESS` | 원격 Edge가 접근할 중앙 신뢰 LAN IP |
 | `CONFIG_FILE`, `*_DIR` | 설정·DB·녹화·복구·스냅샷·모델·인증서 실제 경로 |
 | `*_SECRETS_FILE` | 생성한 역할별 env 5개, 서로 다른 경로 |
@@ -91,7 +95,9 @@ Linux에서는 `Copy-Item`을 `cp`, `python`을 Python 3.11의 `python3` 명령�
 | `RECORDING_SEGMENT_SECONDS` | 10~300초, 기본 60초 |
 | `COMPOSE_PROJECT_NAME` | 운영·업데이트 때 유지할 프로젝트 이름 |
 
-8554는 신뢰 LAN에서만 사용한다. 내부 8000·8080·8888·9996·9997은 외부에 공개하지 않는다. 운영은 도메인에 맞는 CA 전체 체인 `CERTS_DIR/tls.crt`와 개인키 `tls.key`를 사용한다. 개발용 자체 서명 인증서 때문에 앱의 검증을 끄지 않는다.
+위 개발 인증서는 `localhost`용이다. PC 안에서 시험할 때는 `PUBLIC_BASE_URL=https://localhost`로 맞추고 시험 클라이언트에 해당 인증서를 신뢰하도록 설정한다. 인증서 생성만으로 신뢰가 등록되지는 않는다. 휴대폰에서 `localhost`는 휴대폰 자신을 뜻하므로 실제 서버 주소와 단말이 신뢰하는 인증서가 필요하다. 운영 인증서는 `CERTS_DIR/tls.crt`(전체 인증서 체인), 개인키는 `tls.key`에 둔다.
+
+외부 접속에는 서버 주소로 연결되는 DNS·방화벽·필요시 공유기 포트 전달 설정도 필요하며 Configurator가 자동으로 구성하지 않는다. 8554는 신뢰 LAN에서만 사용하고 내부 8000·8080·8888·9996·9997은 외부에 공개하지 않는다.
 
 ```powershell
 python server/scripts/doctor.py
@@ -100,26 +106,24 @@ docker compose --env-file server/.env -f server/compose.yml up -d --build --wait
 python server/scripts/bootstrap_admin.py --username admin
 ```
 
-`bootstrap_admin.py`는 `server/.env`를 쓰는 소스 배포용이다. Configurator 설치에서는 설정 생성 시 관리자를 준비한다.
+`bootstrap_admin.py`는 관리자 비밀번호를 숨김 입력으로 받는 소스 배포용 도구다. Configurator 설치에서는 설정 생성 시 관리자를 준비한다. 중앙 기동 후 [Edge](#edge-연결)와 [모바일](#모바일과-푸시)을 연결한다.
 
 ## Edge 연결
 
 Raspberry Pi 설치·Pairing·업데이트는 [Edge 안내](edge/README.md#설치와-연결)를 따른다. 실제 장비 없이 MP4로 시험하려면 [Mock Edge](tests/mock_edge/README.md)를 사용한다.
 
-### 수동 연결
-
 자동 검색을 사용할 수 없다면 [토큰 내보내기·수동 등록](edge/README.md#수동-연결)을 따른다. 관리·복구 주소는 중앙 컨테이너에서도 접근할 수 있어야 한다.
 
 ## 모바일과 푸시
 
-앱 실행·서명은 [모바일 README](mobile/README.md)를 따른다. 대체 앱 개발자는 [OpenAPI](docs/openapi.yaml)를 사용한다. 기본 앱 식별자는 `com.example.app`이며 중앙 HTTPS origin으로 로그인한다.
+앱 설치·로그인은 [모바일 README](mobile/README.md), 대체 앱 개발은 [OpenAPI](docs/openapi.yaml)를 따른다. 영상 확인에는 Firebase가 필요하지 않다.
 
 푸시를 켜려면 같은 기존 Firebase 프로젝트의 두 파일을 준비한다.
 
 - Android: `mobile/android/app/google-services.json`. 등록 package name과 applicationId가 같아야 한다.
 - 서버: FCM 발송 권한의 서비스 계정 JSON. 저장소 밖에 보관하고 External이 읽게 한다. APK에는 넣지 않는다.
 
-실제 `compose.env` 또는 `.env`와 같은 폴더에 [push.env 예시](server/push.env.example)를 바탕으로 작성한다.
+실제 `compose.env` 또는 `.env`와 같은 폴더에 다음 내용으로 **`push.env`**를 만든다. [전체 예시](server/push.env.example)의 프로젝트 ID와 파일 경로는 실제 값으로 바꾼다.
 
 ```dotenv
 PUSH_ENABLED=true
@@ -151,7 +155,7 @@ docker compose --env-file C:/path/to/compose.env -f server/compose.yml logs --ta
 
 | 대상 | 포함 경로 |
 |---|---|
-| 설정·인증 | 실제 env, `CONFIG_FILE`, `release-manifest.json`, 서비스별 비밀 파일 5개, 선택적 push.env·Firebase 계정 |
+| 설정·인증 | 실제 env, `CONFIG_FILE`, 서비스별 비밀 파일 5개, 사용 중인 push.env·Firebase 계정, Configurator 설치의 `release-manifest.json` |
 | DB·미디어 | `DATABASE_DIR`, `RECORDINGS_DIR`, **별도의 `RECOVERED_DIR`**, `SNAPSHOTS_DIR` |
 | 모델·TLS | `MODELS_DIR`, `CERTS_DIR` |
 | 복원 기준 | 코드·이미지 버전, 모델·파일 해시, 실제 경로와 파일 권한 |
@@ -168,7 +172,7 @@ docker compose --env-file C:/path/to/compose.env -f server/compose.yml up -d --w
 
 인증서 갱신은 새 `tls.crt`·`tls.key` 배치 → 동일 Compose 명령의 `exec -T nginx nginx -t` → `exec -T nginx nginx -s reload` 순서로 한다. 실제 단말 검증과 만료일을 확인한다.
 
-자동 복구가 놓친 구간은 Edge에 원본이 남아 있을 때 수동으로 가져온다. 아래 토큰은 [수동 연결](#수동-연결)에서 내보낸 해당 Edge의 보호 파일이며, 명령에는 값 대신 환경변수 이름을 전달한다. 기간은 UTC로 한 번에 최대 24시간을 지정한다.
+자동 복구가 놓친 구간은 Edge에 원본이 남아 있을 때 수동으로 가져온다. 아래 토큰은 [수동 연결](edge/README.md#수동-연결)에서 내보낸 해당 Edge의 보호 파일이며, 명령에는 값 대신 환경변수 이름을 전달한다. 기간은 UTC로 한 번에 최대 24시간을 지정한다.
 
 ```powershell
 $env:EDGE_RECOVERY_TOKEN = (Get-Content -Raw -LiteralPath 'C:\secure\edge-001-control.token').Trim()
@@ -185,13 +189,13 @@ try {
 
 ## 업그레이드
 
-먼저 백업하고 기존 프로젝트 이름·데이터 경로를 유지한다. Windows 설치 프로그램은 코드를 교체하지만 운영 설정을 자동 이관하지 않는다. 이전 inference·identity 구성에서 전환할 때만 Python 3.11로 실행한다.
+먼저 백업하고 기존 프로젝트 이름·데이터 경로를 유지한다. Windows 설치 프로그램은 코드를 교체하지만 운영 설정을 자동 이관하지 않는다. 이전 inference·identity 구성에서 전환할 때만 **전체 소스 저장소에서 Python 3.11로** 다음을 실행한다. 설치본에는 이관 스크립트에 필요한 Python 모듈 일부가 포함되지 않는다.
 
 ```powershell
 python server/scripts/enable_object_processing.py --server-dir server --env-file C:/path/to/compose.env
 ```
 
-설치 패키지는 실제 설치의 스크립트·server 경로를 지정한다. 기존 토큰을 보존하며 오래된 단일 `secrets.env`는 수동 이전이 필요하다. 중간 실패는 해결 후 재실행한다. 설정 초기화로 이관을 대신하지 않는다.
+Windows 설치를 이관하면 `--server-dir`를 실제 설치의 `server` 절대 경로로, `--env-file`을 운영 중인 `compose.env`로 바꾼다. 기존 토큰을 보존하며 오래된 단일 `secrets.env`는 수동 이전이 필요하다. 중간 실패는 해결 후 재실행한다. 설정 초기화로 이관을 대신하지 않는다.
 
 Configurator **Start services** 또는 `up -d --build --wait --remove-orphans`로 재생성한다. 단순 Restart는 새 환경·이미지를 반영하지 않는다. 같은 프로젝트의 구형 감지 컨테이너가 정리되고 6개만 실행되는지 확인한다. Data 시작 시 DB 마이그레이션이 적용되므로 실패 시 이전 이미지와 일관된 백업을 함께 복원한다.
 
@@ -218,7 +222,7 @@ Windows 제거는 기본 운영 데이터를 보존한다. 사용자 지정 경�
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml up -d --build
 ```
 
-PC의 코드를 컨테이너에 읽기 전용으로 연결한다. 파일은 PC에서 편집하고 Python 서비스는 변경 시 재시작한다. 의존성을 변경하면 이미지를 다시 빌드한다. 운영 이미지는 `production`, 개발 이미지는 `development` 단계이며 태그도 분리한다.
+PC의 코드를 컨테이너에 읽기 전용으로 연결한다. PC에서 편집하면 해당 Python 서비스가 자동으로 재시작한다. 의존성을 변경하면 이미지를 다시 빌드한다. 운영 이미지는 `production`, 개발 이미지는 `development` 단계이며 태그도 분리한다.
 
 서비스별 테스트는 해당 개발 컨테이너에서 실행한다. `data`를 `external`, `preprocessing`, `analysis`로 바꿔 사용할 수 있다.
 
