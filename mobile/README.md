@@ -1,23 +1,18 @@
 # AI CCTV Android
 
-중앙 서버의 HTTPS API를 사용하는 Flutter 앱이다. `Eye-O-T/AI_CCTV-Mobile`의
-`401d5424b501efdf09dd0ab2545487eb99858760`을 기반으로 현재 저장소에 통합했다.
-원본의 하단 탐색·날짜 선택·이벤트 Repository 구조를 유지하면서 중앙 계약에 맞게 변경했다.
-원본 sandbox 서버와 테스트 DB·영상은 운영 앱에 포함하지 않는다.
+중앙 서버의 HTTPS API를 사용하는 Flutter 앱이다. 원본은 `Eye-O-T/AI_CCTV-Mobile`의
+`401d5424b501efdf09dd0ab2545487eb99858760`이며 현재 서버 계약에 맞게 연동했다.
 
 ## 포함 기능
 
-- 중앙 HTTPS 로그인, 안전한 세션 저장, 단일 refresh 갱신, 서버 로그아웃
+- HTTPS 로그인·세션 저장·토큰 갱신·로그아웃
 - 카메라 목록, 보호된 Live HLS, 장치 상태, 관리자 HD/FHD 변경
 - 실시간 사람 박스·카메라 내 인물 ID·연결된 전역 ID 표시 ([시차와 좌표 계약](../docs/openapi.yaml))
 - 로컬 날짜별 이벤트 검색, UTC 쿼리, 페이지 처리, 이벤트 상세·연결 녹화 재생
-- FCM 기기 등록·토큰 갱신·권한 처리, 모든 이벤트 기본 수신
-- 포그라운드 알림·목록 갱신, 백그라운드/종료 상태 알림 클릭, 앱 복귀 재조회
-- 사용자·로그인 세션별 알림 식별, 설정 파일 없이도 일반 앱 시작
+- FCM 기기·권한 관리, 모든 이벤트 기본 수신, 알림 클릭과 앱 복귀 시 재조회
 
-카메라 최초 등록·Edge Pairing은 기존 Configurator가 담당한다. 독립적인 녹화 검색 화면,
-사용자/ACL 편집 화면, iOS·Web·데스크톱 제품화는 이번 Android 통합 범위가 아니다.
-다른 플랫폼 폴더는 원본 기본 템플릿으로 보존했다.
+카메라 최초 등록·Edge Pairing은 Configurator가 담당한다. 독립 녹화 검색·사용자/ACL 편집 화면은
+없다. iOS·Web·데스크톱은 기본 템플릿만 있으며 제품 동작은 검증하지 않았다.
 
 ## 개발 실행
 
@@ -55,8 +50,8 @@ Flutter SDK 경로에 공백이 있으면 일부 native build hook 도구가 실
 실제 푸시를 받으려면 기존 프로젝트의 Android 설정과 중앙 서비스 계정이 모두 필요하다.
 앱은 최초 로그인 때 Android 알림 권한을 요청한다.
 
-기존 Firebase 식별자 `com.example.app`을 유지한다. 릴리스 서명을 위해
-`android/key.properties`를 다음 형식으로 만들고 실제 값을 로컬에서 지정한다.
+현재 Android `applicationId`는 `com.example.app`이다. 기존 Firebase의 등록 package name과
+일치하는지는 설정 파일을 받은 뒤 확인해야 한다. 릴리스 서명을 위해 `android/key.properties`를 만든다.
 
 ```properties
 storeFile=C:/secure/path/release.jks

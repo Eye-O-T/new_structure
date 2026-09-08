@@ -1,5 +1,4 @@
 # 보관 기한이 지난 녹화를 정리하고 저장 공간의 용량과 쓰기 가능 여부를 확인한다.
-"""Storage retention operations."""
 
 from __future__ import annotations
 

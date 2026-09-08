@@ -2,13 +2,12 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    // Flutter 플러그인은 Android 플러그인 뒤에 적용한다.
     id("com.google.gms.google-services") apply false
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// A fresh checkout can run without Firebase. Add the existing project's file
-// to enable push; production signing is configured separately below.
+// Firebase 설정 파일이 있을 때 푸시를 활성화한다. 배포 서명은 별도로 설정한다.
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
@@ -36,10 +35,8 @@ android {
     }
 
     defaultConfig {
-        // Preserve the existing Firebase Android application identity.
+        // 현재 앱 ID를 유지한다. Firebase에 같은 ID가 등록되어 있는지는 설정 파일로 확인한다.
         applicationId = "com.example.app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

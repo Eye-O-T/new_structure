@@ -1,7 +1,6 @@
 # 로컬 개발에서 HTTPS 연결을 시험할 자체 서명 인증서를 만든다.
 # 운영 단말이 신뢰하는 CA 인증서를 자동 발급하는 도구는 아니다.
 
-"""Generate a short-lived self-signed TLS certificate for local testing."""
 
 from __future__ import annotations
 

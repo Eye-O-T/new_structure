@@ -222,6 +222,8 @@ Data는 완료 시 해당 이벤트의 `metadata.identity`만 `{"status":"comple
 
 감지가 켜져 있는데 모델이 준비되지 않았거나 identity가 준비되지 않음·정지·오류 상태이면 `status:"degraded"`로 보고한다. identity 장애만으로 감지·영상 수신을 중지하지 않는다. `unconfigured`는 미구현 상태이며 HTTP 준비 성공이나 `ready`가 모델 완성을 의미하지 않는다. 카메라의 `state`와 `last_frame_at`도 확인해야 한다. 이 경로들은 현재 인증 없이 내부에서 사용하며 외부에 공개하지 않는다.
 
+인물 연결 완료 응답이 `accepted:true`가 아니면 identity 상태의 `last_outcome="rejected"`, `last_error="COMPLETION_NOT_ACCEPTED"`로 표시한다. 이 거절만으로 수신을 중단하지 않으며 이후 작업이 정상 완료되면 오류를 해제한다. `rejected`는 진단값이며 완료 요청의 `outcome`에는 사용하지 않는다.
+
 Data 오류는 `{"error":{"code":"...","message":"...","details":{}}}` 구조다(`details`는 검증 오류에서 배열 가능). 401은 없는·잘못된 토큰, 403은 범위가 다른 토큰, 404는 없는 카메라, 422는 필드·좌표·경로 오류, 409는 결과 충돌이다. 토큰 미설정은 503이며, 서버·통신 장애에는 제한된 재시도를 적용한다. Nginx가 직접 반환한 오류는 이 JSON 형식을 보장하지 않으며 전체 요청 본문은 Nginx의 2 MiB 제한도 따른다. 비밀값이나 모델 예외 원문을 결과에 싣지 않는다.
 
 교체 완료 전에는 다음을 실제 연결로 확인한다.

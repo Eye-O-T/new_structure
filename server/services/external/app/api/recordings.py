@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from typing import Any, AsyncIterator
 from urllib.parse import quote, urlencode
 
@@ -13,6 +14,8 @@ from fastapi import (
     Request,
 )
 from fastapi.responses import StreamingResponse
+
+from ai_cctv_core.time import central_recording_start
 
 from ..clients.data import (
     DataClient,
@@ -54,6 +57,9 @@ def _playback_url(settings: Settings, segment: dict[str, Any]) -> str:
     if start.tzinfo is None or end.tzinfo is None or end <= start:
         raise DataServiceError("invalid recording response")
     duration = (end - start).total_seconds()
+    # DB의 밀리초 절삭·기존 수정 시각 오차로 파일 시작보다 앞을 요청하면 재생이 실패한다.
+    filename = PurePosixPath(str(segment.get("relative_path", ""))).name
+    start = central_recording_start(filename) or start
     query = urlencode(
         {
             "path": camera_id,

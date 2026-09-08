@@ -1,5 +1,4 @@
 # 내부 API에 공통 인증을 적용하고 분야별 요청 처리기를 연결한다.
-"""Assemble internal routers under one authenticated API boundary."""
 
 from fastapi import APIRouter, Depends
 

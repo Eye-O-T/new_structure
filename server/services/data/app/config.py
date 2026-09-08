@@ -1,5 +1,4 @@
 # 환경 변수에서 DB 경로, 서비스별 인증 토큰, 보관·복구 정책을 읽어 실행 설정으로 묶는다.
-"""Runtime settings for the Data Service."""
 
 from __future__ import annotations
 
@@ -166,7 +165,7 @@ class Settings:
         )
 
     def data_api_tokens(self) -> dict[str, str]:
-        """Return effective Data API tokens, including the legacy fallback."""
+        """구형 공통 토큰의 대체값까지 포함해 유효한 Data API 토큰을 반환한다."""
 
         scoped_tokens = {
             "external": self.data_external_token,

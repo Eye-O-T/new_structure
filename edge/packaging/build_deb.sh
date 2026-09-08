@@ -1,6 +1,5 @@
 #!/bin/sh
 # Raspberry Pi용 코드·의존성·서비스 정의를 ARM64 Debian 설치 패키지로 묶는다.
-# 첫 줄의 shebang은 이 파일을 실행할 셸을 지정하므로 반드시 맨 앞에 둔다.
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
@@ -91,8 +90,7 @@ case "$mediamtx_version_output" in
     *) fail "MediaMTX reports '$mediamtx_version_output'; expected $expected_mediamtx_version" ;;
 esac
 
-# wheel은 설치 가능한 Python 패키지 파일이다. 필요한 의존성까지 패키지에 넣어
-# Edge 설치 단계가 인터넷에서 Python 패키지를 내려받지 않도록 준비한다.
+# 인터넷 없이 설치할 수 있도록 Python 패키지 파일(wheel)과 의존성을 함께 넣는다.
 python3 -m pip wheel \
     --constraint "$edge_root/packaging/constraints.txt" \
     --wheel-dir "$root/usr/lib/ai-cctv-edge/wheels" \
@@ -126,8 +124,7 @@ fi
     printf 'mediamtx_sha256=%s\n' "$actual_mediamtx_sha256"
 } > "$root/usr/share/doc/ai-cctv-edge/build-info"
 
-# 내용뿐 아니라 파일 시각과 압축 파일 헤더 시각도 맞춘다. 모든 wheel과 MediaMTX 입력이
-# 같다는 조건 아래에서 반복 빌드 결과를 비교할 수 있게 하기 위한 정규화다.
+# 같은 입력으로 만든 패키지를 비교할 수 있도록 파일·압축 헤더 시각도 고정한다.
 find "$root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 rm -f "$artifact" "$artifact.sha256"
 dpkg-deb --build --root-owner-group --uniform-compression -Zxz -z9 \

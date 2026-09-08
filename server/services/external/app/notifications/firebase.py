@@ -1,5 +1,4 @@
 # 알림 대기열 항목을 FCM 메시지로 변환하고 실패가 재시도 가능한지 구분한다.
-"""Optional Firebase adapter; never log recipient tokens or SDK exception text."""
 
 from __future__ import annotations
 

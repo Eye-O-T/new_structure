@@ -1,1 +1,1 @@
-"""Filesystem validation, recording reconciliation, and retention."""
+"""저장 경로 검사·녹화 대조·보관 기간 관리."""

@@ -1,5 +1,3 @@
-"""One container: camera detection threads and independent identity job consumer."""
-
 # preprocessing 컨테이너의 시작점이다. 카메라별 사람 탐지와 카메라 간 인물 식별을
 # 같은 컨테이너에서 실행하되, 한쪽의 작업 지연이 다른 쪽을 막지 않도록 따로 구동한다.
 

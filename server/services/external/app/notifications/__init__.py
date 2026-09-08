@@ -1,1 +1,1 @@
-"""External service notifications."""
+"""FCM 알림 전송."""

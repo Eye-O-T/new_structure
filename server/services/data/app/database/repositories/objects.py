@@ -1,5 +1,4 @@
 # 인물 식별·추가 분석의 작업 대기열, 최신 객체 좌표, 카메라 간 인물 연결을 저장한다.
-"""Durable independent identity/analysis jobs; only Data owns SQLite."""
 
 import json
 import uuid

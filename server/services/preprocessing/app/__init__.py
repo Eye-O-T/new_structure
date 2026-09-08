@@ -1,2 +1,1 @@
-"""AI_CCTV preprocessing lifecycle and camera/identity orchestration."""
 # 컨테이너 시작·종료, 카메라 처리 스레드와 인물 식별 작업자의 실행을 조율하는 패키지다.

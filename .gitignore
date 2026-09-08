@@ -1,4 +1,6 @@
 .venv/
+.venv-mock-edge/
+.mock-edge/
 venv/
 venv311/
 venv311_AI/
@@ -37,7 +39,7 @@ logs/
 *.ts
 *.pt
 
-# Local review/tooling and Flutter-generated files.
+# 로컬 도구·검토 파일과 Flutter 생성물을 제외한다.
 .review/
 .tools/
 mobile/.dart_tool/

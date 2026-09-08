@@ -1,5 +1,4 @@
 # 카메라·Edge 정보와 영상 설정을 SQL로 관리하고 삭제 시 관련 이력이 손실되지 않게 검사한다.
-"""Cameras persistence and SQL operations."""
 
 from __future__ import annotations
 
@@ -108,7 +107,7 @@ class CamerasRepositoryMixin:
             )
 
     def get_camera_deletion_status(self, camera_id: str) -> dict[str, Any] | None:
-        """Report whether a camera can be deleted without losing history."""
+        """이력을 잃지 않고 카메라를 삭제할 수 있는지 검사한다."""
 
         with self.database.connection() as connection:
             camera = connection.execute(

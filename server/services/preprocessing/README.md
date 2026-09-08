@@ -11,7 +11,7 @@
 
 `DETECTION_PLUGIN`과 `IDENTITY_PLUGIN`에 `패키지.모듈:팩토리`를 지정해 교체한다. 인물 연결 기본값은 `unconfigured`이며 전역 ID를 만들지 않는다. **[객체 처리 계약](../../../docs/SRS_interface_preprocessing.md)**에서 컨테이너의 입출력·재시도·배포 규약을 확인한다.
 
-설정은 `DATA_INFERENCE_TOKEN`, `DATA_IDENTITY_TOKEN`, `DATA_SERVICE_URL`, `SNAPSHOTS_ROOT`, `MEDIA_READ_USERNAME/PASSWORD`를 사용한다. `INFERENCE_*`는 기존 감지 설정 이름이다. SQLite는 직접 열지 않는다.
+설정은 `DATA_INFERENCE_TOKEN`, `DATA_IDENTITY_TOKEN`, `DATA_SERVICE_URL`, `SNAPSHOTS_ROOT`, `MEDIA_READ_USERNAME/PASSWORD`를 사용한다. `INFERENCE_*`는 감지 설정이다. SQLite는 직접 열지 않는다.
 
 [개발 환경](../../../README.md#개발과-검증)을 준비한 뒤 저장소 루트에서:
 

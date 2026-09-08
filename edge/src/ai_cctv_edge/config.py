@@ -100,7 +100,7 @@ class RecoveryConfig:
 class ControlConfig:
     bind_host: str = "0.0.0.0"
     port: int = 8003
-    # The same edge_auth_token protects management and recovery by default.
+    # 관리·복구 API는 기본적으로 같은 edge_auth_token을 사용한다.
     token_file: Path = Path("/etc/ai-cctv-edge/recovery.token")
     apply_timeout_seconds: float = 30.0
     preflight_timeout_seconds: float = 10.0
@@ -143,8 +143,7 @@ class EdgeConfig:
                 raise ValueError(f"unsupported video profile: {requested_profile}")
             profile_defaults = VIDEO_PROFILES[requested_profile]
         else:
-            # Schema v1 files written by releases before profiles were explicit
-            # remain readable when their values exactly match HD or FHD.
+            # 프로필 필드가 없는 구형 설정도 HD/FHD 값과 정확히 일치하면 읽는다.
             legacy_values = (
                 int(video.get("width", 1280)),
                 int(video.get("height", 720)),
@@ -386,8 +385,7 @@ def render_toml(config: EdgeConfig) -> str:
 
 
 def write_atomic(path: str | Path, text: str, mode: int = 0o640) -> None:
-    # 같은 폴더의 임시 파일을 끝까지 기록한 뒤 교체하여 읽는 쪽에 반쪽짜리 설정이 보이지 않게 한다.
-    # 이 보장은 파일 하나에 대한 것이며 여러 설정 파일 전체를 한 번에 확정하는 기능은 아니다.
+    # 같은 폴더에 임시 파일을 완성한 뒤 교체한다. 원자적 교체는 이 파일 하나에만 적용된다.
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(dir=target.parent, prefix=".tmp-")

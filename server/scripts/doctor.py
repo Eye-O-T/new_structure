@@ -1,7 +1,6 @@
 # 소스 배포가 사용할 파일·저장소·서비스별 인증 설정을 점검한다.
 # 설정 내용을 출력하지 않고 정상 여부를 보고하며, 구성 오류가 있으면 기동 전에 알린다.
 
-"""Preflight checks for the central Docker Compose deployment."""
 
 from __future__ import annotations
 
@@ -37,8 +36,7 @@ def read_deployment_env(path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         value = value.strip()
         if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
-            # Configurator emits JSON-quoted values when Windows paths contain
-            # spaces or backslashes. Decode them instead of retaining escapes.
+            # Windows 경로의 공백·역슬래시는 Configurator가 쓴 JSON 인용 규칙으로 복원한다.
             value = json.loads(value)
         elif len(value) >= 2 and value.startswith("'") and value.endswith("'"):
             value = value[1:-1]

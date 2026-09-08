@@ -1,6 +1,4 @@
-# Dependency resolution lock for the ARM64 Edge wheelhouse. Direct dependencies
-# remain declared in edge/pyproject.toml; this file fixes their transitive graph
-# so a later package release cannot silently change the .deb contents.
+# ARM64 배포 의존성의 전체 버전을 고정한다. 직접 의존성은 edge/pyproject.toml에서 선언한다.
 annotated-types==0.7.0
 anyio==4.8.0
 click==8.1.8

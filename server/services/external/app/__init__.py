@@ -1,4 +1,4 @@
-"""FastAPI application for the AI CCTV External Service."""
+"""모바일과 Edge 요청을 처리하는 External 서비스."""
 
 from .main import app, create_app
 

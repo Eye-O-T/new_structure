@@ -1,5 +1,4 @@
 # 내부 API 자료의 형식과 범위를 정의하여 잘못된 값이 DB에 들어가기 전에 거른다.
-"""Validated request contracts for the internal Data API."""
 
 from __future__ import annotations
 
@@ -61,12 +60,10 @@ class VideoProfile(str, Enum):
 
 
 class EventType(str, Enum):
-    """Events understood by the central server.
+    """중앙 서버가 받는 이벤트 종류.
 
-    The two legacy network names remain accepted while older inference
-    producers are upgraded. They are stored for input compatibility, but only
-    Edge ``central_connection_*`` events define automatic recovery bounds.
-    """
+    구형 network_failure/network_recovery도 저장하지만,
+    자동 녹화 복구 구간은 Edge의 central_connection_* 이벤트만으로 정한다."""
 
     person_detected = "person_detected"
     person_appeared = "person_appeared"

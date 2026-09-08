@@ -1,12 +1,9 @@
-// 서버가 제공하는 최신 객체 위치를 영상 위에 그린다. 모바일에서 탐지나 재식별을 수행하지 않는다.
-// HLS 영상과 좌표 API는 도착 시간이 다르므로 같은 프레임에 정확히 맞춘 박스는 아니다.
+// 서버의 최신 객체 좌표를 표시한다. HLS 지연 때문에 영상 프레임과 정확히 일치하지 않는다.
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';
 
-/// Latest detector positions. HLS has a separate playback delay; this is not
-/// a frame-synchronized video annotation stream.
 class ObjectOverlay extends ConsumerStatefulWidget {
   const ObjectOverlay({super.key, required this.cameraId});
   final String cameraId;
@@ -93,8 +90,7 @@ class ObjectBoxes extends StatelessWidget {
           return const SizedBox.shrink();
         }
         final children = <Widget>[];
-        // bbox는 원본 프레임의 [왼쪽, 위, 오른쪽, 아래] 픽셀 좌표다.
-        // 원본 크기로 나눈 비율을 현재 화면 크기에 곱해 해상도가 다른 단말에서도 위치를 맞춘다.
+        // bbox [왼쪽, 위, 오른쪽, 아래]를 원본 픽셀에서 화면 좌표로 환산한다.
         for (final object in (frame?['objects'] as List? ?? [])) {
           final box = object['bbox'] as List;
           final left = (box[0] as num).toDouble();
@@ -110,8 +106,7 @@ class ObjectBoxes extends StatelessWidget {
             continue;
           }
           final global = object['global_person_id'];
-          // P는 카메라 추적 세션 안의 person_id, G는 여러 카메라를 연결하는 global_person_id다.
-          // 재식별은 서버의 교체 가능한 블랙박스이므로 아직 없는 G 값을 임의로 만들지 않는다.
+          // P는 카메라 추적 세션의 ID, G는 카메라 간 인물 ID다. 서버가 지정한 G만 표시한다.
           children.add(
             Positioned(
               left: left / width * bounds.maxWidth,

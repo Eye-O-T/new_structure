@@ -36,7 +36,7 @@ lib/                      # pyproject.toml과 ai_cctv_core 공통 패키지
 tests/                    # 개발·검증용 코드
 ├── automated/            # 공통·통합 자동 테스트
 ├── runner/               # 테스트 이미지·pytest·Ruff 설정
-└── mock_edge/            # 직접 실행하는 MP4 모의 카메라
+└── mock_edge/            # MP4 모의 카메라
 docs/                     # 위 네 문서
 ```
 
@@ -104,49 +104,11 @@ python server/scripts/bootstrap_admin.py --username admin
 
 ## Edge 연결
 
-Raspberry Pi OS Bookworm ARM64·Python 3.11에서 카메라와 시간 동기화를 확인한다. 패키지와 체크섬을 같은 폴더에 두고 실행한다.
-
-```bash
-sha256sum -c ai-cctv-edge_0.3.0_arm64.deb.sha256
-test "$(dpkg --print-architecture)" = arm64
-sudo apt update
-sudo apt install ./ai-cctv-edge_0.3.0_arm64.deb
-sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-key
-```
-
-숨김 입력으로 32자 이상 Key를 설정한다. 같은 신뢰 IPv4 LAN의 Configurator에서 같은 Key 입력 → **Discover Edge on trusted LAN** → Edge 선택 → 중앙 RTSP 주소·카메라·Profile 확인 → **Register Edge and camera**를 실행한다. 검색 실패 시 UDP 37020 방화벽·AP 격리·Key를 확인한다.
-
-구성 완료 후 `sudo ai-cctv-edge doctor`·`status`를 실행하고 재부팅 뒤 Capture·Control·Recovery 세 서비스와 중앙 영상이 복귀하는지 확인한다. 평소에는 `logs`·`restart`를 사용한다. 업데이트 전 설정·토큰·백업을 보존하고 새 패키지를 같은 방법으로 설치한다. `sudo apt remove ai-cctv-edge`는 운영 데이터를 자동 삭제하지 않는다.
+Raspberry Pi 설치·Pairing·업데이트는 [Edge 안내](edge/README.md#설치와-연결)를 따른다. 실제 장비 없이 MP4로 시험하려면 [Mock Edge](tests/mock_edge/README.md)를 사용한다.
 
 ### 수동 연결
 
-검색을 쓸 수 없을 때만 진행한다. 경로·주소·ID를 실제 값으로 바꾸고 전달 파일은 보호된 전송으로 옮긴다.
-
-1. Edge에서 인증 토큰을 보호 파일로 내보낸 뒤 중앙 PC로 전송한다.
-
-```bash
-sudo ai-cctv-edge export-auth-token --output /home/pi/edge-001-control.token
-```
-
-2. 중앙 Windows CLI에서 등록한다. 관리 8003과 복구 8002는 독립 주소다.
-
-```powershell
-AI_CCTV_CLI.exe edge-register cam-001 `
-  --server-url https://cctv.example.com --name Entrance `
-  --edge-device-id edge-001 `
-  --management-url http://192.0.2.41:8003 --recovery-url http://192.0.2.41:8002 `
-  --edge-auth-token-file 'C:\secure\edge-001-control.token' `
-  --publish-credentials-output 'C:\secure\cam-001-publish.json'
-```
-
-3. 생성된 JSON을 해당 Edge로 전달한다.
-
-```bash
-chmod 600 /home/pi/cam-001-publish.json
-sudo ai-cctv-edge setup --publish-credentials-file /home/pi/cam-001-publish.json
-```
-
-동일 Device·Camera ID, `central_publish`, 중앙 LAN IP, 지원 Profile과 백업 경로를 입력한다. 완료 후 양쪽 전달용 token·JSON만 지운다. `/etc/ai-cctv-edge/`의 실제 운영 파일은 보존한다. Pairing 자동 전달만 실패했다면 Configurator가 만든 보호 파일로 3번부터 진행한다.
+자동 검색을 사용할 수 없다면 [토큰 내보내기·수동 등록](edge/README.md#수동-연결)을 따른다. 관리·복구 주소는 중앙 컨테이너에서도 접근할 수 있어야 한다.
 
 ## 모바일과 푸시
 
@@ -237,7 +199,7 @@ Windows 제거는 기본 운영 데이터를 보존한다. 사용자 지정 경�
 
 ## 개발과 검증
 
-서버 개발·테스트 패키지는 컨테이너에 설치한다. 루트에 Python 패키지 설정이나 통합 uv 환경을 두지 않는다.
+아래 명령은 소스 저장소에서 실행한다. Windows 설치본은 운영용이며 개발 Compose·테스트 코드·문서 생성기는 포함하지 않는다. 서버 개발·테스트 도구는 컨테이너에 설치한다.
 
 | 위치 | 관리하는 환경 |
 |---|---|
@@ -258,7 +220,7 @@ docker compose --env-file server/.env -f server/compose.yml -f server/compose.de
 
 PC의 코드를 컨테이너에 읽기 전용으로 연결한다. 파일은 PC에서 편집하고 Python 서비스는 변경 시 재시작한다. 의존성을 변경하면 이미지를 다시 빌드한다. 운영 이미지는 `production`, 개발 이미지는 `development` 단계이며 태그도 분리한다.
 
-특정 서비스의 테스트는 해당 개발 컨테이너에서 실행한다. pytest 전용 플러그인이 테스트 수집 전에 서비스의 인증·접속 환경변수를 비우므로 실행 중인 서버의 설정을 테스트가 상속하지 않는다. `data`를 `external`, `preprocessing`, `analysis`로 바꿔 사용할 수 있다.
+서비스별 테스트는 해당 개발 컨테이너에서 실행한다. `data`를 `external`, `preprocessing`, `analysis`로 바꿔 사용할 수 있다.
 
 ```powershell
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec data python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/data/tests -q
@@ -292,28 +254,11 @@ docker compose -f server/compose.test.yml run --rm --user 0:0 -v "${PWD}/docs:/w
 
 Windows GUI·CLI는 [Configurator README](configurator/README.md), Edge는 [Edge README](edge/README.md), 모바일은 [모바일 README](mobile/README.md), 모의 카메라는 [Mock Edge README](tests/mock_edge/README.md)를 따른다.
 
-실환경에서는 동시 영상·HD/FHD 변경·권한·녹화 복구·백업 복원·앱 푸시를 확인한다. 자동 검증은 Docker 이미지 빌드·Pi 카메라·Android 인수를 대신하지 않는다. 기존 SQL 마이그레이션은 수정하지 않고 새 버전을 추가한다.
+실환경에서는 동시 영상·HD/FHD 변경·권한·녹화 복구·백업 복원·앱 푸시를 확인한다. 단위 테스트는 실제 카메라·영상·단말 검증을 대신하지 않는다. 기존 SQL 마이그레이션은 수정하지 않고 새 버전을 추가한다.
 
 ### 패키지 빌드
 
-Windows는 Python 3.11·Inno Setup 6가 필요하다.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\configurator\packaging\build_windows_installer.ps1 -Version 0.3.0
-```
-
-Edge는 ARM64 Linux·Python 3.11/pip·dpkg-deb·coreutils·Git에서 검증된 MediaMTX 1.9.0 바이너리를 준비한다. 최초 wheel 수집에는 Package Index가 필요하다.
-
-```bash
-export MEDIAMTX_BINARY="$PWD/vendor/mediamtx"
-export MEDIAMTX_SHA256='<확인한 64자리 SHA-256>'
-export MEDIAMTX_VERSION='v1.9.0'
-export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-export OUTPUT_DIR="$PWD/dist/edge"
-sh edge/packaging/build_deb.sh
-```
-
-결과는 Windows `dist/installer/`, Edge `dist/edge/`에 체크섬과 함께 생성된다. Edge는 오프라인 wheel을 포함한다. 배포 전 깨끗한 장비에서 설치·업데이트·제거를 시험한다. Windows 실행 파일 서명과 최종 라이선스는 별도 배포 준비 사항이다.
+소스 저장소에서 [Windows 설치 파일](configurator/README.md#설치-파일-빌드) 또는 [Edge 패키지](edge/README.md#패키지-빌드)를 만든다. 결과와 체크섬은 각각 `dist/installer/`, `dist/edge/`에 생성된다. 배포 전 실제 장비에서 설치·업데이트·제거를 확인한다. Windows 실행 파일 서명은 별도 준비가 필요하다.
 
 ## 배포 조건
 

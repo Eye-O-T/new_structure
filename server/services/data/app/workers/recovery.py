@@ -1,11 +1,6 @@
 # Edge에 남은 녹화를 복구한다. 수동 실행과 백그라운드 작업이 같은 복구 절차를 쓴다.
-"""One-shot central coordinator for importing Edge recovery segments.
-
-Run this module inside the existing Data container.  It intentionally does not
-start a daemon: an operator or scheduler supplies one explicit UTC interval,
-the coordinator fetches the Edge manifest, commits each verified file, and
-registers it through the Data Service's authenticated HTTP API.
-"""
+"""Data 컨테이너에서 Edge 녹화를 검증·저장한 뒤 내부 API로 등록한다.
+수동 실행은 지정한 UTC 구간을 한 번 처리하며 별도 데몬을 시작하지 않는다."""
 
 from __future__ import annotations
 
@@ -44,19 +39,18 @@ EDGE_PATH_PATTERN = re.compile(
 
 
 class RecoveryError(RuntimeError):
-    """A safe, operator-facing recovery failure."""
+    """인증값 없이 운영자에게 전달할 복구 오류."""
 
 
 class _RejectRedirects(HTTPRedirectHandler):
-    """Do not forward either service credential across an HTTP redirect."""
+    """HTTP 리다이렉트로 내부 인증값이 다른 주소에 전달되지 않게 한다."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
         del req, fp, code, msg, headers, newurl
         return None
 
 
-# Internal bearer/service credentials must never be handed to a host-configured
-# HTTP(S) proxy. Edge and loopback destinations are selected explicitly.
+# 내부 인증값이 호스트의 프록시로 새지 않도록 지정한 Edge·루프백 주소에 직접 접속한다.
 _HTTP_OPENER = build_opener(ProxyHandler({}), _RejectRedirects())
 
 
@@ -429,9 +423,8 @@ class RecoveryCoordinator:
                 raise RecoveryError("Edge file SHA-256 verification failed")
             os.chmod(temporary, 0o640)
             os.replace(temporary, destination)
-            # POSIX directory fsync makes the atomic rename durable. Windows
-            # does not permit opening a directory with os.open; os.replace is
-            # still atomic there and the file itself was flushed above.
+            # POSIX는 폴더도 fsync해 이름 변경을 디스크에 확정한다. Windows는 파일 동기화와
+            # os.replace의 원자성을 사용하며 폴더를 os.open으로 열 수 없다.
             if os.name != "nt":
                 directory_descriptor = os.open(
                     destination.parent,
@@ -503,9 +496,7 @@ class RecoveryCoordinator:
                     and _sha256_file(destination) == item.sha256
                 )
                 if not existing_matches:
-                    # Relative paths are immutable identities. Replacing a
-                    # different file would leave an existing database row
-                    # describing bytes that are no longer on disk.
+                    # 경로는 녹화의 고정 식별자다. 다른 내용으로 덮으면 기존 DB 정보와 파일이 어긋난다.
                     raise RecoveryError(
                         "existing recovery destination does not match manifest"
                     )

@@ -1,5 +1,4 @@
-# 인증된 설정 변경·상태 조회 API를 영상 수집과 별도 프로세스로 실행한다.
-# 영상 프로세스가 멈춰도 관리 API를 통해 상태 확인과 제어를 계속할 수 있게 한다.
+# 영상 수집이 멈춰도 상태 조회·제어를 제공하도록 관리 API를 별도 서비스로 실행한다.
 [Unit]
 Description=AI_CCTV edge authenticated management and status API
 After=network.target
@@ -11,7 +10,7 @@ Type=simple
 User=ai-cctv-edge
 Group=ai-cctv-edge
 ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml serve-control
-# API 프로세스가 종료되면 다시 시작한다. 관리자가 systemctl stop한 경우에는 재시작하지 않는다.
+# 종료된 API를 재시작한다. 관리자의 systemctl stop 요청에는 적용하지 않는다.
 Restart=always
 RestartSec=3
 TimeoutStopSec=15
@@ -28,5 +27,4 @@ ProtectHome=true
 ProtectSystem=full
 
 [Install]
-# 초기 설정이 서비스를 enable하면 다음 부팅부터 자동 실행 대상이 된다.
 WantedBy=multi-user.target

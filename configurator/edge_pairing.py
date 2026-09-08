@@ -1,8 +1,6 @@
 # 발견한 Edge의 장치 정보를 확인하고 중앙에서 받은 RTSP 게시 계정을 전달한다.
 # 리다이렉트를 따라가면 다른 장치에 비밀값이 전달될 수 있어 최초 대상으로만 요청한다.
 
-"""Provision a discovered Edge after the central Camera registration succeeds."""
-
 from __future__ import annotations
 
 import json
@@ -30,7 +28,7 @@ class EdgePairingError(RuntimeError):
 def probe_edge_connection(
     edge: DiscoveredEdge, *, timeout: float = 5.0
 ) -> dict[str, Any]:
-    """Verify the selected HMAC-discovered Edge before central registration."""
+    """중앙 등록 전에 발견한 Edge의 장치 정보를 확인한다."""
 
     if timeout <= 0:
         raise ValueError("Edge probe timeout must be positive")

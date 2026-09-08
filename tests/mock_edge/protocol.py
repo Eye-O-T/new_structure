@@ -1,5 +1,4 @@
-# 모의 Edge의 광고 서명, 토큰 검사, 파일 저장과 이벤트 목록 규칙을 모은다.
-# 실제 Edge와 같은 계약을 사용해야 중앙을 수정하지 않고 통합 시험할 수 있다.
+# 중앙 코드를 수정하지 않고 시험하도록 실제 Edge와 같은 서명·인증·저장·이벤트 규약을 사용한다.
 
 from __future__ import annotations
 
@@ -175,7 +174,7 @@ def write_atomic(path: Path, text: str, *, mode: int = 0o640) -> None:
 
 
 class EventJournal:
-    """Small persistent JSONL journal compatible with the real Edge API."""
+    """실제 Edge API와 같은 형식으로 저장하는 JSONL 이벤트 일지."""
 
     def __init__(self, camera_id: str, root: Path, max_bytes: int = 2 * 1024 * 1024):
         if CAMERA_ID.fullmatch(camera_id) is None:

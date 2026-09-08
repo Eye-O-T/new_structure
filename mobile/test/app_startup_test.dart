@@ -1,8 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:app/main.dart' as app;
 
-// Keep cold startup in its own isolate so native singletons and runApp's
-// warm-up frame begin with a fresh application clock.
+// 네이티브 싱글턴과 첫 프레임의 시계를 분리하기 위해 시작 테스트를 별도 isolate에서 실행한다.
 void main() {
   testWidgets('fresh application boots without Firebase configuration', (
     tester,

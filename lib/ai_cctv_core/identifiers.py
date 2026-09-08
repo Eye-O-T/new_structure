@@ -1,5 +1,3 @@
-"""Identifiers and filesystem boundary validation."""
-
 # 카메라 ID가 URL과 저장 경로에 함께 쓰이므로 허용 문자를 한곳에서 제한한다.
 
 from __future__ import annotations
@@ -17,13 +15,13 @@ def validate_camera_id(value: str) -> str:
 
 
 def validate_stream_path(value: str) -> str:
-    """Validate the single-segment MediaMTX path used by this release."""
+    """MediaMTX 경로가 유효한 단일 카메라 ID인지 검사한다."""
 
     return validate_camera_id(value)
 
 
 def safe_storage_path(root: str | Path, relative_path: str | Path) -> Path:
-    """Resolve a DB path below a storage root and reject traversal/absolute input."""
+    """DB의 상대 경로를 저장소 내부 경로로 변환하고 절대 경로·탈출을 거부한다."""
 
     relative = Path(relative_path)
     if relative.is_absolute():

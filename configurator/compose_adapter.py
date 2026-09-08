@@ -50,7 +50,7 @@ class Prerequisite:
 
 
 def installation_prerequisites(server_dir: str | Path) -> list[Prerequisite]:
-    """Return non-mutating checks required before starting the deployment."""
+    """배포를 바꾸지 않고 실행 전 점검 항목을 반환한다."""
 
     server_root = Path(server_dir).resolve()
     results = []
@@ -247,7 +247,7 @@ class ComposeAdapter:
         )
 
     def start(self) -> int:
-        # Retired services in this Compose project must not keep producing events.
+        # 이전 구성의 컨테이너가 남아 중복 이벤트를 만들지 않도록 제거한다.
         return self.run(*START_ARGUMENTS).returncode
 
     def stop(self) -> int:

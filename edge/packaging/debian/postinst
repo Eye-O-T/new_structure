@@ -34,8 +34,7 @@ install -d -m 0750 -o ai-cctv-edge -g ai-cctv-edge \
 chown root:ai-cctv-edge /etc/ai-cctv-edge
 chmod 0750 /etc/ai-cctv-edge
 if [ ! -s /etc/ai-cctv-edge/recovery.token ]; then
-    # 기존 인증 값은 보존한다. 처음 생성할 때도 임시 파일을 완성하고 권한을 설정한 뒤
-    # 교체해 내용이 일부만 쓰인 토큰이나 다른 사용자에게 공개된 파일이 남지 않게 한다.
+    # 기존 토큰은 보존한다. 새 토큰은 임시 파일의 기록·권한 설정을 마친 뒤 교체한다.
     umask 0077
     token_temp=$(mktemp /etc/ai-cctv-edge/.recovery.token.XXXXXX)
     trap 'rm -f "$token_temp"' EXIT INT TERM
@@ -49,8 +48,7 @@ fi
 chown root:ai-cctv-edge /etc/ai-cctv-edge/recovery.token
 chmod 0640 /etc/ai-cctv-edge/recovery.token
 
-# 예전 버전은 설치 중 서비스를 활성화했다. 이미 설정된 장치의 업그레이드는 유지하되
-# 예제 설정만 설치된 새 장치를 초기 설정이 끝난 장치로 취급하지 않도록 구분한다.
+# 구형 장치의 설정은 유지하되 예제 설정뿐인 새 장치는 초기 설정 완료로 취급하지 않는다.
 configured_marker=/etc/ai-cctv-edge/.configured
 if [ -n "${2:-}" ] && [ -s /etc/ai-cctv-edge/publish.password ] && \
     [ ! -e "$configured_marker" ]; then
@@ -66,8 +64,7 @@ fi
 # systemd가 갱신된 서비스 정의를 다시 읽게 한다. 새 장치의 자동 시작 활성화는 초기 설정에서 한다.
 systemctl daemon-reload
 if [ -n "${2:-}" ]; then
-    # 파일을 교체해도 실행 중인 프로세스에는 이전 코드가 남아 있다. 업그레이드에서는
-    # 원래 실행 중이던 서비스만 재시작하며, 사용자가 꺼 둔 서비스는 임의로 켜지 않는다.
+    # 교체한 코드를 적용하도록 실행 중이던 서비스만 재시작한다. 꺼 둔 서비스는 유지한다.
     systemctl try-restart ai-cctv-edge.service \
         ai-cctv-edge-control.service ai-cctv-edge-recovery.service
 fi

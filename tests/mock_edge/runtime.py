@@ -1,5 +1,4 @@
-# FFmpeg 프로세스로 MP4를 반복 송출하고 로컬 녹화를 만들어 카메라를 모사한다.
-# 송출과 녹화를 따로 관리하므로 중앙 연결 실패를 시험해도 로컬 자료를 남길 수 있다.
+# FFmpeg로 MP4를 반복 송출·녹화한다. 두 프로세스를 나눠 중앙 연결이 끊겨도 녹화를 유지한다.
 
 from __future__ import annotations
 
@@ -79,7 +78,7 @@ def utc_timestamp() -> str:
 
 
 def resolve_ffmpeg(executable: str) -> str:
-    """Resolve FFmpeg and verify the libx264 encoder used by the loop sender."""
+    """FFmpeg 경로와 반복 송출에 필요한 libx264 인코더를 확인한다."""
 
     resolved: str | None = None
     if executable == "ffmpeg" and getattr(sys, "frozen", False):
@@ -169,7 +168,7 @@ def build_publisher_command(
     profile: VideoProfile,
     target: CentralTarget,
 ) -> list[str]:
-    """Build a shell-free real-time MP4 loop publishing RTSP/1.0 over TCP."""
+    """셸 없이 MP4를 실시간 반복 송출하는 RTSP/1.0·TCP 명령을 만든다."""
 
     return [
         executable,
@@ -194,7 +193,7 @@ def build_recorder_command(
     *,
     now: datetime | None = None,
 ) -> tuple[list[str], Path]:
-    """Build a second loop encoder that produces Edge-compatible MPEG-TS files."""
+    """Edge와 같은 MPEG-TS 파일을 만드는 별도 녹화 명령을 구성한다."""
 
     started = (now or datetime.now(UTC)).astimezone(UTC)
     directory = (
@@ -304,7 +303,7 @@ class ManagedProcess:
 
 
 class MediaEngine:
-    """Own looped RTSP publication and independent local MPEG-TS recording."""
+    """RTSP 반복 송출과 독립적인 로컬 MPEG-TS 녹화를 관리한다."""
 
     def __init__(
         self,

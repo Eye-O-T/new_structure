@@ -1,5 +1,4 @@
-# 실제 Raspberry Pi 없이 중앙 서버를 시험할 수 있도록 Edge의 제어·복구 HTTP 계약을 구현한다.
-# 모의 상태 이벤트와 실제 MP4 송출을 조합하되 운영 Edge의 인증·응답 형태를 유지한다.
+# Raspberry Pi 대신 MP4·모의 이벤트로 중앙을 시험하며 실제 Edge의 제어·복구 API 계약을 지킨다.
 
 from __future__ import annotations
 
@@ -98,7 +97,7 @@ def _sha256(path: Path) -> str:
 
 
 class MockEdgeService:
-    """State and behavior shared by the control and recovery HTTP apps."""
+    """제어·복구 API가 공유하는 모의 장치 상태와 동작."""
 
     def __init__(
         self,
@@ -194,7 +193,7 @@ class MockEdgeService:
     def stop(self) -> None:
         self.media.stop()
 
-    # 장치·카메라 정보와 게시 계정을 확인한 뒤 저장하여 서로 다른 카메라의 계정이 섞이지 않게 한다.
+    # 카메라 간 계정이 섞이지 않도록 장치·카메라·송출 계정을 확인한 뒤 저장한다.
     def complete_pairing(self, request: PairingCompletion) -> dict[str, str]:
         with self._lock:
             if self.marker_path.exists():
@@ -455,7 +454,7 @@ class MockEdgeService:
             self.journal.record(action, storage_percent=self._storage_override)
         return {"status": "applied", "action": action, "edge": self.status()}
 
-    # 아직 쓰는 파일을 복구 대상으로 주면 크기·해시가 바뀌므로 완료된 Segment만 고른다.
+    # 크기·해시가 변하지 않도록 기록이 끝난 영상 조각만 복구 대상으로 고른다.
     def finalized_segments(self) -> tuple[Path, ...]:
         camera_root = self.backup_root / self.camera_id
         candidates: list[tuple[int, str, Path]] = []

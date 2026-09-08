@@ -1,5 +1,4 @@
 # 입력·DB·서버 오류를 일관된 HTTP 상태 코드와 JSON 오류 응답으로 바꾼다.
-"""Stable JSON error contract."""
 
 from __future__ import annotations
 
@@ -51,7 +50,7 @@ def install_error_handlers(app: FastAPI) -> None:
     async def handle_validation_error(
         _request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        # Do not include input values: request bodies can contain hashes or tokens.
+        # 요청에 해시·토큰이 있을 수 있어 오류 응답에는 입력값을 넣지 않는다.
         details = [
             {
                 "location": list(error["loc"]),

@@ -1,3 +1,3 @@
-"""Server configuration tools shared by the CLI and PyQt GUI."""
+"""서버 설정용 GUI·CLI와 공통 설치 로직."""
 
 __version__ = "0.3.0"

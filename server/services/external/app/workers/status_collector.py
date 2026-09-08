@@ -1,5 +1,4 @@
 # Edge를 주기적으로 조회해 상태와 이벤트를 중앙에 반영하고 연결 변화도 이벤트로 남긴다.
-"""Periodic central collection of Edge runtime state and durable event journals."""
 
 from __future__ import annotations
 
@@ -124,9 +123,7 @@ class StatusCollector:
         if isinstance(encoder, str) and encoder:
             observation["encoder"] = encoder
 
-        # Status from older Edge releases contained configured declarations,
-        # not probed sensor capabilities. Only an explicitly available probe
-        # may replace the central supported-profile set.
+        # 구형 Edge는 설정값을 지원 사양으로 보냈다. 실제 점검에 성공한 경우만 지원 프로필을 갱신한다.
         if payload.get("capability_status") != "available":
             return observation
         supported = payload.get(
@@ -256,10 +253,8 @@ class StatusCollector:
                 or next_cursor == previous_cursor
             ):
                 break
-        # Cursor persistence is deliberately deferred until the complete drain
-        # succeeds. If a later page fails, replaying already imported events is
-        # safe because edge_event_id is idempotent. More importantly, the old
-        # runtime transition baseline remains intact for the next poll.
+        # 전체 페이지를 읽은 뒤에만 cursor를 저장한다. 실패 시 이전 상태 비교 기준을 보존하며
+        # 재조회한 이벤트는 edge_event_id로 중복을 막는다.
         return (
             imported,
             imported_types,
@@ -417,12 +412,8 @@ class StatusCollector:
             await self.data.update_camera_video_profile(
                 camera_id, self._profile_observation(payload)
             )
-            # Drain the authoritative Edge journal before replacing the
-            # runtime snapshot. If the journal is temporarily unavailable, the
-            # error path only marks Edge offline and preserves the previous
-            # power/input/storage values. The next successful poll can then
-            # compare against that baseline and synthesize any truly missing
-            # transition without duplicating a journaled event.
+            # 상태 갱신 전에 Edge 일지를 읽는다. 실패하면 offline만 표시하고 이전 전원·입력·저장 상태는
+            # 보존해 다음 조회에서 일지와 겹치지 않는 누락 변화만 이벤트로 만든다.
             (
                 imported,
                 imported_types,

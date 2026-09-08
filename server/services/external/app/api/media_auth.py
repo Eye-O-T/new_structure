@@ -48,7 +48,7 @@ DUMMY_MEDIA_PASSWORD_HASH = hash_password("invalid-media-credential")
 
 
 class _MediaAuthResponse(Response):
-    """Release a camera lock only after MediaMTX receives the auth response."""
+    """MediaMTX에 인증 응답을 보낸 뒤 카메라 잠금을 해제한다."""
 
     def __init__(self, lock: asyncio.Lock) -> None:
         super().__init__(status_code=204)
@@ -128,9 +128,7 @@ async def internal_auth_verify(
     elif original_path.startswith("/playback/"):
         raise HTTPException(status_code=400, detail="Invalid playback path")
     elif original_uri and not original_path.startswith("/hls/"):
-        # auth_request is valid only for the two protected media
-        # namespaces. Never approve a raw URI that Nginx may have
-        # normalized into one of them while this service saw another.
+        # 인증 요청은 보호된 두 영상 경로에만 허용한다. Nginx의 정규화와 해석이 달라질 URI는 거절한다.
         raise HTTPException(status_code=400, detail="Invalid protected path")
 
     if selected_camera_id is not None:
@@ -180,8 +178,7 @@ async def internal_media_auth(
         # 이 허용은 HLS 포트를 외부에 직접 열지 않는 Compose 구성에 의존한다.
         return Response(status_code=204)
     if action not in {"publish", "read"}:
-        # Playback/API/metrics/pprof are excluded by MediaMTX config and
-        # remain on the private Compose network.
+        # Playback/API/metrics/pprof는 MediaMTX 인증 대상에서 제외되며 내부 Compose망에만 있다.
         return Response(status_code=204)
     if not CAMERA_ID_PATTERN.fullmatch(payload.path):
         raise _auth_error("Media authentication failed")
@@ -208,9 +205,7 @@ async def internal_media_auth(
                 payload.password, settings.media_read_password
             )
         else:
-            # A database credential is issued on every registration/rotation
-            # and is authoritative. Static credentials remain a bootstrap-only
-            # fallback for cameras created before persistence existed.
+            # 등록·교체 시 발급한 DB 인증값을 우선한다. 정적 인증값은 DB 저장 도입 전 카메라의 초기 대체값이다.
             dynamic = await data.get_camera_publish_credential(payload.path)
             if dynamic is not None:
                 expected_username = str((dynamic or {}).get("username", ""))

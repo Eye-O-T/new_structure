@@ -62,7 +62,7 @@ class InstallRequest:
 @dataclass(frozen=True)
 class InstallResult:
     config_path: Path
-    # Compatibility name: this is the Data service's least-privilege env file.
+    # 기존 필드명이며 실제로는 Data 전용 비밀 설정 파일이다.
     secrets_path: Path
     external_secrets_path: Path
     preprocessing_secrets_path: Path
@@ -76,16 +76,13 @@ class InstallResult:
     camera_credentials: dict[str, dict[str, str]]
 
 
-# 비밀번호 해시의 $를 Compose 변수로 오해하지 않도록 env 파일 값의 따옴표를 처리한다.
+# 작은따옴표로 감싸 비밀번호 해시의 $가 Compose 변수로 치환되는 것을 막는다.
 def _dotenv(value: str | Path | int) -> str:
     text = str(value)
     if "\n" in text or "\r" in text:
         raise ValueError("environment values must be single-line")
     if SAFE_ENV.fullmatch(text):
         return text
-    # Compose interpolates `$NAME` in unquoted and double-quoted env-file
-    # values. Single quotes preserve Argon2 hashes and other secret values
-    # literally; Compose represents an embedded quote as \'.
     return "'" + text.replace("'", "\\'") + "'"
 
 
@@ -141,9 +138,7 @@ def _runtime_identity() -> tuple[int, int] | None:
         return None
     uid = int(os.getenv("SUDO_UID", str(os.getuid())))
     gid = int(os.getenv("SUDO_GID", str(os.getgid())))
-    # Running the Configurator directly as root must not silently make every
-    # media container run as root. The documented deployment account defaults
-    # to 1000 when sudo did not preserve an invoking identity.
+    # root로 설치해도 미디어 컨테이너는 일반 계정으로 실행한다. 기본 UID·GID는 1000이다.
     if uid == 0:
         uid = int(os.getenv("AI_CCTV_RUNTIME_UID", "1000"))
     if gid == 0:
@@ -152,7 +147,7 @@ def _runtime_identity() -> tuple[int, int] | None:
 
 
 def _validate_public_base_url(value: str) -> str:
-    """Return a normalized public HTTPS origin or an empty development value."""
+    """HTTPS 접속 주소를 검증한다. 개발 환경에서는 빈 값을 허용한다."""
 
     text = value.strip()
     if not text:
@@ -265,7 +260,6 @@ def _validate_request(request: InstallRequest) -> Path:
 
 # 입력 검증 → 운영 폴더·모델 준비 → 설정·인증 파일 생성 순서다. 기존 파일은 백업한다.
 def initialize(request: InstallRequest) -> InstallResult:
-    """Validate once and atomically generate config, secrets and Compose env."""
 
     model_source = _validate_request(request)
     public_base_url = _validate_public_base_url(request.public_base_url)
@@ -312,8 +306,7 @@ def initialize(request: InstallRequest) -> InstallResult:
             )
             if explicitly_selected or exc.errno not in {errno.EINVAL, errno.EPERM}:
                 raise
-            # Some rootless or mapped filesystems reject arbitrary numeric IDs.
-            # Fall back to their actual owner so bind mounts remain writable.
+            # 소유자 변경이 불가능한 파일 시스템에서는 현재 소유자로 컨테이너를 실행한다.
             runtime_identity = (os.getuid(), os.getgid())
             for name in owned_names:
                 stat = directories[name].stat()

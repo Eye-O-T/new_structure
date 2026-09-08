@@ -13,7 +13,7 @@ def enforce_retention(
     *,
     preserve_newest: bool = False,
 ) -> list[Path]:
-    """Delete old TS segments without unlinking the active splitmux output."""
+    """기록 중인 파일을 보호하면서 오래된 TS 조각을 삭제한다."""
 
     current = time.time() if now is None else now
     cutoff = current - max_age_hours * 3600

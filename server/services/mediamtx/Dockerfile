@@ -1,8 +1,8 @@
 # 공식 이미지에서 실행 파일만 가져오고, 녹화 완료 알림에 필요한 셸·curl을 추가한다.
 ARG MEDIAMTX_UPSTREAM_IMAGE=bluenviron/mediamtx:1.9.0
+ARG MEDIAMTX_WRAPPER_BASE_IMAGE=alpine:3.20.3
 FROM ${MEDIAMTX_UPSTREAM_IMAGE} AS upstream
 
-ARG MEDIAMTX_WRAPPER_BASE_IMAGE=alpine:3.20.3
 FROM ${MEDIAMTX_WRAPPER_BASE_IMAGE}
 
 RUN apk add --no-cache ca-certificates curl

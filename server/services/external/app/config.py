@@ -123,10 +123,8 @@ class Settings:
     public_hls_prefix: str = "/hls"
     public_playback_prefix: str = "/playback"
     public_base_url: str | None = None
-    # Edge profile application can spend 20 seconds waiting for another change,
-    # 20 seconds starting the new encoder and another 20 seconds on rollback.
-    # Keep the central deadline above that complete transaction window so a
-    # client cannot retry after an ambiguous timeout.
+    # Edge 변경은 잠금 대기·인코더 시작·복원에 각각 최대 20초가 걸린다.
+    # 완료 여부가 모호한 시간 초과 뒤 재시도하지 않도록 중앙 제한 시간은 그 합보다 길게 잡는다.
     edge_control_timeout_seconds: float = 75.0
     edge_status_timeout_seconds: float = 5.0
     media_control_timeout_seconds: float = 5.0

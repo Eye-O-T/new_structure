@@ -499,6 +499,45 @@ def test_recording_playback_uses_numeric_mediamtx_duration(service):
     query = parse_qs(urlparse(response.json()["playback_url"]).query)
     assert query["path"] == ["cam-001"]
     assert query["duration"] == ["60.000"]
+    assert query["start"] == ["2026-08-22T08:00:00Z"]
+
+
+@pytest.mark.parametrize(
+    "filename,expected_start",
+    [
+        ("20260908T040308-227398Z.mp4", "2026-09-08T04:03:08.227398Z"),
+        ("20260230T040308-227398Z.mp4", "2026-09-08T04:03:08.092000Z"),
+        ("legacy.mp4", "2026-09-08T04:03:08.092000Z"),
+    ],
+)
+def test_recording_playback_uses_filename_time_without_changing_duration(
+    service, monkeypatch, filename, expected_start,
+):
+    client, fake_data = service
+    token = _login(client)["access_token"]
+
+    async def recording(segment_id, *, user_id):
+        return {
+            "id": segment_id,
+            "camera_id": "cam-001",
+            "relative_path": f"cam-001/2026/09/08/{filename}",
+            # 이전 Hook이 파일 수정 시각으로 등록한 잘못된 시작도 재생 가능해야 한다.
+            "start_time": "2026-09-08T04:03:08.092Z",
+            "end_time": "2026-09-08T04:03:18.092Z",
+            "format": "fmp4",
+        }
+
+    monkeypatch.setattr(fake_data, "get_recording", recording)
+    response = client.get(
+        "/api/v1/recordings/segment-001/playback",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    query = parse_qs(urlparse(response.json()["playback_url"]).query)
+    assert query["start"] == [expected_start]
+    assert query["duration"] == ["10.000"]
+    assert query["path"] == ["cam-001"]
 
 
 def test_internal_auth_verify_returns_identity_headers_and_checks_hls_acl(service):

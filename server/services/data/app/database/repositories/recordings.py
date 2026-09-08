@@ -1,5 +1,4 @@
 # 녹화 파일의 경로·시간·상태를 저장하여 영상 검색과 이벤트 연결을 지원한다.
-"""Recordings persistence and SQL operations."""
 
 from __future__ import annotations
 
@@ -121,7 +120,7 @@ class RecordingsRepositoryMixin:
         pre_roll_seconds: int,
         post_roll_seconds: int,
     ) -> None:
-        """Attach a newly indexed segment to existing event playback windows."""
+        """새 녹화 조각을 시간대가 겹치는 기존 이벤트에 연결한다."""
 
         segment_start = parse_utc(segment["start_time"])
         segment_end = parse_utc(segment["end_time"])

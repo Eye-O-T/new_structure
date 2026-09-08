@@ -1,5 +1,3 @@
-"""Version 1 in-process BGR frame input and per-frame person detection output."""
-
 # 탐지 모델을 바꾸어도 카메라 처리 코드가 유지되도록 입력과 출력의 모양을 정한다.
 # 이 계약은 같은 프로세스 안에서 이미지를 전달하며, HTTP로 영상 배열을 보내는 형식은 아니다.
 
@@ -49,9 +47,9 @@ class DetectionProcessor(Protocol):
     # Protocol은 구현 클래스가 갖춰야 할 함수 모양을 나타낸다.
     # reset은 영상 재접속 때 이전 추적 상태를 버리고, process는 한 프레임을 처리한다.
     def reset(self) -> None:
-        """Discard tracking state when the camera stream starts a new session."""
+        """새 영상 세션에서 이전 추적 상태를 버린다."""
         ...
 
     def process(self, frame: DetectionFrame) -> DetectionResult:
-        """Return person IDs, pixel xyxy boxes and confidence; do not mutate pixels."""
+        """인물 ID·픽셀 xyxy 박스·신뢰도를 반환하고 입력 영상은 변경하지 않는다."""
         ...

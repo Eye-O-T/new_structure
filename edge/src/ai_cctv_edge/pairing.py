@@ -1,5 +1,3 @@
-"""Authenticated LAN discovery and one-time Edge provisioning."""
-
 # 같은 LAN에서 Edge를 발견하고 중앙 주소·송출 인증을 한 번 등록하는 절차를 제공한다.
 # UDP 광고의 HMAC 서명은 변조를 확인하기 위한 것이며 광고 내용 자체를 암호화하지 않는다.
 from __future__ import annotations

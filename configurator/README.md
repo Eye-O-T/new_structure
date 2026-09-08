@@ -1,6 +1,8 @@
 # Windows Configurator
 
-일반 사용자가 중앙 서버를 설정하고 Docker 컨테이너를 시작하는 GUI·CLI다. 서버의 Python 개발 환경과 별도로 관리한다.
+중앙 서버 설정과 Docker 실행을 돕는 Windows GUI·CLI다. 설치 파일을 사용하는 경우 Python·uv 없이 [설치 안내](../README.md#windows-설치)를 따른다. 아래는 소스 개발·빌드용이다.
+
+## 개발 실행
 
 Windows에서 Python 3.11·uv를 준비하고 저장소 루트에서 실행한다.
 
@@ -10,4 +12,14 @@ uv run --project configurator --locked python -m configurator
 uv run --project configurator --locked python -m pytest -c configurator/pyproject.toml configurator/tests
 ```
 
-GUI를 사용해도 Docker Desktop은 필요하다. 실행 파일을 설치한 사용자는 Python·uv가 필요 없다. 패키징과 설치 절차는 [루트 README](../README.md#패키지-빌드)를 따른다. 공통 코드는 `../lib`의 로컬 패키지를 사용하며 `uv.lock`은 이 개발 환경의 버전을 고정한다.
+공통 코드는 `../lib`의 로컬 패키지를 사용하며 `uv.lock`으로 개발·빌드 의존성 버전을 고정한다. 서버 기동에는 Docker Desktop이 필요하다.
+
+## 설치 파일 빌드
+
+Windows에서 Python 3.11·uv·Inno Setup 6를 준비하고 저장소 루트에서 실행한다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\configurator\packaging\build_windows_installer.ps1 -Version 0.3.0
+```
+
+빌드는 `uv.lock`에 따라 `build/windows-installer/.venv`에 별도 환경을 만들고 테스트·실행 파일 생성·설치 파일 생성을 수행한다. 설치 파일과 체크섬은 `dist/installer/`에 생성된다. 배포 전 실제 Windows에서 설치·업데이트·제거를 확인하고 실행 파일 서명을 준비한다.

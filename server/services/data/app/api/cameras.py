@@ -1,5 +1,4 @@
 # 카메라 등록 정보와 Edge 연결 상태를 읽고 변경하는 내부 API이다.
-"""Internal cameras API."""
 
 from __future__ import annotations
 

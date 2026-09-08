@@ -1,5 +1,4 @@
-// 인증이 필요한 실시간 HLS와 녹화 영상을 재생한다. 토큰이 교체되면 네이티브 플레이어도
-// 다시 만들어 새 Authorization 헤더를 재생 목록과 영상 조각 요청에 적용한다.
+// 토큰 갱신 시 플레이어를 다시 만들어 HLS 목록·조각 요청에도 새 인증 헤더를 적용한다.
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,8 +6,6 @@ import 'package:video_player/video_player.dart';
 import 'package:app/core/network/providers.dart';
 import 'object_overlay.dart';
 
-/// Rebuilds the native player with current Bearer headers after token rotation.
-/// Android's HTTP data source applies headers to HLS manifests and segments.
 class ProtectedVideo extends ConsumerStatefulWidget {
   const ProtectedVideo({
     super.key,

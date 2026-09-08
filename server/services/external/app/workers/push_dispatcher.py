@@ -1,5 +1,4 @@
 # Data에서 발송할 알림을 가져와 FCM으로 보내고 성공·재시도 결과를 되돌려 준다.
-"""Claim and complete durable deliveries through Data; send through the FCM adapter."""
 
 from __future__ import annotations
 

@@ -1,8 +1,6 @@
 # Configurator가 중앙 HTTPS 관리자 API를 호출하는 클라이언트다.
 # JWT는 요청 인증용이고 일회성 RTSP 계정은 Edge 전달용이므로 저장·표시 경로를 구분한다.
 
-"""Authenticated management client shared by the Configurator GUI and CLI."""
-
 from __future__ import annotations
 
 import json
@@ -21,14 +19,13 @@ from .private_files import restrict_private_file
 
 
 VIDEO_PROFILES = ("hd", "fhd")
-# The central control endpoint can legitimately wait for Edge apply and rollback
-# verification. Keep this above the server's 75-second Edge control deadline.
+# Edge 적용·복구를 기다리는 서버의 제한 시간(75초)보다 길게 대기한다.
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 90.0
 _SENSITIVE_PARTS = ("password", "token", "secret", "credential", "authorization")
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
-    """Keep credentials pinned to the administrator-selected origin."""
+    """선택한 서버 외의 주소로 인증 정보가 전달되는 리다이렉트를 막는다."""
 
     def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
         return None
@@ -59,7 +56,7 @@ def _validate_edge_url(value: str, name: str) -> None:
 
 
 class ServerApiError(RuntimeError):
-    """Safe, operator-facing representation of an External Service error."""
+    """사용자에게 표시할 관리자 API 오류."""
 
     def __init__(
         self,
@@ -77,8 +74,6 @@ class ServerApiError(RuntimeError):
 
 # 중첩된 응답에서도 비밀번호·토큰을 제거해 GUI와 콘솔에 노출되지 않게 한다.
 def redact_for_display(value: Any) -> Any:
-    """Recursively remove secrets before a response reaches UI or console output."""
-
     if isinstance(value, Mapping):
         redacted: dict[str, Any] = {}
         for key, item in value.items():
@@ -97,8 +92,6 @@ def redact_for_display(value: Any) -> Any:
 
 # 중앙이 비밀번호를 한 번만 돌려주므로 요청 전에 파일 저장 가능 여부를 확인한다.
 def prepare_private_output(path: Path) -> Path:
-    """Validate a private output location before requesting a one-time secret."""
-
     target = path.expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and not target.is_file():
@@ -117,8 +110,6 @@ def prepare_private_output(path: Path) -> Path:
 def write_publish_credentials(
     response: Mapping[str, Any], camera_id: str, path: Path
 ) -> Path:
-    """Atomically persist the one-time RTSP publish credential, never a JWT."""
-
     credentials = response.get("publish_credentials")
     response_camera_id = response.get("camera_id")
     if response_camera_id != camera_id or not isinstance(credentials, Mapping):
@@ -189,7 +180,7 @@ def _error_from_payload(status_code: int, payload: Any) -> ServerApiError:
 
 
 class ServerApiClient:
-    """Small JSON client for the public, versioned External Service boundary."""
+    """관리자 API의 JSON 요청·응답과 로그인을 처리한다."""
 
     def __init__(
         self,

@@ -39,9 +39,9 @@ from .state import (
     utc_timestamp,
 )
 
-try:  # Verify the runner's held lock on Linux; keep test imports portable.
+try:  # Linux 파일 잠금은 유지하며 다른 OS에서도 테스트를 불러올 수 있게 한다.
     import fcntl
-except ImportError:  # pragma: no cover - non-POSIX test hosts only
+except ImportError:  # pragma: no cover - 비POSIX 테스트 환경용
     fcntl = None  # type: ignore[assignment]
 
 
@@ -77,7 +77,7 @@ _NOMINAL_FPS_TOLERANCE = 0.05
 
 
 def _parse_primary_camera_modes(output: str) -> tuple[CameraMode, ...]:
-    """Parse sensor modes for camera index 0 from rpicam/libcamera output."""
+    """rpicam/libcamera 출력에서 첫 카메라의 센서 모드를 읽는다."""
 
     in_primary_camera = False
     found_primary_camera = False
@@ -108,7 +108,7 @@ class CapabilityProbe(Protocol):
 
 
 class LocalCapabilityProbe:
-    """Probe the primary camera's sensor modes and the configured encoder."""
+    """첫 카메라의 센서 모드와 설정된 인코더를 점검한다."""
 
     def __init__(self, timeout_seconds: float = 5.0):
         self.timeout_seconds = timeout_seconds
@@ -151,8 +151,7 @@ class LocalCapabilityProbe:
             return None, None
         modes = _parse_primary_camera_modes(result.stdout)
         if not modes:
-            # A detected camera without parseable FPS data is not enough to
-            # claim that a requested 30fps mode is supported.
+            # 카메라를 찾았더라도 FPS를 읽지 못하면 30fps 지원으로 판단하지 않는다.
             return None, None
         return True, modes
 
@@ -162,8 +161,7 @@ class LocalCapabilityProbe:
         modes: tuple[CameraMode, ...] | None,
     ) -> tuple[str, ...]:
         if modes is None:
-            # Preserve configured declarations while exposing an unknown
-            # capability status; ProfileManager rejects changes as unknown.
+            # 기존 프로필은 보존하되 지원 여부를 unknown으로 표시하여 변경을 차단한다.
             return tuple(config.video.supported_profiles)
         supported: list[str] = []
         for name in config.video.supported_profiles:
@@ -379,8 +377,7 @@ class LocalProfileRuntime:
                 runner_instance_id=str(request["runner_instance_id"]),
             )
         except OSError:
-            # The persistent selection is already committed. A same-profile
-            # transient file is harmless and is discarded by the next runner.
+            # 영구 설정은 저장됐다. 같은 프로필의 임시 파일은 다음 실행에서 무시된다.
             pass
 
     def clear_request(self, generation: int) -> None:
@@ -682,8 +679,7 @@ class EdgeStatusService:
             camera_input = "offline"
             central_connection = "unknown"
         elif capture_alive is False:
-            # The control service has an old status file but the capture
-            # process no longer exists. Do not report its last healthy values.
+            # 캡처가 종료됐다면 남은 상태 파일의 정상 값을 현재 상태로 보고하지 않는다.
             capture_state = "stale"
             camera_input = "offline"
             central_connection = "unknown"

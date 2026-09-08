@@ -31,7 +31,7 @@ docker compose --env-file server/.env -f server/compose.yml -f server/compose.de
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec external python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/external/tests -q
 ```
 
-설정 파일과 인증키는 실제 설치에서 생성한 값을 사용합니다. 컨테이너는 `app.main:app`을 실행하고, `/health/live`는 프로세스 상태, `/health/ready`는 Data 통신 상태를 확인합니다. 서비스 간 인증키·JWT·영상 자격 증명 설정은 `app/config.py`와 서버 설정 예시를 기준으로 합니다.
+운영과 분리한 개발용 설정·인증키를 사용합니다. `/health/live`는 프로세스 상태, `/health/ready`는 Data 통신 상태를 확인합니다. 서비스 간 인증키·JWT·영상 자격 증명 설정은 `app/config.py`와 서버 설정 예시를 기준으로 합니다.
 
 ## 유지해야 하는 경계
 

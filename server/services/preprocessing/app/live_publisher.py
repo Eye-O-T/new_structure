@@ -1,5 +1,3 @@
-"""Coalesce live detections so slow API calls never backlog video frames."""
-
 # 실시간 박스는 오래된 자료를 모두 보내기보다 가장 최근 상태를 빨리 보내는 것이 중요하다.
 # HTTP 전송을 별도 스레드에 맡겨 느린 네트워크가 카메라 탐지를 막지 않게 한다.
 

@@ -1,5 +1,4 @@
 # 요청 처리 함수에 현재 설정과 저장소 객체를 전달하여 매번 새 객체를 만들지 않게 한다.
-"""Request-scoped runtime settings and repository dependencies."""
 
 from typing import Annotated, Any
 

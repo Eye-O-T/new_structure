@@ -1,7 +1,6 @@
 # 소스 배포의 첫 관리자를 생성한다. 비밀번호를 숨김 입력으로 받아 컨테이너 안에서 해시한다.
 # 명령 인자에 비밀번호를 넣지 않고 표준 입력으로 전달하여 프로세스 목록 노출을 줄인다.
 
-"""Create the first administrator through the Docker-internal Data API."""
 
 from __future__ import annotations
 

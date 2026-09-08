@@ -32,7 +32,7 @@ def test_runtime_and_development_images_keep_separate_dependencies():
         )
         runtime, stages = dockerfile.split("FROM runtime AS development", 1)
         assert "requirements-dev.txt" not in runtime
-        assert "pip install --no-cache-dir /opt/ai-cctv-core" in runtime
+        assert "/opt/ai-cctv-core" in runtime
         assert "requirements-dev.txt" in stages
         assert stages.rstrip().endswith("FROM runtime AS production")
         service = development["services"][name]

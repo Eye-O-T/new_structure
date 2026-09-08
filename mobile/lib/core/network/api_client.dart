@@ -169,8 +169,7 @@ class ApiClient extends ChangeNotifier {
   }
 
   Future<void> refreshSession() async {
-    // 여러 화면의 요청이 동시에 만료되어도 갱신 요청 하나를 함께 기다린다.
-    // 서버에서 refresh 토큰을 교체하므로 같은 토큰으로 중복 갱신하지 않도록 한다.
+    // 서버가 refresh 토큰을 교체하므로 동시 요청은 하나의 갱신 결과를 공유한다.
     if (_refreshing != null) return _refreshing!;
     final future = _performRefresh();
     _refreshing = future;

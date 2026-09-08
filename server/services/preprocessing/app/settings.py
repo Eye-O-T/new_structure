@@ -144,14 +144,13 @@ class Settings:
             raise ValueError("DISAPPEAR_SECONDS must be greater than zero")
 
     def rtsp_source_url(self, stream_path: str) -> str:
-        """Build a credentialed URL without ever logging or returning its parts alone."""
+        """인증 정보를 인코딩한 RTSP URL을 만든다. 반환값은 로그에 남기지 않는다."""
 
         parsed = urlsplit(self.rtsp_base_url)
         normalized_path = stream_path.strip("/")
         if not normalized_path:
             raise ValueError("RTSP stream path must not be empty")
         # URL에서 의미를 가지는 특수 문자를 인코딩해 경로와 인증 정보가 섞이지 않게 한다.
-        # 반환 URL에는 비밀번호가 들어 있으므로 로그에 출력하지 않는다.
         escaped_path = quote(normalized_path, safe="/-._~")
         base_path = parsed.path.rstrip("/")
         path = f"{base_path}/{escaped_path}"

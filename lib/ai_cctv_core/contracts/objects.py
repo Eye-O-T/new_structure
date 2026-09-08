@@ -1,5 +1,3 @@
-"""Versioned contracts between detection, identity and attribute analysis."""
-
 # 계약(contract)은 서비스들이 주고받기로 약속한 데이터 형식과 검증 규칙이다.
 # 영상 파일 자체 대신 좌표와 공유 저장소의 상대 경로를 전달한다.
 

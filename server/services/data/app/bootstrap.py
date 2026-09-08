@@ -1,5 +1,4 @@
 # Data 시작 시 저장소를 준비하고 비어 있는 계정·카메라 목록에 초기 설정을 반영한다.
-"""Initialize storage and seed configured users and cameras."""
 
 from __future__ import annotations
 

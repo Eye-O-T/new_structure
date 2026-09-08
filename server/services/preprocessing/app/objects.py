@@ -1,5 +1,3 @@
-"""Frame-space boxes and per-appearance crops, independent of identity models."""
-
 # 탐지 좌표를 영상 크기에 맞추고, 다른 모델이 사용할 사람 이미지와 박스 이미지를 만든다.
 
 import uuid

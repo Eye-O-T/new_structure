@@ -1,5 +1,4 @@
 # 토큰의 발급·교체·폐기 이력을 저장하여 이미 로그아웃한 세션의 재사용을 막는다.
-"""Sessions persistence and SQL operations."""
 
 from __future__ import annotations
 

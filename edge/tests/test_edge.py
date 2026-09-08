@@ -856,8 +856,7 @@ def test_event_journal_isolated_when_edge_is_reprovisioned_for_new_camera(tmp_pa
     assert [item["event_id"] for item in current.read()] == [new_event["event_id"]]
     assert legacy.path != current.path
 
-    # A mixed legacy file from a previous release is filtered rather than
-    # wedging the new camera's central event cursor.
+    # 구형 혼합 일지도 카메라별로 걸러 새 카메라의 이벤트 조회가 막히지 않아야 한다.
     legacy_new_event = {**new_event, "event_id": "legacy-new-event"}
     legacy.legacy_path.write_text(
         json.dumps(old_event) + "\n" + json.dumps(legacy_new_event) + "\n",
@@ -937,13 +936,11 @@ def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
     assert "sniffio==1.3.1" in constraints
 
     root_readme = (edge_root.parent / "README.md").read_text(encoding="utf-8")
-    deployment_doc = root_readme.split("## Edge 연결", 1)[1].split(
-        "## 모바일과 푸시", 1
-    )[0]
+    deployment_doc = (edge_root / "README.md").read_text(encoding="utf-8")
     assert "AI_CCTV_CLI.exe edge-register" in deployment_doc
     assert "ai-cctv-server" not in deployment_doc
 
-    handoff_guide = deployment_doc.split("### 수동 연결", 1)[1]
+    handoff_guide = deployment_doc.split("## 수동 연결", 1)[1]
     handoff_steps = [
         "export-auth-token",
         "AI_CCTV_CLI.exe edge-register",

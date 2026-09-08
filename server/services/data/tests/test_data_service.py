@@ -340,12 +340,20 @@ def test_segment_idempotency_and_file_stat(data_client) -> None:
     assert second["idempotent_replay"] is True
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "hook.mp4",
+        "20260230T040308-227398Z.mp4",
+        "20260908T040308-Z.mp4",
+    ],
+)
 def test_recording_complete_hook_derives_metadata_and_is_idempotent(
-    data_client,
+    data_client, filename,
 ) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
-    target = settings.storage_root / "cam-001/hook.mp4"
+    target = settings.storage_root / "cam-001" / filename
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"hook-video")
     expected_end = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
@@ -360,12 +368,47 @@ def test_recording_complete_hook_derives_metadata_and_is_idempotent(
     assert first.status_code == 201, first.text
     assert second.status_code == 201, second.text
     assert first.json()["id"] == second.json()["id"]
-    assert first.json()["relative_path"] == "cam-001/hook.mp4"
+    assert first.json()["relative_path"] == f"cam-001/{filename}"
     assert first.json()["file_size"] == len(b"hook-video")
     assert first.json()["duration_ms"] == 10_000
     assert first.json()["end_time"] == "2026-08-22T12:00:00.000Z"
     assert first.json()["start_time"] == "2026-08-22T11:59:50.000Z"
     assert second.json()["idempotent_replay"] is True
+
+
+@pytest.mark.parametrize(
+    "fraction,expected_fraction",
+    [("227398", "227"), ("2", "200"), ("227398999", "227")],
+)
+def test_recording_hook_uses_filename_start_instead_of_file_write_time(
+    data_client, fraction, expected_fraction,
+) -> None:
+    client, settings = data_client
+    _create_camera(client, "cam-001")
+    target = (
+        settings.storage_root
+        / f"cam-001/2026/09/08/20260908T040308-{fraction}Z.mp4"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"completed-central-recording")
+    # 실제 파일처럼 수정 시각과 '파일명 시작 + 영상 길이'가 어긋나게 한다.
+    modified = datetime(2026, 9, 8, 4, 3, 18, 92901, tzinfo=UTC).timestamp()
+    os.utime(target, (modified, modified))
+
+    response = client.post(
+        f"{BASE}/hooks/recording-complete",
+        headers=HEADERS,
+        data={
+            "camera_id": "cam-001",
+            "segment_path": str(target),
+            "duration_seconds": "10",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["start_time"] == f"2026-09-08T04:03:08.{expected_fraction}Z"
+    assert response.json()["end_time"] == f"2026-09-08T04:03:18.{expected_fraction}Z"
+    assert response.json()["duration_ms"] == 10_000
 
 
 def test_event_has_primary_and_many_to_many_segment_links(data_client) -> None:

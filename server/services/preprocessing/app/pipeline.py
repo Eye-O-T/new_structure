@@ -97,15 +97,9 @@ class CameraWorker(threading.Thread):
             )
 
     def _inference_stream_lost(self, reason: str) -> None:
-        """Report one inference-consumer outage while retrying MediaMTX.
+        """탐지 소비자의 연결 장애를 한 번 보고한다."""
 
-        Edge-to-central ingest loss is detected by the Edge publisher and is
-        the authoritative trigger for segment recovery. A failure at this
-        downstream consumer must not create or truncate an Edge recovery job.
-        """
-
-        # 이 장애는 MediaMTX → 탐지 소비자 구간의 장애다. Edge → 중앙 서버 구간의
-        # 장애와 구별하며, 여기서 Edge 녹화 복구 작업을 생성하거나 끝내지 않는다.
+        # 녹화 복구 구간은 Edge 연결로 정하므로 여기서는 복구 작업을 변경하지 않는다.
         if self._failure_reported:
             return
         self._status("offline")

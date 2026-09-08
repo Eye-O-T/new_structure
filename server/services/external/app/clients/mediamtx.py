@@ -23,7 +23,7 @@ class MediaControlError(RuntimeError):
 
 
 class MediaMtxClient:
-    """Narrow MediaMTX v1.9 client used only to revoke active publishers."""
+    """진행 중인 송출을 끊기 위한 MediaMTX v1.9 클라이언트."""
 
     def __init__(
         self,
@@ -102,18 +102,15 @@ class MediaMtxClient:
         if kicked.status_code in {200, 204}:
             return True
         if kicked.status_code == 404:
-            # The publisher disconnected between the status and kick calls.
+            # 상태 조회와 연결 해제 요청 사이에 송출자가 이미 끊겼다.
             return False
         raise MediaControlError("MediaMTX could not disconnect the RTSP publisher.")
 
     async def disconnect_publisher(self, camera_id: str) -> bool:
-        """Kick publishers until the path stays quiet across repeated checks.
+        """송출이 연속 점검에서 사라질 때까지 연결을 끊는다.
 
-        A MediaMTX HTTP-auth request that completed just before a camera was
-        disabled can attach after the first path lookup. Requiring consecutive
-        quiet observations catches that late source while new auth requests are
-        held behind the camera lifecycle lock and will subsequently be denied.
-        """
+        비활성화 직전 인증된 송출이 첫 조회 뒤 연결될 수 있어 반복 점검한다.
+        새 인증은 카메라 잠금에서 대기한 뒤 비활성 상태를 확인하고 거절된다."""
 
         kicked_any = False
         quiet_checks = 0

@@ -1,1 +1,1 @@
-"""External service workers."""
+"""Edge 상태 수집과 푸시 발송 작업."""

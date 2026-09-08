@@ -1,5 +1,4 @@
 # 계정과 카메라 열람 권한을 SQL로 관리한다. 비밀번호는 원문이 아닌 해시를 저장한다.
-"""Users persistence and SQL operations."""
 
 from __future__ import annotations
 
@@ -137,7 +136,7 @@ class UsersRepositoryMixin:
     def replace_camera_permissions(
         self, user_id: int, camera_ids: list[str]
     ) -> list[dict[str, Any]]:
-        """Validate the complete target set, then replace it atomically."""
+        """변경 대상을 모두 검증한 뒤 한 트랜잭션으로 교체한다."""
 
         unique_ids = list(dict.fromkeys(camera_ids))
         now = _now()

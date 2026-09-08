@@ -1,5 +1,4 @@
 # 녹화 완료 통지를 받아 파일을 등록하고 검색 결과와 영상 내용을 다른 서비스에 제공한다.
-"""Internal recordings API."""
 
 from __future__ import annotations
 

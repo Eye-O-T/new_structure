@@ -1,5 +1,4 @@
 # 연결 끊김·복구 이벤트를 복구 시간 구간으로 묶고 작업의 진행 상태와 재시도를 기록한다.
-"""Recovery persistence and SQL operations."""
 
 from __future__ import annotations
 
@@ -26,22 +25,16 @@ class RecoveryRepositoryMixin:
         max_attempts: int,
         settle_seconds: int = 15,
     ) -> dict[str, Any] | None:
-        """Merge authoritative Edge outage reports into one recovery interval.
+        """Edge의 중앙 연결 끊김·복구 보고를 하나의 복구 구간으로 합친다.
 
-        Duplicate and reordered Edge reports for the same camera are correlated
-        when a lost timestamp overlaps the stored interval (with up to 60 seconds
-        of start-boundary skew), or a restored timestamp is within 60 seconds of
-        the stored end boundary. Correlated boundaries use min(start)/max(end).
-        A restore event received before its lost event is paired from the event
-        journal. Expanding a claimed/completed interval increments ``revision``
-        and requeues it, so an in-flight worker cannot complete stale bounds.
-        Closed bounds become claimable only after the configured settle period,
-        allowing the Edge splitmux writer to rotate its final active segment.
+        끊김 시각이 기존 구간과 겹치거나(시작 경계 오차 60초 허용),
+        복구 시각이 기존 끝 경계의 60초 이내이면 같은 구간으로 본다.
+        시작은 최솟값, 끝은 최댓값을 쓰며 복구 보고가 먼저 오면 이벤트 일지에서 짝을 찾는다.
+        임대·완료된 구간이 늘어나면 revision을 올려 재등록하고 이전 범위의 완료를 거절한다.
+        끝이 정해진 구간도 설정된 안정화 시간이 지난 뒤 임대해 마지막 녹화 파일의 회전을 기다린다.
 
-        Legacy ``network_failure``/``network_recovery`` events remain valid event
-        history, but they describe the old inference-consumer signal and are not
-        authoritative Edge publisher boundaries for segment recovery.
-        """
+        구형 network_failure/network_recovery는 이력으로만 보존한다.
+        추론 소비자의 신호이므로 Edge 송출 복구 구간의 근거로 사용하지 않는다."""
         lost_types = {"central_connection_lost"}
         restored_types = {"central_connection_restored"}
         if event_type not in lost_types | restored_types:
@@ -131,9 +124,7 @@ class RecoveryRepositoryMixin:
                         merge_bounds(connection, open_job, start=occurred_at)
                     )
 
-                # Event insertion precedes this call. If transport ordering
-                # delivered a restore first, pair the earliest later restore
-                # rather than leaving a permanently open job.
+                # 복구 보고가 먼저 저장됐다면 끊김 이후의 가장 이른 복구 보고와 짝을 지어 구간을 닫는다.
                 pending_restore = connection.execute(
                     """
                     SELECT occurred_at FROM events
@@ -243,7 +234,7 @@ class RecoveryRepositoryMixin:
             return claimed
 
     def requeue_interrupted_recovery_jobs(self) -> int:
-        """Make jobs leased by a terminated Data process retryable again."""
+        """종료된 Data 프로세스의 작업을 다시 시도할 수 있게 한다."""
 
         now = _now()
         with self.database.transaction() as connection:

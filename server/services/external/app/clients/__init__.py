@@ -1,1 +1,1 @@
-"""External service clients."""
+"""다른 서비스에 요청하는 HTTP 클라이언트."""

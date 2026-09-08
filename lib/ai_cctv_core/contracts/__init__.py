@@ -1,2 +1,1 @@
-"""Versioned service contracts shared by central components."""
 # 서비스 사이에 전달하는 데이터 형식은 이 패키지에서 함께 정의해 송신·수신 규칙을 맞춘다.

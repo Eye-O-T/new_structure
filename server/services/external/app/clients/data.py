@@ -53,9 +53,7 @@ class DataClient:
             headers={"X-Internal-Token": internal_token},
             timeout=httpx.Timeout(timeout_seconds),
             transport=transport,
-            # Internal service traffic must not be diverted through host proxy
-            # settings. This also keeps the shared internal token on the
-            # private Docker network selected by DATA_BASE_URL.
+            # 내부 토큰이 호스트 프록시로 새지 않도록 DATA_BASE_URL에 직접 접속한다.
             trust_env=False,
         )
 

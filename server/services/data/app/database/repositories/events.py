@@ -1,5 +1,4 @@
 # 이벤트와 관련 녹화, 알림·객체 작업을 함께 저장하여 일부만 기록되는 상황을 막는다.
-"""Events persistence and SQL operations."""
 
 from __future__ import annotations
 

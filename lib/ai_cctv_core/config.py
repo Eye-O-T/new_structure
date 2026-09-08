@@ -1,5 +1,3 @@
-"""Versioned configuration schema and atomic YAML persistence."""
-
 # 여러 서비스와 설정 도구가 같은 규칙으로 config.yaml을 읽고 쓰게 하는 공통 모듈이다.
 # Pydantic 모델은 자료형뿐 아니라 포트 범위, 중복 ID 등의 조건도 함께 검사한다.
 

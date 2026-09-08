@@ -1,5 +1,3 @@
-"""Optional baseline YOLO/ByteTrack implementation behind the detection contract."""
-
 # 기본 구현은 YOLO로 사람 위치를 찾고 ByteTrack으로 프레임 사이의 위치를 연결해 ID를 붙인다.
 # 얼굴·외형으로 여러 카메라의 동일 인물을 판별하는 재식별 모델은 여기에 포함하지 않는다.
 

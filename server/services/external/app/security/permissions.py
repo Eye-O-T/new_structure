@@ -1,5 +1,4 @@
 # 토큰과 현재 계정 상태를 확인한 뒤 관리자 권한·카메라 열람 권한을 검사한다.
-"""Authenticated principal and camera ACL checks for public and media requests."""
 
 from __future__ import annotations
 

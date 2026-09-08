@@ -1,7 +1,6 @@
 # Data 컨테이너의 백업 API로 실행 중인 SQLite의 일관된 복사본을 만든다.
 # 영상·모델·설정은 포함하지 않으며 이 도구는 server-dir 아래 .env를 사용한다.
 
-"""Request a consistent SQLite backup from the running Data Service."""
 
 from __future__ import annotations
 

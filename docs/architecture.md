@@ -108,4 +108,4 @@ MediaMTX는 1.9.0 기준으로 고정한다. 모델 장애 중에도 HLS와 녹�
 
 `compose.test.yml`은 운영 설정을 상속하지 않는 독립 구성이다. 기본 테스트 컨테이너에서 공통·서비스별 자동 검증을 실행하고, integration 프로필은 임시 Data·External과 HTTP 검증기를 실행한다. 테스트 네트워크는 외부 접속을 막고 운영 저장소를 마운트하지 않는다.
 
-공통 패키지 정의는 `lib/pyproject.toml`, Windows 개발 환경은 `configurator/pyproject.toml`·`uv.lock`, Edge는 `edge/pyproject.toml`에 있다. 루트에 Python 프로젝트 정의·설치 목록·잠금 파일을 두지 않는다. 실행 명령은 [개발·검증](../README.md#개발과-검증)을 따른다.
+공통 패키지는 `lib/`, Windows GUI·CLI와 Edge의 개발 환경은 각각 `configurator/`, `edge/`에서 관리한다. 실행 명령은 [개발·검증](../README.md#개발과-검증)을 따른다.

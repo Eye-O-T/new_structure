@@ -73,8 +73,7 @@ def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
         "management_url",
         "recovery_url",
         "auth_token",
-        # cameras.status is a schema-v1 compatibility column. Runtime state is
-        # served exclusively by /cameras/{id}/status.
+        # cameras.status는 구형 스키마 호환 필드다. 실행 상태는 /cameras/{id}/status에서만 제공한다.
         "status",
     ):
         result.pop(internal_field, None)
@@ -225,9 +224,7 @@ async def create_camera(
         body["edge_auth_token"] = payload.edge_auth_token.get_secret_value()
     body["stream_path"] = payload.camera_id
     requested_enabled = bool(body.get("enabled", True))
-    # Keep admission closed until the authoritative DB credential exists.
-    # Otherwise a deleted/re-registered bootstrap camera can briefly fall
-    # back to its stale static credential between these two Data calls.
+    # DB 인증값을 저장할 때까지 송출을 막아 재등록 중 옛 정적 인증값이 허용되지 않게 한다.
     create_body = {
         **body,
         "enabled": False,
@@ -250,10 +247,8 @@ async def create_camera(
                     {"enabled": True, "status": "offline"},
                 )
         except Exception:
-            # Keep the disabled row in place until any old publisher is gone;
-            # deleting first would make the static bootstrap fallback valid
-            # again while rollback is still in progress. If MediaMTX cannot be
-            # reached, leave the fail-closed row for an administrator to retry.
+            # 기존 송출을 끊기 전에 행을 지우면 옛 정적 인증값이 다시 허용될 수 있다.
+            # MediaMTX 연결 실패 시에도 비활성 행을 남겨 관리자가 재시도하게 한다.
             await _disconnect_camera_publisher(settings, payload.camera_id)
             await data.delete_camera(payload.camera_id)
             raise
@@ -343,9 +338,7 @@ async def delete_camera(
         try:
             await data.delete_camera(camera_id)
         except DataConflict:
-            # A recording/event can arrive between the preflight check and
-            # the transactional delete. Restore admission in that rare race
-            # so a history conflict never silently strands a live camera.
+            # 사전 검사 뒤 녹화·이벤트가 들어와 삭제가 거절되면 송출 허용을 복구해 카메라가 멈추지 않게 한다.
             was_enabled = bool(previous.get("enabled", True))
             await data.update_camera(
                 camera_id,
@@ -381,7 +374,7 @@ async def rotate_camera_publish_credentials(
     settings: Settings = Depends(get_settings_dependency),
     data: DataClient = Depends(get_data_client),
 ) -> Any:
-    """Rotate one camera credential and return the plaintext exactly once."""
+    """카메라 인증값을 교체하고 원문은 이 응답에서만 반환한다."""
 
     if not CAMERA_ID_PATTERN.fullmatch(camera_id):
         raise HTTPException(status_code=400, detail="Invalid camera ID")
@@ -602,8 +595,7 @@ async def update_camera_video_profile(
     finally:
         await edge.close()
 
-    # AC-002: current_profile changes only after the Edge's explicit
-    # applied response above has been validated.
+    # Edge의 applied 응답을 검증한 뒤에만 current_profile을 바꾼다.
     profile = await data.update_camera_video_profile(
         camera_id,
         {
@@ -613,12 +605,8 @@ async def update_camera_video_profile(
             "last_error_code": None,
         },
     )
-    # The Data Service mirrors current_profile to camera runtime state in
-    # the same transaction. Avoid a partial status write here: a successful
-    # control call does not refresh CPU/power/input telemetry.
-    # ProfileManager wrote the authoritative success event before it sent
-    # the applied response. The Status Collector imports that durable Edge
-    # journal entry; writing another event here would duplicate it.
+    # Data가 같은 트랜잭션에서 실행 프로필도 갱신한다. 제어 응답만으로 CPU·전원·입력 상태를 바꾸지 않는다.
+    # 성공 이벤트는 Edge 일지에서 수집하므로 여기서 중복 기록하지 않는다.
     return {
         key: profile.get(key)
         for key in (

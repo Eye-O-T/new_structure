@@ -1,5 +1,4 @@
 # 복구 작업 조회, 녹화 파일 대조, 보관 기간 정리와 DB 백업을 요청하는 API이다.
-"""Internal maintenance API."""
 
 from __future__ import annotations
 

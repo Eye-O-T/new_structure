@@ -24,7 +24,7 @@ class PowerSensor(Protocol):
 
 
 class LinuxPowerSupplySensor:
-    """Use the documented Linux power-supply ABI; make no UPS register guesses."""
+    """Linux 전원 인터페이스만 읽으며 UPS 레지스터를 추측하지 않는다."""
 
     def __init__(self, root: Path = Path("/sys/class/power_supply")):
         self.root = root
@@ -246,7 +246,7 @@ class PowerMonitor:
 
 
 class CameraInputWatchdog:
-    """State machine fed by observed recording activity from the capture path."""
+    """녹화 파일의 실제 변화로 캡처 상태를 판정한다."""
 
     def __init__(
         self,

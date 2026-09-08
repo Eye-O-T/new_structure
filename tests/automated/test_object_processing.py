@@ -308,6 +308,53 @@ async def test_workers_report_both_blackboxes_as_unconfigured(tmp_path):
         safe_crop(tmp_path / "nested", "../crop.jpg")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["identity", "analysis"])
+async def test_worker_reports_rejected_lease_and_recovers_on_next_job(objects, stage):
+    client, repo, settings = objects
+    crop = settings.snapshot_root / "cam-001/crop.jpg"
+    crop.parent.mkdir(parents=True, exist_ok=True)
+    crop.write_bytes(b"test crop")
+    event = appearance(client)
+    expire_lease = True
+
+    class Processor:
+        def process(self, job, crop_path):
+            return {"outcome": "complete", "metadata": {"backend": "test"}}
+
+    def handler(request):
+        import json
+
+        if request.url.path.endswith("/complete") and expire_lease:
+            # 모델 처리 중 임대가 만료된 상황을 실제 Data API로 재현한다.
+            with repo.database.transaction() as connection:
+                connection.execute(
+                    "UPDATE object_jobs SET lease_until='2000-01-01T00:00:00Z'"
+                )
+        result = client.post(
+            "/internal/v1" + request.url.path,
+            headers={"X-Internal-Token": TOKENS[stage]},
+            json=json.loads(request.content) if request.content else None,
+        )
+        return httpx.Response(result.status_code, json=result.json())
+
+    async with httpx.AsyncClient(
+        base_url="http://data", transport=httpx.MockTransport(handler)
+    ) as transport:
+        worker = ObjectWorker(stage, transport, settings.snapshot_root, Processor())
+        assert await worker.once()
+        assert worker.last_outcome == "rejected"
+        assert worker.last_error == "COMPLETION_NOT_ACCEPTED"
+        assert not worker.stalled
+        assert repo.get_event(event["id"])["metadata"][stage] == {"status": "pending"}
+
+        expire_lease = False
+        assert await worker.once()
+        assert worker.last_outcome == "complete"
+        assert worker.last_error is None
+        assert repo.get_event(event["id"])["metadata"][stage]["status"] == "complete"
+
+
 def test_existing_deployment_upgrade_keeps_existing_tokens(tmp_path, monkeypatch):
     from server.scripts.enable_object_processing import enable
     from server.scripts.doctor import read_deployment_env

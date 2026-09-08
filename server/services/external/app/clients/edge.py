@@ -1,5 +1,4 @@
 # Edge 상태·이벤트 조회와 영상 설정 요청을 보내고 통신 실패를 API용 오류로 바꾼다.
-"""Authenticated HTTP client for Edge status, event and video control APIs."""
 
 from __future__ import annotations
 
@@ -23,10 +22,8 @@ class EdgeControlError(Exception):
         self.message = message
         self.status_code = status_code
         self.details = details or {}
-        # ProfileManager persists an Edge journal entry before returning an
-        # applied/rejected outcome.  Callers use this marker to avoid writing a
-        # second central event for the same operation while still auditing
-        # transport and preflight failures that never reached ProfileManager.
+        # ProfileManager는 응답 전에 Edge 일지에 기록한다. 이 표시는 중앙의 중복 이벤트를 막고,
+        # 그 전에 발생한 통신·사전 점검 실패는 중앙에서 기록하도록 구분한다.
         self.profile_outcome_journaled = profile_outcome_journaled
 
 

@@ -1,5 +1,4 @@
 # 다른 서비스의 실패를 공개 API 오류로 바꾸되 토큰이나 비밀값이 응답에 노출되지 않게 한다.
-"""Translate upstream errors without leaking credentials or validation inputs."""
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError

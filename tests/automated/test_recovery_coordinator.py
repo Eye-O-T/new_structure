@@ -249,3 +249,36 @@ def test_data_recovery_token_precedes_legacy_internal_token(monkeypatch) -> None
 
     monkeypatch.delenv("DATA_RECOVERY_TOKEN")
     assert read_internal_token() == INTERNAL_TOKEN
+
+
+@pytest.mark.parametrize("duration", ["10", "60.125", "0.000001", "10s", "-1", "nan"])
+def test_recording_hook_accepts_mediamtx_numeric_seconds(duration):
+    import os
+    import shutil
+    import subprocess
+
+    if os.name == "nt" or not shutil.which("sh") or not shutil.which("awk"):
+        pytest.skip("MediaMTX 셸 계약은 Linux 테스트 컨테이너에서 검증한다")
+    result = subprocess.run(
+        [
+            "sh", "-c",
+            'curl() { printf "%s\\n" "$@"; }\n'
+            '. server/services/mediamtx/recording-complete-hook.sh',
+        ],
+        env={
+            **os.environ,
+            "MTX_PATH": "cam-001",
+            "MTX_SEGMENT_PATH": "/recordings/cam-001/test.mp4",
+            "MTX_SEGMENT_DURATION": duration,
+            "DATA_MEDIA_TOKEN": "test-recording-hook-token-00000000000000",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if duration in {"10s", "-1", "nan"}:
+        assert result.returncode == 2
+        assert not result.stdout
+    else:
+        assert result.returncode == 0, result.stderr
+        assert f"duration_seconds={duration}" in result.stdout.splitlines()

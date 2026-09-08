@@ -9,8 +9,6 @@ from pathlib import Path
 
 
 def restrict_private_file(path: Path) -> None:
-    """Restrict a secret file on POSIX and with an explicit Windows DACL."""
-
     os.chmod(path, 0o600)
     if os.name != "nt":
         return

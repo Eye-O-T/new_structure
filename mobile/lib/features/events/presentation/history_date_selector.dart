@@ -16,7 +16,6 @@ class HistoryDateSelector extends ConsumerWidget {
       Duration(days: selectedDate.weekday % 7),
     );
 
-    // 일요일 ~ 토요일
     final weekDates = List.generate(
       7,
       (index) => startOfWeek.add(Duration(days: index)),
@@ -24,7 +23,6 @@ class HistoryDateSelector extends ConsumerWidget {
 
     return Column(
       children: [
-        // 상단: < 2026년 7월 4주차 >
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -45,9 +43,6 @@ class HistoryDateSelector extends ConsumerWidget {
               onPressed: () {
                 final newDate = selectedDate.add(const Duration(days: 7));
 
-                debugPrint('기존 날짜: $selectedDate');
-                debugPrint('변경 날짜: $newDate');
-
                 ref.read(selectedDateProvider.notifier).selectDate(newDate);
               },
               icon: const Icon(Icons.chevron_right),
@@ -57,7 +52,6 @@ class HistoryDateSelector extends ConsumerWidget {
 
         const SizedBox(height: 16),
 
-        // 날짜 7개
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: weekDates.map((date) {

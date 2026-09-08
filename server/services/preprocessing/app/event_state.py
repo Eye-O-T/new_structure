@@ -13,7 +13,7 @@ class TrackEvent:
 
 
 class TrackState:
-    """Turns per-frame detections into appearance/disappearance transitions."""
+    """프레임별 탐지 결과에서 등장·퇴장 전환을 구한다."""
 
     def __init__(self, disappear_seconds: float):
         self._disappear_seconds = disappear_seconds

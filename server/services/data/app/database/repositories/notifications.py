@@ -1,9 +1,6 @@
 # 발송할 알림을 DB에 보관하고 수신 자격 확인과 재시도 일정을 관리한다.
-"""Durable push storage owned exclusively by the Data Service.
-
-No Firebase calls occur in a database transaction. Delivery is at-least-once;
-event/device uniqueness and client notification IDs suppress normal duplicates.
-"""
+"""FCM 통신은 DB 트랜잭션 밖에서 수행한다. 재전송될 수 있으므로
+이벤트·기기 고유 키와 앱의 알림 ID로 일반적인 중복을 억제한다."""
 
 from __future__ import annotations
 

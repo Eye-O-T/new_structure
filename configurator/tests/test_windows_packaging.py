@@ -41,6 +41,13 @@ def test_inno_installer_packages_gui_cli_and_required_compose_context():
     assert "*.key" in installer
     assert "*.pem" in installer
     assert "*.egg-info\\*" in installer
+    for development_input in (
+        "tests\\*",
+        "compose.dev.yml",
+        "compose.test.yml",
+        "scripts\\export_openapi.py",
+    ):
+        assert development_input in installer
 
 
 def test_inno_installer_preserves_runtime_data_without_opening_program_files():
@@ -88,9 +95,16 @@ def test_windows_build_script_builds_both_entrypoints_and_checksum():
     assert "SHA256" in script
     assert "$env:OS -ne 'Windows_NT'" in script
     assert "$IsWindows" not in script
+    assert "'sync', '--locked'" in script
+    assert "'--extra', 'test', '--extra', 'build'" in script
+    assert "$env:UV_PROJECT_ENVIRONMENT = $buildVenv" in script
+    assert "@('--check', '--offline')" in script
+    assert "requirements-windows-build.txt" not in script
+    assert "'pip', 'install'" not in script
     for document in (
         "README.md",
         "mobile\\README.md",
+        "configurator\\uv.lock",
         "docs\\architecture.md",
         "docs\\SRS_interface_preprocessing.md",
         "docs\\SRS_interface_analysis.md",

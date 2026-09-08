@@ -1,5 +1,4 @@
 # External API와 Edge 상태 수집·선택적 푸시 발송 작업의 시작·종료를 관리한다.
-"""External service lifecycle and public/internal router composition."""
 
 from __future__ import annotations
 
@@ -39,8 +38,7 @@ async def _lifespan(application: FastAPI):
         try:
             settings = Settings.from_env()
         except RuntimeError:
-            # Unit tests commonly override FastAPI dependencies after app
-            # construction and intentionally do not install deployment secrets.
+            # 테스트는 앱 생성 뒤 의존성을 교체하므로 운영 인증값 없이도 생성할 수 있게 한다.
             settings = None
     client = getattr(application.state, "data_client", None)
     if settings is not None and client is None:

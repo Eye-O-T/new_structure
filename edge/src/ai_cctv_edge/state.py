@@ -16,9 +16,9 @@ from typing import Any
 
 from .config import VIDEO_PROFILES, write_atomic
 
-try:  # Linux deployment; the fallback keeps imports/test doubles portable.
+try:  # Linux 파일 잠금이 없는 OS에서도 테스트를 불러올 수 있게 한다.
     import fcntl
-except ImportError:  # pragma: no cover - exercised only on non-POSIX hosts
+except ImportError:  # pragma: no cover - 비POSIX 테스트 환경용
     fcntl = None  # type: ignore[assignment]
 
 
@@ -57,7 +57,7 @@ class RuntimeStatusStore:
 
 
 class ProfileSelectionStore:
-    """Persistent, atomically replaced runtime video-profile selection."""
+    """재시작 후에도 유지할 영상 프로필을 원자적으로 저장한다."""
 
     def __init__(self, root: Path | None = None):
         self.root = root or default_state_root()
@@ -102,7 +102,7 @@ class ProfileSelectionStore:
 
 
 class ProfileRequestStore:
-    """Transient request scoped to one live runner instance."""
+    """현재 실행 인스턴스에만 적용할 임시 요청."""
 
     def __init__(self, root: Path | None = None):
         self.root = root or default_runtime_root()
@@ -190,7 +190,7 @@ class ProfileRequestStore:
 
 
 class EventJournal:
-    """Append-only local event journal shared by capture and control services."""
+    """캡처·제어 프로세스가 공유하는 추가 방식의 로컬 이벤트 일지."""
 
     def __init__(
         self,
@@ -203,8 +203,7 @@ class EventJournal:
         self.camera_id = camera_id
         self.root = root or default_state_root()
         self.path = self.root / f"events-{camera_id}.jsonl"
-        # Read the pre-0.3 shared file for upgrade compatibility, but filter it
-        # by camera. New writes are always isolated per camera.
+        # 업그레이드를 위해 구형 일지는 카메라별로 걸러 읽고, 새 기록은 카메라별 파일에 쓴다.
         self.legacy_path = self.root / "events.jsonl"
         self.lock_path = self.root / f"events-{camera_id}.lock"
         self.max_bytes = max_bytes

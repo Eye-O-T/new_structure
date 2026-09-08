@@ -1,6 +1,6 @@
 # Data 서비스
 
-중앙 SQLite를 직접 여는 유일한 서비스입니다. HTTP 경로와 저장 데이터 형식은 구조 변경 전과 동일하며, 기존 DB는 `app/database/migrations/`의 버전 이력으로 업그레이드합니다.
+SQLite·이벤트·작업·녹화 정보를 관리합니다. DB를 직접 여는 유일한 서비스이며, `app/database/migrations/`의 버전 순서로 DB를 업그레이드합니다.
 
 ## 코드 위치
 
@@ -27,7 +27,7 @@
 
 내부 API에는 `X-Internal-Token`이 필요합니다. `external`, `inference`, `identity`, `analysis`, `media`, `recovery` 용도의 인증키를 분리합니다. `preprocessing` 컨테이너에 감지와 인물 연결이 함께 있어도 각 작업의 API 권한은 각각 `inference`, `identity`로 유지합니다. 권한은 `app/security.py`에 정의되어 있습니다.
 
-수동 Edge 복구 명령의 새 모듈 경로는 컨테이너 내부 기준 `python -m app.workers.recovery --help`입니다.
+수동 Edge 복구 명령은 컨테이너에서 `python -m app.workers.recovery --help`로 확인합니다.
 
 ## 검증
 

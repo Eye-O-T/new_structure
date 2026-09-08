@@ -36,7 +36,6 @@ from .server_api import (
 def rotate_publish_credentials_to_file(
     client: ServerApiClient, camera_id: str, output_path: str | Path
 ) -> dict[str, Any]:
-    """Rotate a camera credential only after its private handoff is writable."""
 
     normalized_camera_id = camera_id.strip()
     if not normalized_camera_id:

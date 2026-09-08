@@ -1,1 +1,1 @@
-"""External service security."""
+"""사용자 인증과 카메라 접근 권한 검사."""

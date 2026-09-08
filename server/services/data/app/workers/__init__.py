@@ -1,1 +1,1 @@
-"""Data service maintenance and Edge recovery workers."""
+"""저장소 정리와 Edge 녹화 복구 작업."""

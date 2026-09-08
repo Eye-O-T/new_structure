@@ -1,5 +1,4 @@
 # 로그인한 사용자 자신의 단말만 알림 수신 대상으로 등록하거나 해제하도록 한다.
-"""Authenticated device registration; clients cannot select another owner."""
 
 from __future__ import annotations
 

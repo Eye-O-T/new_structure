@@ -1,5 +1,3 @@
-"""Shared, dependency-light contracts used by AI_CCTV tools and services."""
-
 # 공통 설정·식별자·시간 함수의 공개 진입점이다. 서비스별 모델과 저장 로직은 각 서비스에 둔다.
 
 from .config import AppConfig, CameraBootstrap, load_config, write_config_atomic

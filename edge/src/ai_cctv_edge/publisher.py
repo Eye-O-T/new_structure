@@ -1,5 +1,3 @@
-"""Publish the capture shared-memory stream without exposing credentials in argv."""
-
 # 캡처 프로세스가 만든 공유 메모리 영상을 읽어 중앙 MediaMTX에 RTSP/TCP로 보낸다.
 # 인증값은 명령행 인수 대신 GStreamer 속성에 넣어 프로세스 목록 노출을 피한다.
 from __future__ import annotations

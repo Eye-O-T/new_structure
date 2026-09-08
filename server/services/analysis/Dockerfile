@@ -5,8 +5,9 @@ WORKDIR /app
 COPY server/services/analysis/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY lib /opt/ai-cctv-core
-RUN pip install --no-cache-dir /opt/ai-cctv-core
-COPY server/services/analysis /app/server/services/analysis
+RUN pip install --no-cache-dir '/opt/ai-cctv-core[processing]'
+COPY server/services/analysis/app /app/server/services/analysis/app
+COPY server/services/analysis/processors /app/server/services/analysis/processors
 USER 65532:65532
 CMD ["uvicorn", "server.services.analysis.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

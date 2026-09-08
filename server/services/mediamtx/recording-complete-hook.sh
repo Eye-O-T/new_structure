@@ -29,50 +29,11 @@ if [ "${#MTX_PATH}" -gt 64 ]; then
   exit 2
 fi
 
-# MediaMTX의 1m0.125s 같은 길이를 Data가 받는 숫자 초 단위(60.125)로 바꾼다.
-duration_seconds="$({
-  awk -v duration="$MTX_SEGMENT_DURATION" '
-    BEGIN {
-      total = 0
-      rest = duration
-
-      hpos = index(rest, "h")
-      if (hpos > 0) {
-        total += substr(rest, 1, hpos - 1) * 3600
-        rest = substr(rest, hpos + 1)
-      }
-
-      mpos = index(rest, "m")
-      if (mpos > 0 && substr(rest, mpos + 1, 1) != "s") {
-        total += substr(rest, 1, mpos - 1) * 60
-        rest = substr(rest, mpos + 1)
-      }
-
-      if (rest ~ /^[0-9]+([.][0-9]+)?ms$/) {
-        total += substr(rest, 1, length(rest) - 2) / 1000
-        rest = ""
-      } else if (rest ~ /^[0-9]+([.][0-9]+)?us$/) {
-        total += substr(rest, 1, length(rest) - 2) / 1000000
-        rest = ""
-      } else if (rest ~ /^[0-9]+([.][0-9]+)?ns$/) {
-        total += substr(rest, 1, length(rest) - 2) / 1000000000
-        rest = ""
-      } else if (rest ~ /^[0-9]+([.][0-9]+)?s$/) {
-        total += substr(rest, 1, length(rest) - 1)
-        rest = ""
-      }
-
-      if (rest != "") {
-        exit 1
-      }
-
-      printf "%.9f", total
-    }
-  '
-} || true)"
-
-if [ -z "$duration_seconds" ]; then
-  echo "recording hook could not parse segment duration" >&2
+# MediaMTX 1.9는 단위 없는 소수 초를 전달한다. 변환하지 않고 검증 후 넘긴다.
+if ! awk -v duration="$MTX_SEGMENT_DURATION" 'BEGIN {
+  exit !(duration ~ /^[0-9]+([.][0-9]+)?$/ && duration + 0 > 0)
+}'; then
+  echo "recording hook rejected invalid segment duration" >&2
   exit 2
 fi
 
@@ -91,5 +52,5 @@ curl \
   --header "X-Internal-Token: ${DATA_API_TOKEN}" \
   --data-urlencode "camera_id=${MTX_PATH}" \
   --data-urlencode "segment_path=${MTX_SEGMENT_PATH}" \
-  --data-urlencode "duration_seconds=${duration_seconds}" \
+  --data-urlencode "duration_seconds=${MTX_SEGMENT_DURATION}" \
   http://nginx:8080/internal/data/v1/hooks/recording-complete

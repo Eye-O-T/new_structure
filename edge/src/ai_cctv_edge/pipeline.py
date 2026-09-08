@@ -120,7 +120,7 @@ def build_gstreamer_command(
 
 
 def build_profile_probe_command(config: EdgeConfig) -> list[str]:
-    """Build a bounded encoder preflight that does not seize the real camera."""
+    """실제 카메라를 점유하지 않는 유한 길이의 인코더 시험 명령을 만든다."""
 
     command = [
         "gst-launch-1.0",

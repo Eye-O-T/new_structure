@@ -166,6 +166,8 @@ Data 오류 JSON은 `{"error":{"code":"...","message":"...","details":{}}}` 형�
 
 정상 준비 응답 예시는 `{"status":"ready","ready":true,"stalled":false,"last_error":null,"last_outcome":"complete"}`다. 마지막 작업 오류가 남아 있지만 작업 수신이 가능한 상태는 200과 `status="degraded"`다. 기본 블랙박스의 `unconfigured`는 모델이 없다는 뜻으로, 통신 준비 실패와 구분한다. 초기에는 `last_outcome=null`일 수 있다. 준비 상태 200만으로 분석 모델의 존재·정확도가 검증되지는 않는다.
 
+완료 응답이 `accepted:true`가 아니면 현재 실행기는 `last_outcome="rejected"`, `last_error="COMPLETION_NOT_ACCEPTED"`로 표시한다. 이 거절만으로 수신을 중단하지 않으며 이후 작업이 정상 완료되면 오류를 해제한다. `rejected`는 진단값이며 완료 요청의 `outcome`으로 보내는 값이 아니다.
+
 교체 전 다음 항목을 확인한다.
 
 1. 기존 Compose 네트워크·토큰·읽기 전용 마운트로 시작하고 상태 확인이 동작한다.

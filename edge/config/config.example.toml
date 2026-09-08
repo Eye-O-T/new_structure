@@ -34,7 +34,7 @@ token_file = "/etc/ai-cctv-edge/recovery.token"
 [control]
 bind_host = "0.0.0.0"
 port = 8003
-# The management, status and recovery services share this edge_auth_token.
+# 관리·상태·복구 API는 이 edge_auth_token을 공유한다.
 token_file = "/etc/ai-cctv-edge/recovery.token"
 apply_timeout_seconds = 30
 preflight_timeout_seconds = 10

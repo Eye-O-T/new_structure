@@ -1,5 +1,4 @@
 # Data가 소유한 SQLite 연결과 트랜잭션, 스키마 변경 및 DB 백업을 관리한다.
-"""SQLite connection ownership, migration, health, and backup."""
 
 from __future__ import annotations
 

@@ -38,9 +38,9 @@ from .recovery import create_app
 from .runner import EdgeRunner
 from .state import ProfileSelectionStore, default_state_root
 
-try:  # Edge deploys on Linux; keep validation helpers importable elsewhere.
+try:  # Windows에서도 설정 검증을 사용할 수 있게 한다.
     import pwd
-except ImportError:  # pragma: no cover - Windows development hosts only
+except ImportError:  # pragma: no cover - Windows 개발 환경용
     pwd = None  # type: ignore[assignment]
 
 DEFAULT_CONFIG = Path("/etc/ai-cctv-edge/config.toml")
@@ -83,7 +83,7 @@ def _publish_password_from_file(path: Path, camera_id: str) -> str:
 
 
 def export_auth_token(config_path: Path, output_path: Path) -> int:
-    """Copy the Edge bearer token to a new private handoff file without printing it."""
+    """Edge 토큰을 출력하지 않고 권한을 제한한 전달 파일에 복사한다."""
 
     config = EdgeConfig.load(config_path)
     source = config.control.token_file.expanduser().resolve()
@@ -164,9 +164,7 @@ def setup(path: Path, publish_credentials_file: Path | None = None) -> int:
     )
     config.validate()
 
-    # Validate and prepare every secret before replacing the live config. A
-    # malformed Configurator handoff or an aborted password prompt must leave
-    # the currently running configuration and profile selection untouched.
+    # 잘못된 전달 파일이나 입력 취소로 기존 설정이 바뀌지 않도록 인증값부터 검증한다.
     publish_password: str | None = None
     if mode == "central_publish":
         publish_password = (
@@ -208,8 +206,7 @@ def setup(path: Path, publish_credentials_file: Path | None = None) -> int:
         for target in (path, password_file, recovery_token_file):
             if target.exists():
                 shutil.chown(target, user=account.pw_uid, group=account.pw_gid)
-    # This is the final persistent setup write. systemd units refuse to start
-    # from the packaged example config until this marker exists.
+    # 이 완료 표시를 마지막에 기록해야 systemd가 예제 설정으로 서비스를 시작하지 않는다.
     write_atomic(path.parent / CONFIGURED_MARKER_NAME, "configured\n", mode=0o644)
     print(f"Configuration written: {path}")
     print(f"Camera stream path: {camera_id}")
@@ -236,7 +233,7 @@ def pair(
     supported_profiles: tuple[str, ...],
     set_pairing_key: bool = False,
 ) -> int:
-    """Advertise an unconfigured Edge and accept one authenticated setup."""
+    """미설정 Edge를 광고하고 인증된 초기 설정을 한 번 수락한다."""
 
     session = PairingSession(
         config_path=path.expanduser().resolve(),

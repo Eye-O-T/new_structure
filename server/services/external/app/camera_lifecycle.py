@@ -1,5 +1,4 @@
 # 같은 카메라의 등록·인증·제어가 겹쳐 상태가 엇갈리지 않도록 잠금을 제공한다.
-"""Serialize camera registration, admission and control without an unbounded registry."""
 
 import asyncio
 import hashlib
@@ -7,8 +6,7 @@ import hashlib
 
 class CameraLifecycleLocks:
     def __init__(self) -> None:
-        # MediaMTX can supply attacker-selected camera names before authentication.
-        # Hash collisions add safe serialization while keeping memory bounded.
+        # 인증 전 임의의 카메라 이름이 들어와도 고정 개수의 잠금만 쓴다. 해시 충돌은 추가 대기만 만든다.
         self._locks = tuple(asyncio.Lock() for _ in range(64))
 
     def __call__(self, camera_id: str) -> asyncio.Lock:

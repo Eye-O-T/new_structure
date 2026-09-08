@@ -1,5 +1,4 @@
-; Windows 설치·업그레이드·제거 절차를 정의하는 Inno Setup 설정이다.
-; 프로그램 파일과 사용 중 생기는 데이터의 위치를 분리해 코드 교체 시 운영 데이터를 보존한다.
+; Windows 설치·제거 설정. 운영 데이터는 프로그램과 분리해 보존한다.
 #define MyAppName "AI CCTV Server"
 #ifndef MyAppVersion
   #define MyAppVersion "0.3.0"
@@ -44,19 +43,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "addtopath"; Description: "AI CCTV CLI를 시스템 PATH에 추가"; GroupDescription: "명령줄 도구:"; Flags: checkedonce
 
 [Dirs]
-; 녹화·DB·설정은 Program Files 밖의 ProgramData에 두고 업그레이드와 제거 후에도 보존한다.
-; ACL은 파일 접근 권한 목록이다. 일반 사용자 전체에 수정 권한을 주지 않고 관리 권한을
-; 상속하며, Configurator는 쓰기 전에 관리자 권한을 요청한다. 비밀 파일은 더 좁은 권한을 쓴다.
+; ProgramData의 녹화·DB·설정은 제거 후에도 보존하며, 관리자에게만 수정 권한을 준다.
 Name: "{commonappdata}\AI_CCTV"; Flags: uninsneveruninstall
 
 [Files]
 Source: "..\..\dist\AI_CCTV_Configurator.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\dist\AI_CCTV_CLI.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\.dockerignore"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\lib\*"; DestDir: "{app}\lib"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,*.pyc,*.pyo,*.egg-info\*"
-; server 전체를 재귀 복사하므로 services 아래의 MediaMTX·Nginx도 다른 네 서비스와 함께 포함한다.
-; 개발 PC의 비밀번호·인증서·DB·실제 설정 파일은 배포 패키지에 섞이지 않도록 제외한다.
-Source: "..\..\server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,secrets\*.env,secrets\*.json,runtime\*,certs\*,config\config.yaml,__pycache__\*,*.pyc,*.pyo,*.key,*.crt,*.pem"
+Source: "..\..\lib\*"; DestDir: "{app}\lib"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,*.pyc,*.pyo,*.egg-info\*,build\*,dist\*"
+; 여섯 서비스의 실행 코드를 포함하고 개발·테스트 도구와 실제 운영 데이터는 제외한다.
+Source: "..\..\server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,secrets\*.env,secrets\*.json,runtime\*,certs\*,config\config.yaml,__pycache__\*,*.pyc,*.pyo,*.key,*.crt,*.pem,tests\*,compose.dev.yml,compose.test.yml,scripts\export_openapi.py"
 ; README와 네 규약 문서를 소스 저장소와 같은 상대 위치에 두어 링크를 유지한다.
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\mobile\README.md"; DestDir: "{app}\mobile"; Flags: ignoreversion
@@ -76,23 +72,19 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\AI CCTV Configurator"; Filename: "{app}\{#MyGuiExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-; GUI 실행 파일은 관리자 권한을 요청하도록 빌드한다. 설치 코드를 일반 사용자가 수정하지
-; 못하게 하면서 ProgramData의 실제 배포 설정을 필요한 권한으로 저장하기 위한 구성이다.
+; 보호된 운영 설정을 저장하기 위해 GUI는 관리자 권한을 요청한다.
 Filename: "{app}\{#MyGuiExeName}"; Description: "AI CCTV Configurator를 열어 모델 경로와 서버 설정 지정"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; 제거 시 docker compose down으로 컨테이너와 전용 네트워크를 정리한다.
-; 호스트 폴더를 연결한 DB·녹화·스냅샷·모델·비밀 파일은 이 명령으로 삭제되지 않는다.
+; 컨테이너와 네트워크를 중지·제거하되 호스트의 운영 데이터는 남긴다.
 Filename: "{app}\{#MyCliExeName}"; Parameters: "--server-dir ""{app}\server"" stop --env-file ""{commonappdata}\AI_CCTV\config\compose.env"""; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopAiCctvServices"
 
 [UninstallDelete]
-; 과거에 설치 경로 안에 생성하던 env 파일만 삭제한다. ProgramData는 삭제 대상에 넣지 않아
-; 재설치 시 보존된 운영 설정과 데이터를 다시 사용할 수 있게 한다.
+; 과거 설치 경로의 env만 삭제하며 ProgramData의 운영 설정은 유지한다.
 Type: files; Name: "{app}\server\.env"
 
 [Code]
-// 아래는 설치 중 실행되는 Pascal 코드다. 다른 프로그램의 PATH 항목은 유지하면서
-// 이 프로그램의 설치 경로만 추가·제거해 어느 폴더에서든 CLI를 호출할 수 있게 한다.
+// 어디서든 CLI를 실행하도록 설치 경로만 PATH에 추가·제거한다.
 const
   SystemEnvironmentKey =
     'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';

@@ -9,6 +9,9 @@ description = "Shared configuration and processing contracts for AI CCTV"
 requires-python = ">=3.11,<3.12"
 dependencies = ["pydantic==2.10.6", "PyYAML==6.0.2"]
 
+[project.optional-dependencies]
+processing = ["httpx==0.28.1"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ai_cctv_core*"]

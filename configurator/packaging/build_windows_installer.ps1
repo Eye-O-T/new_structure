@@ -1,5 +1,4 @@
-# Python 프로그램을 실행 파일로 묶은 뒤 Windows 설치 프로그램과 검증용 해시를 만든다.
-# 개발용 가상환경과 빌드용 가상환경을 분리해 개발 중 설치한 패키지의 영향을 줄인다.
+# uv.lock의 의존성을 별도 가상환경에 설치해 Windows 설치 파일과 검증 해시를 만든다.
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+(?:\.\d+)?$')]
@@ -20,13 +19,13 @@ $buildVenv = Join-Path $buildRoot '.venv'
 $buildPython = Join-Path $buildVenv 'Scripts\python.exe'
 $distRoot = Join-Path $repositoryRoot 'dist'
 $installerDist = Join-Path $distRoot 'installer'
-$buildRequirements = Join-Path $packagingRoot 'requirements-windows-build.txt'
+$configuratorRoot = Join-Path $repositoryRoot 'configurator'
 $guiSpec = Join-Path $packagingRoot 'ai_cctv_configurator.spec'
 $cliSpec = Join-Path $packagingRoot 'ai_cctv_cli.spec'
 $innoScript = Join-Path $packagingRoot 'AI_CCTV_Server.iss'
 
 function Invoke-Checked {
-    # 외부 도구의 종료 코드를 확인해 앞 단계가 실패한 상태로 다음 빌드를 진행하지 않는다.
+    # 외부 명령이 실패하면 후속 빌드도 중단한다.
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string[]]$ArgumentList
@@ -83,12 +82,12 @@ if ($env:OS -ne 'Windows_NT') {
 }
 
 foreach ($requiredFile in @(
-    $buildRequirements,
     $guiSpec,
     $cliSpec,
     $innoScript,
     (Join-Path $repositoryRoot 'lib\pyproject.toml'),
     (Join-Path $repositoryRoot 'configurator\pyproject.toml'),
+    (Join-Path $repositoryRoot 'configurator\uv.lock'),
     (Join-Path $repositoryRoot 'tests\runner\ruff.toml'),
     (Join-Path $repositoryRoot 'README.md'),
     (Join-Path $repositoryRoot 'mobile\README.md'),
@@ -103,41 +102,36 @@ foreach ($requiredFile in @(
 }
 
 $compiler = Find-InnoCompiler
+$uvCommand = Get-Command 'uv.exe' -ErrorAction SilentlyContinue
+if ($null -eq $uvCommand) {
+    throw 'uv was not found. Install uv and restart PowerShell.'
+}
 New-Item -ItemType Directory -Force -Path $buildRoot, $distRoot, $installerDist | Out-Null
 $bootstrapPython = Find-BootstrapPython
-# 실행 파일에 포함될 Python 버전을 고정해야 빌드 PC마다 호환성이 달라지는 일을 줄일 수 있다.
+# 잠금 파일이 지원하는 Python 3.11을 사용한다.
 $bootstrapVersion = (& $bootstrapPython -c 'import sys; print(sys.version_info.major, sys.version_info.minor, sep=chr(46))').Trim()
 if ($LASTEXITCODE -ne 0 -or $bootstrapVersion -ne '3.11') {
     throw "Bootstrap Python must be version 3.11; found $bootstrapVersion."
 }
-if (-not (Test-Path -LiteralPath $buildPython)) {
-    Invoke-Checked $bootstrapPython @('-m', 'venv', $buildVenv)
+if ($SkipDependencyInstall -and -not (Test-Path -LiteralPath $buildPython)) {
+    throw 'The build environment is missing. Run without -SkipDependencyInstall first.'
 }
-
-$pythonVersion = (& $buildPython -c 'import sys; print(sys.version_info.major, sys.version_info.minor, sep=chr(46))').Trim()
-if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.11') {
-    throw "The packaging environment must use Python 3.11; found $pythonVersion."
-}
-
-if (-not $SkipDependencyInstall) {
-    $pipAvailable = (& $buildPython -c 'import importlib.util; print(int(importlib.util.find_spec(chr(112)+chr(105)+chr(112)) is not None))').Trim()
-    if ($LASTEXITCODE -ne 0 -or $pipAvailable -ne '1') {
-        Invoke-Checked $buildPython @('-m', 'ensurepip', '--upgrade')
+$previousUvEnvironment = $env:UV_PROJECT_ENVIRONMENT
+try {
+    # 개발용 .venv는 유지하고, 설치 생략 시에도 기존 빌드 환경의 잠금 일치를 확인한다.
+    $env:UV_PROJECT_ENVIRONMENT = $buildVenv
+    $syncArguments = @(
+        'sync', '--locked', '--project', $configuratorRoot,
+        '--python', $bootstrapPython, '--no-python-downloads',
+        '--extra', 'test', '--extra', 'build', '--no-editable'
+    )
+    if ($SkipDependencyInstall) {
+        $syncArguments += @('--check', '--offline')
     }
-    Invoke-Checked $buildPython @(
-        '-m', 'pip', 'install', '--disable-pip-version-check',
-        '--requirement', $buildRequirements
-    )
-    Invoke-Checked $buildPython @(
-        '-m', 'pip', 'install', '--disable-pip-version-check',
-        (Join-Path $repositoryRoot 'lib'),
-        "$(Join-Path $repositoryRoot 'configurator')[test]"
-    )
+    Invoke-Checked $uvCommand.Source $syncArguments
 }
-else {
-    Invoke-Checked $buildPython @(
-        '-c', 'import PyInstaller, PyQt5, argon2, pydantic, yaml'
-    )
+finally {
+    $env:UV_PROJECT_ENVIRONMENT = $previousUvEnvironment
 }
 
 Push-Location $repositoryRoot
@@ -148,13 +142,11 @@ try {
             'configurator\tests\test_configurator.py', 'configurator\tests\test_windows_packaging.py'
         )
         Invoke-Checked $buildPython @(
-            '-m', 'ruff', 'check', '--config', 'tests\runner\ruff.toml', 'configurator',
-            'configurator\tests\test_configurator.py', 'configurator\tests\test_windows_packaging.py'
+            '-m', 'ruff', 'check', '--config', 'tests\runner\ruff.toml', 'configurator'
         )
     }
 
-    # PyInstaller는 Python 실행 환경과 의존성을 함께 묶는다. GUI와 CLI는 진입점과
-    # 콘솔 사용 방식이 달라 각 spec 파일로 별도의 실행 파일을 만든다.
+    # GUI와 CLI는 콘솔 사용 여부가 달라 각각의 실행 파일로 묶는다.
     foreach ($spec in @($guiSpec, $cliSpec)) {
         Invoke-Checked $buildPython @(
             '-m', 'PyInstaller', '--clean', '--noconfirm',
@@ -171,14 +163,14 @@ try {
         }
     }
 
-    # Inno Setup은 실행 파일, 서버 코드, 바로가기와 제거 절차를 하나의 설치 파일로 묶는다.
+    # 실행 파일과 서버 코드를 바로가기·제거 기능이 있는 설치 파일로 묶는다.
     Invoke-Checked $compiler @("/DMyAppVersion=$Version", $innoScript)
 
     $installer = Join-Path $installerDist "AI_CCTV_Server_Setup_${Version}_x64.exe"
     if (-not (Test-Path -LiteralPath $installer)) {
         throw "Inno Setup did not create the expected installer: $installer"
     }
-    # SHA-256은 배포 파일이 다운로드·복사 중 달라졌는지 비교할 수 있는 파일 지문이다.
+    # 배포 파일의 복사·다운로드 중 손상을 비교할 해시를 함께 저장한다.
     $checksumPath = "${installer}.sha256"
     $checksum = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
     Set-Content -LiteralPath $checksumPath -Encoding ascii -NoNewline -Value (

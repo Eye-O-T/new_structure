@@ -162,8 +162,7 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
         == scoped_tokens["DATA_MEDIA_TOKEN"]
     )
     assert "INTERNAL_SERVICE_TOKEN=" not in data_secrets
-    # NTFS does not expose its ACL as POSIX permission bits: Python reports 0666
-    # even after chmod(0600).  POSIX hosts can and must verify the actual mode.
+    # Windows ACL은 POSIX 권한 비트로 확인할 수 없으므로 해당 검사는 POSIX에서만 수행한다.
     if os.name != "nt":
         assert stat.S_IMODE(result.secrets_path.stat().st_mode) == 0o600
         assert stat.S_IMODE(result.external_secrets_path.stat().st_mode) == 0o600

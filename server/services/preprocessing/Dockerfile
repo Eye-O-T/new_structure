@@ -14,8 +14,9 @@ WORKDIR /app
 COPY server/services/preprocessing/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY lib /opt/ai-cctv-core
-RUN pip install --no-cache-dir /opt/ai-cctv-core
-COPY server/services/preprocessing /app/server/services/preprocessing
+RUN pip install --no-cache-dir '/opt/ai-cctv-core[processing]'
+COPY server/services/preprocessing/app /app/server/services/preprocessing/app
+COPY server/services/preprocessing/processors /app/server/services/preprocessing/processors
 
 USER 65532:65532
 CMD ["uvicorn", "server.services.preprocessing.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

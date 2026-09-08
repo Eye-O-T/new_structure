@@ -1,8 +1,6 @@
 # 신뢰 LAN에서 Edge의 UDP 광고를 받아 초기 연결 대상을 찾는다.
 # 공유 Key로 만든 HMAC 서명과 시각을 확인하고 실제 패킷 발신 주소로 접속한다.
 
-"""Discover HMAC-authenticated AI_CCTV Edge pairing advertisements."""
-
 from __future__ import annotations
 
 import hashlib

@@ -36,12 +36,7 @@ def _validated_local_model(path: Path) -> Path:
 
 # SHA-256은 파일 내용의 지문이다. 복사 전후 지문을 비교해 복사 중 변경·손상을 확인한다.
 def install_local_model(source_path: Path, models_root: Path) -> Path:
-    """Atomically copy a user-selected model and verify the copied bytes.
-
-    A model is selected locally by the operator; no manifest, license metadata,
-    or network request is involved.  Hashing before and during the copy also
-    detects a download or another process changing the source while setup runs.
-    """
+    """복사 전후 해시를 비교해 모델 파일의 손상·변경을 확인한 뒤 교체한다."""
 
     source = _validated_local_model(source_path)
     target_dir = models_root.expanduser().resolve()

@@ -1,25 +1,18 @@
 # 실제 녹화 파일과 DB 목록을 대조하고 누락·손상·등록되지 않은 파일 상태를 정리한다.
-"""Storage recordings operations."""
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from ai_cctv_core.time import format_utc, utc_now
+from ai_cctv_core.time import central_recording_start, format_utc, utc_now
 
 from ..config import Settings
 from ..database.repositories import DataRepository
 from ..errors import ApiError
 from ..schemas import RecordingSegmentCreate
 from .paths import normalize_hook_segment_path, normalize_relative_path
-
-_CENTRAL_RECORDING_FILENAME = re.compile(
-    r"^(?P<date>\d{8})T(?P<time>\d{6})-(?P<fraction>\d{1,9})Z\.mp4$"
-)
-
 
 def prepare_recording_hook(
     *,
@@ -41,8 +34,13 @@ def prepare_recording_hook(
             {"relative_path": relative_path},
         )
     stat = target.stat()
-    end_time = datetime.fromtimestamp(stat.st_mtime, UTC)
-    start_time = end_time - timedelta(seconds=duration_seconds)
+    start_time = central_recording_start(target.name)
+    if start_time is None:
+        end_time = datetime.fromtimestamp(stat.st_mtime, UTC)
+        start_time = end_time - timedelta(seconds=duration_seconds)
+    else:
+        # 파일 수정 시각은 저장 지연의 영향을 받으므로 녹화 시작은 파일명을 따른다.
+        end_time = start_time + timedelta(seconds=duration_seconds)
     suffix = target.suffix.lower()
     segment_format = "mpegts" if suffix in {".ts", ".mpegts"} else "fmp4"
     return {
@@ -110,23 +108,14 @@ def _prepare_orphaned_central_segment(
     repository: DataRepository,
     settings: Settings,
 ) -> dict[str, Any] | None:
-    """Rebuild metadata when a completed MediaMTX hook was not delivered."""
+    """MediaMTX 완료 통지를 놓친 녹화의 정보를 다시 등록한다."""
 
     parts = PurePosixPath(relative_path).parts
     if len(parts) != 5:
         return None
     camera_id, year, month, day, filename = parts
-    match = _CENTRAL_RECORDING_FILENAME.fullmatch(filename)
-    if match is None or repository.get_camera(camera_id) is None:
-        return None
-
-    fraction = match.group("fraction")[:6].ljust(6, "0")
-    try:
-        start_time = datetime.strptime(
-            f"{match.group('date')}{match.group('time')}{fraction}",
-            "%Y%m%d%H%M%S%f",
-        ).replace(tzinfo=UTC)
-    except ValueError:
+    start_time = central_recording_start(filename)
+    if start_time is None or repository.get_camera(camera_id) is None:
         return None
     if (year, month, day) != (
         start_time.strftime("%Y"),
@@ -138,8 +127,7 @@ def _prepare_orphaned_central_segment(
     stat = target.stat()
     modified_at = datetime.fromtimestamp(stat.st_mtime, UTC)
     if (utc_now() - modified_at).total_seconds() < settings.recovery_settle_seconds:
-        # The active recorder may still be finalizing the newest path. A later
-        # maintenance pass will index it after the settle window.
+        # 최신 파일은 기록 중일 수 있어 안정화 시간이 지난 다음 점검에서 등록한다.
         return None
     expected_end = start_time + timedelta(
         seconds=settings.central_recording_segment_seconds
@@ -185,8 +173,7 @@ def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
                 try:
                     target.unlink()
                 except OSError:
-                    # Keep the durable `deleting` marker so the next startup
-                    # or maintenance pass retries the same idempotent unlink.
+                    # deleting 상태를 남겨 다음 시작·점검에서 같은 파일 삭제를 재시도한다.
                     deletion_retry_errors.append(relative_path)
                     continue
             repository.set_segment_status(segment["id"], "deleted")
@@ -219,9 +206,7 @@ def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
             continue
         existing = repository.get_segment_by_path(relative)
         if existing is not None:
-            # A file that reappears after a durable `deleted` row is not a
-            # missed hook. Keep it visible to operators instead of silently
-            # resurrecting media removed by retention policy.
+            # 삭제 확정 뒤 다시 나타난 파일은 누락 통지로 보지 않는다. 자동 복원 대신 운영자에게 알린다.
             orphaned.append(relative)
             continue
         values = _prepare_orphaned_central_segment(

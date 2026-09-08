@@ -45,7 +45,7 @@ def _sha256(path: Path) -> str:
 
 
 def _capture_may_write(camera_id: str) -> bool:
-    """Conservatively decide whether splitmux can still append to its newest file."""
+    """마지막 파일이 기록 중일 가능성이 있으면 보수적으로 보호한다."""
 
     try:
         payload = json.loads(
@@ -78,7 +78,7 @@ def _recoverable_segments(
     *,
     capture_may_write: bool,
 ) -> tuple[Path, ...]:
-    """Return closed segments while withholding the file splitmux may append to."""
+    """기록이 끝난 영상 조각만 반환한다."""
 
     candidates: list[tuple[int, str, Path]] = []
     for path in camera_root.rglob("*.ts") if camera_root.exists() else ():
@@ -91,8 +91,7 @@ def _recoverable_segments(
     if not candidates:
         return ()
     candidates.sort()
-    # 쓰는 중인 파일을 내려받으면 목록의 크기·해시와 실제 내용이 달라질 수 있다.
-    # 캡처가 멈췄다고 확인될 때에만 마지막 파일까지 복구 대상으로 공개한다.
+    # 크기·해시 불일치를 막기 위해 캡처 종료가 확인된 경우에만 마지막 파일을 공개한다.
     selected = candidates[:-1] if capture_may_write else candidates
     return tuple(item[2] for item in selected)
 

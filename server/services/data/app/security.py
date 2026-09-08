@@ -1,5 +1,4 @@
 # 내부 서비스 토큰을 확인하고 토큰별로 허용한 API만 실행하도록 제한한다.
-"""Authenticate internal requests and enforce per-service route scopes."""
 
 from __future__ import annotations
 

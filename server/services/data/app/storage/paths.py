@@ -1,5 +1,4 @@
 # 받은 파일 경로가 지정된 저장소 안에 있는지 확인해 다른 파일 접근을 막는다.
-"""Storage paths operations."""
 
 from __future__ import annotations
 
@@ -27,7 +26,7 @@ def normalize_relative_path(root: Path, raw_path: str) -> tuple[str, Path]:
 
 
 def normalize_hook_segment_path(root: Path, raw_path: str) -> tuple[str, Path]:
-    """Accept a MediaMTX path only when it resolves below the recording root."""
+    """녹화 저장소 안으로 해석되는 MediaMTX 경로만 허용한다."""
 
     candidate = Path(raw_path)
     if not candidate.is_absolute():

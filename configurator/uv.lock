@@ -50,9 +50,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", marker = "extra == 'processing'", specifier = "==0.28.1" },
     { name = "pydantic", specifier = "==2.10.6" },
     { name = "pyyaml", specifier = "==6.0.2" },
 ]
+provides-extras = ["processing"]
 
 [[package]]
 name = "altgraph"

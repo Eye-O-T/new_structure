@@ -1,7 +1,6 @@
 # 기존 감지·인물 연결 설정을 현재 Preprocessing·Analysis 구성으로 이관한다.
 # 운영 토큰을 새로 바꾸지 않고 일치 여부를 확인하며 누락된 역할의 토큰만 보충한다.
 
-"""Migrate split secrets to preprocessing and analysis without rotating credentials."""
 
 import argparse
 import secrets
@@ -40,7 +39,7 @@ OLD_PLUGIN_DEFAULTS = {
 def _update_env(
     text: str, updates: dict[str, str], remove: set[str] | None = None
 ) -> str:
-    """Keep unrelated settings/comments verbatim and collapse replaced keys once."""
+    """대상 키만 한 번 교체하고 나머지 설정·주석은 보존한다."""
     lines = []
     remaining = dict(updates)
     for line in text.splitlines():
@@ -140,8 +139,7 @@ def enable(server_dir: Path, env_file: Path) -> None:
         if values.get(variable) and not path.is_file():
             raise ValueError(f"Configured {variable} does not exist")
 
-    # Data is authoritative. Existing worker tokens must agree; only missing
-    # identity/analysis scopes may be recovered from workers or generated.
+    # Data 토큰과 기존 작업자 토큰의 일치를 확인하고, 없는 식별·분석 토큰만 보충한다.
     _agree("DATA_INFERENCE_TOKEN", [data_values, preprocessing, inference])
     added_tokens = {}
     for token_key, candidates in (
@@ -221,8 +219,7 @@ def enable(server_dir: Path, env_file: Path) -> None:
         env_updates,
         {"INFERENCE_SECRETS_FILE", "IDENTITY_SECRETS_FILE"},
     )
-    # Validate every file before mutating any. Each write is atomic and a retry
-    # reuses existing tokens, including an interrupted previous invocation.
+    # 전체 검증 후 파일별로 원자 교체한다. 중단 후 재실행해도 기존 토큰은 유지한다.
     for path, content in outputs.items():
         atomic_write(path, content)
     atomic_write(data_path, data_text)

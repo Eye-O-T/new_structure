@@ -1,5 +1,4 @@
-// Android FCM 수신, 서버의 기기 등록, 수신 설정, 알림을 눌렀을 때의 화면 이동을 조정한다.
-// Firebase 설정이 없는 빌드에서는 푸시 준비 실패를 표시하고 일반 서버 조회는 유지한다.
+// Android 푸시 등록·수신·화면 이동을 관리한다. Firebase 미설정 시 서버 조회는 유지한다.
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -14,12 +13,11 @@ import 'notification_payload.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // 백그라운드 알림 표시는 OS에 맡긴다. 보호된 이벤트 상세는 앱을 열고 인증 후 조회한다.
-  // 인증값, 이미지, 상세 내용은 이 처리 과정에서 로그에 남기지 않는다.
+  // 표시는 OS에 맡기고 상세는 인증 후 조회한다. 인증값과 사건 내용은 로그에 남기지 않는다.
   try {
     await Firebase.initializeApp();
   } catch (_) {
-    /* No configured Firebase. */
+    // Firebase가 없어도 백그라운드 처리를 종료한다.
   }
 }
 
@@ -252,7 +250,7 @@ class NotificationController extends ChangeNotifier
     try {
       await LocalNotificationService.showEvent(payload);
     } catch (_) {
-      /* In-app refresh still works. */
+      // 알림 표시가 실패해도 위에서 요청한 화면 갱신은 유지한다.
     }
   }
 
@@ -272,7 +270,7 @@ class NotificationController extends ChangeNotifier
     try {
       openEvent(Map<String, dynamic>.from(jsonDecode(value) as Map));
     } catch (_) {
-      /* Ignore malformed payload. */
+      // 형식이 잘못된 알림은 무시한다.
     }
   }
 

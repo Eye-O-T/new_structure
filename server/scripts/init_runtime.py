@@ -1,7 +1,6 @@
 # Compose가 마운트할 호스트 저장 폴더를 미리 만든다.
 # config.yaml·비밀값·모델은 생성하지 않으므로 별도로 준비해야 한다.
 
-"""Create the host directories used by the central Compose deployment."""
 
 from __future__ import annotations
 

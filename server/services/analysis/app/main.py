@@ -1,5 +1,3 @@
-"""Metadata analyzer service; a black box until an analysis plugin is configured."""
-
 # analysis 컨테이너는 Data에서 받은 사람 관측을 분석하고 추가 정보(metadata)를 돌려준다.
 # 영상 탐지나 전역 인물 ID 지정은 맡지 않으며, 모델은 플러그인으로 별도 연결한다.
 

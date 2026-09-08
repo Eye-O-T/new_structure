@@ -1,5 +1,3 @@
-"""Async lifecycle for a single scoped object job consumer."""
-
 # 서비스가 시작될 때 작업자를 띄우고 종료할 때 정리하는 공통 수명 주기 관리 코드다.
 # identity와 analysis는 각자 권한이 제한된 토큰으로 자신의 작업만 요청한다.
 

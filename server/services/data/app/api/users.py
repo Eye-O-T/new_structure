@@ -1,5 +1,4 @@
 # 사용자 계정과 카메라별 열람 권한을 저장하는 내부 API이다.
-"""Internal users API."""
 
 from __future__ import annotations
 
