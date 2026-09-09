@@ -42,6 +42,7 @@ def _segment_seconds(value: str) -> int:
     return parsed
 
 
+# 발견 기반 연결과 직접 접속 시험에 필요한 경로·포트·영상 인수를 정의한다.
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tests.mock_edge",
@@ -95,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# 인계 JSON의 필드와 카메라별 계정을 확인한 뒤 직접 송출에 사용할 인증값을 반환한다.
 def _load_publish_credentials(path: Path, camera_id: str) -> tuple[str, str]:
     try:
         payload = json.loads(path.expanduser().resolve().read_text(encoding="utf-8"))
@@ -114,6 +116,7 @@ def _load_publish_credentials(path: Path, camera_id: str) -> tuple[str, str]:
     return payload["username"], password
 
 
+# HTTP 서버 스레드의 예외를 기록해 메인 감독 루프가 종료를 감지할 수 있게 한다.
 def _serve(server: uvicorn.Server, name: str) -> None:
     try:
         server.run()
@@ -121,6 +124,7 @@ def _serve(server: uvicorn.Server, name: str) -> None:
         LOGGER.exception("%s HTTP server stopped unexpectedly", name)
 
 
+# 입력·FFmpeg를 검증하고 영상 엔진, 관리·복구 API, 미설정 장치 광고의 수명을 조정한다.
 def run(args: argparse.Namespace) -> int:
     if args.management_port == args.recovery_port:
         raise ValueError("management and recovery ports must differ")
@@ -230,7 +234,7 @@ def run(args: argparse.Namespace) -> int:
             args.recovery_port,
         )
         if not service.configured:
-            LOGGER.info("waiting for Configurator pairing")
+            LOGGER.info("waiting for server install helper pairing")
         while not stop.wait(0.5):
             if service.configured:
                 discovery_stop.set()
@@ -251,6 +255,7 @@ def run(args: argparse.Namespace) -> int:
         signal.signal(signal.SIGTERM, previous_sigterm)
 
 
+# CLI 인수와 로깅을 준비하고 실행 중 발생한 오류를 사용자에게 알리는 진입점이다.
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)

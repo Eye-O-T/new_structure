@@ -7,6 +7,7 @@ from pathlib import Path
 from .config import EdgeConfig
 
 
+# UTC 날짜를 연/월/일 하위 경로로 나누어 카메라별 백업 위치를 만든다.
 def daily_backup_directory(config: EdgeConfig, compact_utc_date: str) -> Path:
     return (
         config.backup.root
@@ -17,6 +18,7 @@ def daily_backup_directory(config: EdgeConfig, compact_utc_date: str) -> Path:
     )
 
 
+# 소프트웨어와 V4L2 인코더가 요구하는 옵션·비트레이트 단위를 각각 맞춘다.
 def _encoder_command(config: EdgeConfig) -> list[str]:
     if config.video.encoder == "x264enc":
         return [
@@ -36,6 +38,7 @@ def _encoder_command(config: EdgeConfig) -> list[str]:
     raise ValueError("video.encoder must be x264enc or v4l2h264enc")
 
 
+# 백업 폴더를 준비하고 한 번 인코딩한 영상을 로컬 녹화와 송출에 나누는 명령을 만든다.
 def build_gstreamer_command(
     config: EdgeConfig, compact_utc_timestamp: str
 ) -> list[str]:
@@ -142,6 +145,7 @@ def build_profile_probe_command(config: EdgeConfig) -> list[str]:
     return command
 
 
+# 로그에 쓸 명령 문자열을 만들며 RTSP URI에 포함된 비밀번호는 가린다.
 def redacted_command(command: list[str]) -> str:
     redacted = []
     for part in command:
@@ -153,6 +157,7 @@ def redacted_command(command: list[str]) -> str:
     return " ".join(redacted)
 
 
+# pull 모드에서 로컬 RTMP 입력을 중앙이 읽을 RTSP로 노출하는 MediaMTX 설정을 만든다.
 def render_edge_mediamtx_config(config: EdgeConfig) -> str:
     if config.rtsp.mode != "central_pull":
         raise ValueError("edge MediaMTX config is only used in central_pull mode")

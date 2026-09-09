@@ -3,6 +3,7 @@
 import os
 
 
+# pytest 수집 초기에 배포 관련 환경변수를 제거해 모듈 import가 운영 설정을 사용하지 않게 한다.
 def pytest_load_initial_conftests(early_config, parser, args):
     # 모듈 수집 전에 지워야 모듈 전역의 create_app()도 배포 설정을 읽지 않는다.
     # 실행 중인 서버가 아니라 별도 pytest 프로세스의 환경만 바뀐다.

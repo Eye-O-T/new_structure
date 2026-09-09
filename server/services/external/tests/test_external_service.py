@@ -1,3 +1,4 @@
+# Data·Edge 대역을 이용해 공개 API의 인증·영상 계약과 카메라 변경/상태 수집의 동시성을 검증한다.
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +41,7 @@ MEDIA_READ_USERNAME = "inference-reader"
 MEDIA_READ_PASSWORD = "r" * 32
 
 
+# 실제 HTTP·DB 대신 상태와 호출 순서를 기록하여 API의 권한 판단과 서비스 간 작업 순서를 관찰한다.
 class FakeDataClient:
     async def get_live_objects(self, camera_id):
         return {"camera_id": camera_id, "objects": [], "stale": True}
@@ -192,6 +194,7 @@ class FakeDataClient:
             ),
         }
 
+    # 해시 저장 당시 카메라 활성 여부도 기록하여 발급 중 송출 차단 순서를 검사한다.
     async def put_camera_publish_credential(self, camera_id: str, payload: dict):
         self.publish_credential_camera_states.append(
             self.camera_enabled.get(camera_id, True)
@@ -248,6 +251,7 @@ class FakeDataClient:
             "end_time": "2026-08-22T08:01:00Z",
         }
 
+    # 고정 영상 바이트와 선택 범위 응답을 제공하여 스트리밍 중계의 헤더·내용 보존을 검사한다.
     async def open_recording_content(
         self,
         segment_id: str,
@@ -303,11 +307,13 @@ class FakeDataClient:
         return {"items": [{"camera_id": camera_id} for camera_id in camera_ids]}
 
 
+# 비용이 있는 Argon2 해시는 테스트 모듈에서 한 번만 만들어 공통 인증 시나리오에 사용한다.
 @pytest.fixture(scope="module")
 def password_hash() -> str:
     return hash_password("correct horse battery staple")
 
 
+# 테스트 전용 토큰과 HTTP 쿠키 설정을 사용하여 운영 비밀값 없이 인증 계약을 검사한다.
 @pytest.fixture()
 def settings() -> Settings:
     return Settings(
@@ -324,6 +330,7 @@ def settings() -> Settings:
     )
 
 
+# Data 의존성과 송출 해제만 대체하고 실제 FastAPI 라우터·인증·응답 변환은 실행한다.
 @pytest.fixture()
 def service(password_hash: str, settings: Settings, monkeypatch):
     fake_data = FakeDataClient(password_hash)
@@ -351,6 +358,7 @@ def service(password_hash: str, settings: Settings, monkeypatch):
         yield client, fake_data
 
 
+# 실제 로그인 경로를 통해 토큰을 발급받아 이후 요청이 정상 인증 절차를 거치게 한다.
 def _login(client: TestClient, username: str = "viewer") -> dict:
     response = client.post(
         "/api/v1/auth/login",
@@ -360,6 +368,55 @@ def _login(client: TestClient, username: str = "viewer") -> dict:
     return response.json()
 
 
+# 관리 화면 자산의 내용 형식과 캐시·CSP를 확인하여 화면 전달 경계를 검증한다.
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [
+        ("/admin", "text/html"),
+        ("/admin/", "text/html"),
+        ("/admin/admin.js", "text/javascript"),
+        ("/admin/admin.css", "text/css"),
+    ],
+)
+def test_admin_ui_serves_only_static_assets_with_security_headers(
+    service, path: str, content_type: str
+):
+    client, _ = service
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(content_type)
+    assert response.headers["cache-control"] == "no-store"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert "script-src 'self'" in response.headers["content-security-policy"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "set-cookie" not in response.headers
+    assert client.get("/admin/config.py").status_code == 404
+    assert all(not path.startswith("/admin") for path in client.app.openapi()["paths"])
+
+
+# 화면을 우회하여 API를 직접 호출해도 미인증·일반 계정의 변경 요청은 거절되어야 한다.
+@pytest.mark.parametrize("role", [None, "viewer"])
+def test_admin_ui_operations_keep_server_authorization_boundary(service, role):
+    client, data = service
+    if role:
+        _login(client, role)
+    expected = 403 if role else 401
+    requests = [
+        ("GET", "/api/v1/admin/system/status", None),
+        ("POST", "/api/v1/cameras", {"camera_id": "cam-002", "name": "정문"}),
+        ("PATCH", "/api/v1/cameras/cam-001", {"name": "변경"}),
+        ("POST", "/api/v1/cameras/cam-001/publish-credentials/rotate", None),
+        ("PATCH", "/api/v1/cameras/cam-001/video-profile", {"profile": "hd"}),
+    ]
+    for method, path, payload in requests:
+        response = client.request(method, path, json=payload)
+        assert response.status_code == expected, response.text
+    assert data.created_cameras == []
+    assert data.publish_credentials == {}
+    assert data.profile_updates == []
+
+
+# 발급 토큰의 서명 방식·사용자 claims와 브라우저 쿠키 보호 속성을 함께 검사한다.
 def test_login_issues_hs256_claims_and_http_only_cookies(service, settings: Settings):
     client, fake_data = service
     response = client.post(
@@ -388,6 +445,7 @@ def test_login_issues_hs256_claims_and_http_only_cookies(service, settings: Sett
     assert settings.refresh_cookie_name in set_cookie
 
 
+# 서명이 유효해도 유효 기간이 지난 JWT는 만료 오류로 구분되어야 한다.
 def test_expired_jwt_is_rejected(settings: Settings):
     expired = issue_token(
         settings,
@@ -401,6 +459,7 @@ def test_expired_jwt_is_rejected(settings: Settings):
         decode_token(expired.encoded, settings, expected_type="access")
 
 
+# 일반 계정의 등록 요청은 Data 변경 호출 전에 거절되어야 한다.
 def test_viewer_cannot_create_camera(service):
     client, fake_data = service
     token = _login(client)["access_token"]
@@ -415,6 +474,7 @@ def test_viewer_cannot_create_camera(service):
     assert fake_data.created_cameras == []
 
 
+# 관리자는 비밀번호를 최초 응답으로만 받고 저장소에는 해시와 발급 중 비활성 상태가 남아야 한다.
 def test_admin_camera_create_returns_one_time_dynamic_publish_credential(service):
     client, fake_data = service
     token = _login(client, "admin")["access_token"]
@@ -448,6 +508,7 @@ def test_admin_camera_create_returns_one_time_dynamic_publish_credential(service
     assert authenticated.status_code == 204
 
 
+# 해시 저장 실패 시 비활성 행을 지우기 전에 기존 송출 연결부터 해제해야 한다.
 def test_camera_create_rollback_kicks_publisher_before_deleting_disabled_row(
     service, monkeypatch
 ):
@@ -471,6 +532,7 @@ def test_camera_create_rollback_kicks_publisher_before_deleting_disabled_row(
     assert "cam-002" not in fake_data.camera_enabled
 
 
+# 카메라 권한을 매번 확인하고 허용된 대상만 현재 사용자 ID로 조회해야 한다.
 def test_camera_acl_is_enforced_by_data_user_id(service):
     client, fake_data = service
     token = _login(client)["access_token"]
@@ -486,6 +548,7 @@ def test_camera_acl_is_enforced_by_data_user_id(service):
     assert fake_data.permission_calls.count("2") >= 2
 
 
+# MediaMTX 재생 쿼리는 기간을 숫자 초 문자열로 전달해야 한다.
 def test_recording_playback_uses_numeric_mediamtx_duration(service):
     client, _ = service
     token = _login(client)["access_token"]
@@ -502,6 +565,7 @@ def test_recording_playback_uses_numeric_mediamtx_duration(service):
     assert query["start"] == ["2026-08-22T08:00:00Z"]
 
 
+# 파일명 시각 보정은 재생 시작점에만 적용하고 DB 녹화 길이는 유지한다.
 @pytest.mark.parametrize(
     "filename,expected_start",
     [
@@ -540,6 +604,7 @@ def test_recording_playback_uses_filename_time_without_changing_duration(
     assert query["path"] == ["cam-001"]
 
 
+# Nginx 인증 결과에는 사용자 헤더가 포함되고 HLS 대상 카메라 권한을 검사해야 한다.
 def test_internal_auth_verify_returns_identity_headers_and_checks_hls_acl(service):
     client, fake_data = service
     token = _login(client)["access_token"]
@@ -558,6 +623,7 @@ def test_internal_auth_verify_returns_identity_headers_and_checks_hls_acl(servic
     assert fake_data.camera_acl_calls[-1] == ("cam-001", "2")
 
 
+# Playback의 단일 path 값으로 권한을 판단하고 누락·중복 선택자는 거절한다.
 def test_internal_auth_verify_checks_playback_path_acl(service):
     client, _fake_data = service
     token = _login(client)["access_token"]
@@ -595,6 +661,7 @@ def test_internal_auth_verify_checks_playback_path_acl(service):
     assert duplicate.status_code == 400
 
 
+# 별도 선택자와 실제 영상 URI가 다르면 허용 카메라로 바꿔치기할 수 없어야 한다.
 def test_internal_auth_verify_rejects_camera_selector_acl_bypass(service):
     client, _fake_data = service
     token = _login(client)["access_token"]
@@ -621,6 +688,7 @@ def test_internal_auth_verify_rejects_camera_selector_acl_bypass(service):
     assert playback_conflict.status_code == 400
 
 
+# 인코딩·상위 경로처럼 모호한 URI는 권한 조회 전에 거절되어야 한다.
 def test_internal_auth_verify_rejects_encoded_hls_path_confusion(service):
     client, fake_data = service
     token = _login(client)["access_token"]
@@ -644,6 +712,7 @@ def test_internal_auth_verify_rejects_encoded_hls_path_confusion(service):
     assert fake_data.camera_acl_calls == before
 
 
+# 공개 명세가 내부 인증·상태 점검 경로를 제외하고 공개 응답·인증 계약을 유지하는지 검사한다.
 def test_public_openapi_excludes_internal_routes(service):
     client, _fake_data = service
 
@@ -732,6 +801,7 @@ def test_public_openapi_excludes_internal_routes(service):
     assert content_schema == {"type": "string", "format": "binary"}
 
 
+# 갱신 때 이전 jti가 교체되고 로그아웃은 현재 접근·갱신 토큰을 모두 폐기해야 한다.
 def test_refresh_rotates_and_logout_revokes_tokens(service):
     client, fake_data = service
     login = _login(client)
@@ -758,6 +828,7 @@ def test_refresh_rotates_and_logout_revokes_tokens(service):
     assert len(fake_data.revoked_refresh) == 1
 
 
+# 카메라 송출 인증과 내부 읽기 계정·프록시 보호 HLS의 허용 조건을 분리해 검사한다.
 def test_media_auth_separates_publish_rtsp_read_and_internal_hls(service):
     client, fake_data = service
     valid = client.post(
@@ -825,6 +896,7 @@ def test_media_auth_separates_publish_rtsp_read_and_internal_hls(service):
     assert "  - action: read" not in mediamtx
 
 
+# 같은 ID 재등록 뒤에는 DB의 새 비밀번호만 유효하고 예전 정적 비밀번호는 거절되어야 한다.
 def test_reregistered_camera_db_publish_credential_overrides_static(service):
     client, _fake_data = service
     admin = _login(client, "admin")["access_token"]
@@ -862,6 +934,7 @@ def test_reregistered_camera_db_publish_credential_overrides_static(service):
     assert _fake_data.disconnected_publishers == ["cam-001"]
 
 
+# 라이브 주소·쿠키 안내뿐 아니라 실제 HLS 조각 인증에도 카메라 권한이 적용되어야 한다.
 def test_live_contract_covers_hls_cookie_and_segment_acl(service):
     client, fake_data = service
     token = _login(client)["access_token"]
@@ -888,6 +961,7 @@ def test_live_contract_covers_hls_cookie_and_segment_acl(service):
     assert fake_data.camera_acl_calls[-1] != ("cam-002", "2")
 
 
+# 중지된 카메라는 라이브 API·HLS 인증에서 차단되고 오래된 실행 상태가 초기화되어야 한다.
 def test_disabling_camera_blocks_live_and_clears_runtime_state(service):
     client, fake_data = service
     admin = _login(client, "admin")["access_token"]
@@ -927,6 +1001,7 @@ def test_disabling_camera_blocks_live_and_clears_runtime_state(service):
     assert fake_data.disconnected_publishers == ["cam-001"]
 
 
+# 삭제 불가 이력이 사전 확인되면 활성 상태와 기존 송출에 손대지 않아야 한다.
 def test_camera_delete_history_conflict_does_not_disable_or_kick(service):
     client, fake_data = service
     fake_data.camera_deletable["cam-001"] = False
@@ -944,6 +1019,7 @@ def test_camera_delete_history_conflict_does_not_disable_or_kick(service):
     assert fake_data.deleted_cameras == []
 
 
+# 자격 증명 교체 뒤 원문은 응답으로만 제공하고 기존 비밀번호 송출은 거절한다.
 def test_admin_rotates_publish_credential_and_old_password_stops_working(service):
     client, fake_data = service
     admin = _login(client, "admin")["access_token"]
@@ -984,6 +1060,7 @@ def test_admin_rotates_publish_credential_and_old_password_stops_working(service
     assert stale.status_code == 401
 
 
+# 임의 카메라 ID가 많아도 잠금 수는 제한되며 같은 ID는 같은 잠금을 사용해야 한다.
 def test_camera_lifecycle_lock_pool_is_stable_and_bounded(password_hash: str):
     application = create_app(data_client=FakeDataClient(password_hash))
     lock_factory = application.state.camera_lifecycle_lock_factory
@@ -993,6 +1070,7 @@ def test_camera_lifecycle_lock_pool_is_stable_and_bounded(password_hash: str):
     assert len(locks) <= 64
 
 
+# 비밀번호 교체 중 뒤이어 온 비활성 요청이 이전 활성 상태 복원에 의해 사라지지 않아야 한다.
 @pytest.mark.asyncio
 async def test_camera_lifecycle_lock_preserves_newer_disable_during_rotation(
     password_hash: str, settings: Settings, monkeypatch
@@ -1054,6 +1132,7 @@ async def test_camera_lifecycle_lock_preserves_newer_disable_during_rotation(
     assert disconnect_calls == ["cam-001", "cam-001"]
 
 
+# 두 동시 교체를 직렬화하여 최종 저장 비밀번호와 응답 순서가 일치하게 한다.
 @pytest.mark.asyncio
 async def test_camera_lifecycle_lock_serializes_concurrent_rotations(
     password_hash: str, settings: Settings, monkeypatch
@@ -1153,6 +1232,7 @@ async def test_camera_lifecycle_lock_serializes_concurrent_rotations(
     assert second_auth.status_code == 204
 
 
+# 송출 인증 응답 전송이 끝나야 비활성화가 진행되어 이미 승인된 연결도 정리할 수 있어야 한다.
 @pytest.mark.asyncio
 async def test_media_auth_finishes_before_concurrent_disable_closes_admission(
     password_hash: str, settings: Settings, monkeypatch
@@ -1244,6 +1324,7 @@ async def test_media_auth_finishes_before_concurrent_disable_closes_admission(
     assert fake_data.disconnected_publishers == ["cam-001"]
 
 
+# 첫 조회 이후 뒤늦게 붙는 송출자도 반복 확인 과정에서 발견하고 해제해야 한다.
 @pytest.mark.asyncio
 async def test_mediamtx_client_kicks_late_attaching_camera_publisher():
     requests: list[tuple[str, str]] = []
@@ -1287,6 +1368,7 @@ async def test_mediamtx_client_kicks_late_attaching_camera_publisher():
     ]
 
 
+# 한 번 비어 있는 관측만으로 끝내지 않고 기본 연속 확인 횟수를 충족해야 한다.
 @pytest.mark.asyncio
 async def test_mediamtx_client_default_requires_extended_quiet_window():
     checks = 0
@@ -1309,6 +1391,7 @@ async def test_mediamtx_client_default_requires_extended_quiet_window():
     assert checks == 10
 
 
+# 송출자가 계속 나타나면 제한 횟수 뒤 성공으로 처리하지 않고 명시적 제어 오류를 반환한다.
 @pytest.mark.asyncio
 async def test_mediamtx_client_fails_closed_when_publisher_never_quiesces():
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -1339,6 +1422,7 @@ async def test_mediamtx_client_fails_closed_when_publisher_never_quiesces():
     assert captured.value.code == "MEDIA_PUBLISHER_STILL_ACTIVE"
 
 
+# 연결 해제 통신이 실패해도 DB 비활성 상태는 유지되어 새 송출을 막아야 한다.
 def test_disable_is_fail_closed_when_mediamtx_control_is_unavailable(
     service, monkeypatch
 ):
@@ -1363,6 +1447,7 @@ def test_disable_is_fail_closed_when_mediamtx_control_is_unavailable(
     assert fake_data.camera_enabled["cam-001"] is False
 
 
+# 허용한 카메라 충돌 코드와 안내만 Data 예외 변환을 통과하는지 확인한다.
 @pytest.mark.asyncio
 async def test_data_client_preserves_allowlisted_camera_conflict():
     async def handler(_request: httpx.Request) -> httpx.Response:
@@ -1393,6 +1478,7 @@ async def test_data_client_preserves_allowlisted_camera_conflict():
     assert "disable" in captured.value.message
 
 
+# 만료는 재생목록·조각 모두에 적용되고 쿠키 갱신 뒤에는 다시 재생할 수 있어야 한다.
 def test_hls_manifest_and_segment_expiry_then_refresh_cookie_recovery(
     service, settings: Settings
 ) -> None:
@@ -1434,6 +1520,7 @@ def test_hls_manifest_and_segment_expiry_then_refresh_cookie_recovery(
         assert response.status_code == 200
 
 
+# 배포 프록시가 인증 헤더·쿠키와 원본 URI를 전달하고 모호한 경로를 차단하는지 확인한다.
 def test_nginx_hls_auth_subrequest_forwards_bearer_and_cookie() -> None:
     nginx = Path("server/services/nginx/nginx.conf").read_text(encoding="utf-8")
     hls = nginx.split("location ^~ /hls/ {", 1)[1].split("# Range is preserved", 1)[0]
@@ -1450,6 +1537,7 @@ def test_nginx_hls_auth_subrequest_forwards_bearer_and_cookie() -> None:
     assert "proxy_pass http://external_service/internal/auth/verify?;" in auth
 
 
+# 내부 등록에 사용한 Edge 주소·토큰·RTSP 정보가 공개 카메라 응답에 섞이지 않아야 한다.
 def test_public_camera_response_never_exposes_edge_or_rtsp_metadata(service):
     client, fake_data = service
     token = _login(client, "admin")["access_token"]
@@ -1479,6 +1567,7 @@ def test_public_camera_response_never_exposes_edge_or_rtsp_metadata(service):
     assert fake_data.created_cameras[-1]["edge_auth_token"] == "s" * 32
 
 
+# 지원 불가 때는 원하는 값만 기록하고 Edge 적용 성공이 확인된 뒤 실제 프로필을 바꾼다.
 def test_video_profile_updates_current_only_after_edge_applied(
     service, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1549,6 +1638,7 @@ def test_video_profile_updates_current_only_after_edge_applied(
     ]
 
 
+# 빈 지원 목록보다 카메라·인코더 사용 불가 원인을 먼저 전달하고 적용 호출은 하지 않는다.
 @pytest.mark.parametrize(
     ("capability_state", "expected_code"),
     [
@@ -1626,6 +1716,7 @@ def test_video_profile_maps_unavailable_capabilities_before_empty_profile_list(
     assert fake_data.edge_events[-1]["metadata"]["reason_code"] == expected_code
 
 
+# 동시 화질 변경과 상태 수집을 직렬화하여 Edge와 중앙의 최종 프로필이 일치해야 한다.
 @pytest.mark.asyncio
 async def test_video_profile_lock_keeps_concurrent_edge_and_data_state_consistent(
     password_hash: str, settings: Settings, monkeypatch
@@ -1757,6 +1848,7 @@ async def test_video_profile_lock_keeps_concurrent_edge_and_data_state_consisten
     assert fake_data.video_profiles["cam-001"]["desired_profile"] == "hd"
 
 
+# Edge 일지에 남긴 적용 거절은 중앙에서 실패 이벤트를 추가 생성하지 않는다.
 def test_video_profile_does_not_duplicate_edge_journaled_rejection(
     service, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1809,6 +1901,7 @@ def test_video_profile_does_not_duplicate_edge_journaled_rejection(
     assert fake_data.edge_events == []
 
 
+# 다른 카메라의 기능 응답을 받으면 프로필 변경 전에 교차 연결 오류를 보고한다.
 def test_video_profile_rejects_cross_wired_edge_capability(
     service, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1856,6 +1949,7 @@ def test_video_profile_rejects_cross_wired_edge_capability(
     )
 
 
+# 장치 상태에는 카메라 권한이, 복구 목록에는 관리자 권한이 계속 적용되어야 한다.
 def test_status_and_recovery_jobs_keep_camera_and_admin_acl(service):
     client, _fake_data = service
     viewer = _login(client)["access_token"]
@@ -1882,6 +1976,7 @@ def test_status_and_recovery_jobs_keep_camera_and_admin_acl(service):
     )
 
 
+# 복구 영상 재생 주소와 범위 스트림이 공개 API를 거치며 소속 카메라 권한을 검사한다.
 def test_recovered_mpegts_playback_streams_with_range_and_camera_acl(
     service, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1924,6 +2019,7 @@ def test_recovered_mpegts_playback_streams_with_range_and_camera_acl(
     ]
 
 
+# 공개 origin을 지정한 배포는 HLS·재생 주소에 해당 origin을 반영한다.
 def test_public_base_url_makes_media_urls_absolute(password_hash: str) -> None:
     configured = Settings(
         data_base_url="http://data.test/internal/data/v1",
@@ -1965,6 +2061,7 @@ def test_public_base_url_makes_media_urls_absolute(password_hash: str) -> None:
         )
 
 
+# Edge 인증 헤더와 시간 초과·거절의 오류 코드 및 일지 기록 여부를 검증한다.
 @pytest.mark.asyncio
 async def test_edge_http_client_auth_timeout_and_rejection_mapping() -> None:
     requests: list[httpx.Request] = []
@@ -2037,6 +2134,7 @@ async def test_edge_http_client_auth_timeout_and_rejection_mapping() -> None:
     await timed.close()
 
 
+# 제어 제한 시간은 Edge의 느린 적용 구간을 수용하고 짧은 상태 조회 제한과 구분되어야 한다.
 @pytest.mark.asyncio
 async def test_edge_control_timeout_covers_slow_profile_apply_contract(
     monkeypatch: pytest.MonkeyPatch,
@@ -2108,6 +2206,7 @@ async def test_edge_control_timeout_covers_slow_profile_apply_contract(
         )
 
 
+# 일지 커서를 저장해 다음 조회에서 이미 수집한 이벤트와 변화 보고가 중복되지 않아야 한다.
 @pytest.mark.asyncio
 async def test_status_collector_persists_cursor_and_avoids_transition_duplicates(
     settings: Settings,
@@ -2249,6 +2348,7 @@ async def test_status_collector_persists_cursor_and_avoids_transition_duplicates
     )
 
 
+# 일지 조회 실패 때 이전 관측 기준을 남겨 다음 회차에 놓친 변화만 생성할 수 있어야 한다.
 @pytest.mark.asyncio
 async def test_status_collector_preserves_transition_baseline_when_journal_fails(
     settings: Settings,
@@ -2374,6 +2474,7 @@ async def test_status_collector_preserves_transition_baseline_when_journal_fails
     ] == ["storage_warning"]
 
 
+# 이벤트 저장 또는 상태 저장이 실패해도 동일한 멱등 키로 재시도해 변화 유실·중복을 막는다.
 @pytest.mark.asyncio
 async def test_status_collector_commits_events_before_baseline_and_retries_stably(
     settings: Settings,
@@ -2485,6 +2586,7 @@ async def test_status_collector_commits_events_before_baseline_and_retries_stabl
     assert len(set(data.event_attempt_ids)) == 1
 
 
+# 실제 기능 점검이 확인되지 않은 구형 지원 프로필 선언은 중앙 지원 목록을 바꾸지 않는다.
 def test_status_collector_does_not_trust_unprobed_profile_declarations():
     legacy = StatusCollector._profile_observation(
         {
@@ -2504,6 +2606,7 @@ def test_status_collector_does_not_trust_unprobed_profile_declarations():
     assert probed == {"current_profile": "hd", "supported_profiles": ["hd"]}
 
 
+# 관측되지 않은 상태와 캡처 미실행 상태에서 연결 변화 이벤트를 추정해 만들지 않는다.
 @pytest.mark.asyncio
 async def test_status_collector_ignores_unknown_transition_states(
     settings: Settings,
@@ -2615,6 +2718,7 @@ async def test_status_collector_ignores_unknown_transition_states(
     ]
 
 
+# 객체 좌표 조회도 인증·카메라 권한을 요구하고 캐시를 비활성화해야 한다.
 def test_live_object_api_requires_camera_acl(service):
     client, data = service
     assert client.get("/api/v1/cameras/cam-001/objects").status_code == 401

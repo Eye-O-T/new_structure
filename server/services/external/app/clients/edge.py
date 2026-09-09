@@ -27,6 +27,7 @@ class EdgeControlError(Exception):
         self.profile_outcome_journaled = profile_outcome_journaled
 
 
+# 프록시 환경값·리다이렉트를 사용하지 않는 인증된 Edge 제어 HTTP 클라이언트이다.
 class EdgeHttpClient:
     def __init__(
         self,
@@ -57,6 +58,7 @@ class EdgeHttpClient:
     async def __aexit__(self, *_args: Any) -> None:
         await self.close()
 
+    # 시간 초과·연결 불가·인증 거절·기능 거절을 구분하고 JSON 객체 응답만 받아들인다.
     async def _request(
         self,
         method: str,
@@ -153,6 +155,7 @@ class EdgeHttpClient:
     async def get_video_capabilities(self) -> dict[str, Any]:
         return await self._request("GET", "internal/v1/capabilities/video")
 
+    # Edge가 applied를 명시해야 성공으로 보고 이미 일지에 기록된 실패인지도 표시한다.
     async def apply_video_profile(self, profile: str) -> dict[str, Any]:
         try:
             payload = await self._request(
@@ -177,6 +180,7 @@ class EdgeHttpClient:
             )
         return payload
 
+    # 마지막 커서 이후의 이벤트 페이지를 요청하며 최초 조회에서는 after를 생략한다.
     async def list_events(
         self, *, after: str | None, limit: int = 100
     ) -> dict[str, Any]:

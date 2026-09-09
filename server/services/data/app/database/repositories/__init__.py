@@ -16,6 +16,7 @@ from .users import UsersRepositoryMixin
 __all__ = ["DataRepository", "CameraHasHistory", "CameraLimitReached"]
 
 
+# 도메인별 SQL 구현을 동일한 Database 인스턴스 위에 합쳐 서비스에 제공한다.
 class DataRepository(
     UsersRepositoryMixin,
     CamerasRepositoryMixin,

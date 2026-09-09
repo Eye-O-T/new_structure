@@ -1,9 +1,13 @@
 # 탐지 좌표를 영상 크기에 맞추고, 다른 모델이 사용할 사람 이미지와 박스 이미지를 만든다.
 
 import uuid
+import os
+import re
+import tempfile
 from pathlib import Path
 
 from ai_cctv_core.time import utc_now
+from ai_cctv_core.identifiers import safe_storage_path, validate_camera_id
 
 
 def clip_detections(detections, width, height):
@@ -29,19 +33,45 @@ def clip_detections(detections, width, height):
     return result[:100]
 
 
+def write_jpeg_atomic(root: Path, relative: Path, frame) -> None:
+    """완성된 JPEG만 공유 저장소에 공개하고 심볼릭 링크를 통한 경로 탈출도 거부한다."""
+    import cv2
+
+    target = safe_storage_path(root, relative)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    encoded, image = cv2.imencode(".jpg", frame)
+    if not encoded:
+        raise OSError("Cannot encode snapshot JPEG")
+    descriptor, name = tempfile.mkstemp(prefix=".snapshot-", dir=target.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(image.tobytes())
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+# 유효한 픽셀 박스를 전제로 모델용 crop과 표시용 사본을 저장해 관측 계약을 반환한다.
 def save_observation(frame, detection, root: Path, camera_id, session_id):
+    validate_camera_id(camera_id)
+    if not isinstance(session_id, str) or not re.fullmatch(r"[a-f0-9]{32}", session_id):
+        raise ValueError("tracking session must be a UUID hex string")
     import cv2
 
     height, width = frame.shape[:2]
     box = detection["bbox"]
     x1, y1, x2, y2 = box
+    if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+        raise ValueError("object crop must fit inside the frame")
     relative = Path(camera_id) / utc_now().strftime("%Y/%m/%d") / uuid.uuid4().hex
     crop = relative.with_name(relative.name + "_crop.jpg")
     annotated = relative.with_name(relative.name + "_boxed.jpg")
     # crop은 모델 입력용 사람 영역, annotated는 사용자가 위치와 ID를 확인할 전체 이미지다.
-    (root / crop).parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(root / crop), frame[y1:y2, x1:x2]):
-        raise OSError("Cannot write object crop")
+    write_jpeg_atomic(root, crop, frame[y1:y2, x1:x2])
     marked = frame.copy()
     # 원본 프레임에 직접 그리지 않아 다른 사람의 crop이나 탐지 입력에 박스가 섞이지 않는다.
     cv2.rectangle(marked, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -54,9 +84,12 @@ def save_observation(frame, detection, root: Path, camera_id, session_id):
         (0, 255, 0),
         2,
     )
-    boxed_path = (
-        annotated.as_posix() if cv2.imwrite(str(root / annotated), marked) else None
-    )
+    try:
+        write_jpeg_atomic(root, annotated, marked)
+    except (OSError, cv2.error):
+        boxed_path = None
+    else:
+        boxed_path = annotated.as_posix()
     return {
         # 공유 저장소의 상대 경로와 원본 크기를 보내므로 컨테이너별 마운트 위치에 의존하지 않는다.
         "schema_version": 1,

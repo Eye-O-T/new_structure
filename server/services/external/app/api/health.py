@@ -28,6 +28,7 @@ async def health_live() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Data가 준비되어 있어야 공개 API 서비스도 요청을 처리할 준비가 된 것으로 판단한다.
 @router.get("/health/ready", include_in_schema=False)
 async def health_ready(
     data: DataClient = Depends(get_data_client),
@@ -36,6 +37,7 @@ async def health_ready(
     return {"status": "ready"}
 
 
+# 관리자에게 External 버전과 실제 Data 준비 상태를 함께 제공한다.
 @router.get("/api/v1/system/status", response_model=SystemStatusResponse)
 @router.get("/api/v1/admin/system/status", response_model=SystemStatusResponse)
 async def system_status(

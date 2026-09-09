@@ -28,6 +28,7 @@ def utc_timestamp() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+# 실제 Edge와 같은 파일 형식으로 비밀값을 읽고 길이·공백·개행 조건을 검증한다.
 def load_secret(path: Path, *, name: str = "secret", minimum: int = 32) -> str:
     try:
         raw = path.expanduser().resolve().read_text(encoding="utf-8")
@@ -46,6 +47,7 @@ def load_secret(path: Path, *, name: str = "secret", minimum: int = 32) -> str:
     return value
 
 
+# 실제 발견 수신기와 바이트 단위로 같은 서명을 계산하도록 JSON 표현을 고정한다.
 def _canonical_payload(message: dict[str, object]) -> bytes:
     return json.dumps(
         message,
@@ -56,6 +58,7 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
     ).encode("utf-8")
 
 
+# 실제 서버 설치 도구가 검증할 수 있는 버전 1 발견 광고와 HMAC 서명을 생성한다.
 def build_advertisement(
     *,
     device_id: str,
@@ -114,6 +117,7 @@ def build_advertisement(
     return payload
 
 
+# 미설정 모의 장치를 LAN에 주기적으로 광고하며 송신 오류는 다음 주기에 재시도한다.
 def advertise_until_stopped(
     stop: threading.Event,
     *,
@@ -150,6 +154,7 @@ def advertise_until_stopped(
             stop.wait(interval_seconds)
 
 
+# 요청 헤더의 Bearer 값과 연결 키를 일정 시간 비교 함수로 대조한다.
 def bearer_matches(authorization: str | None, expected: str) -> bool:
     if not authorization or not authorization.startswith("Bearer "):
         return False
@@ -157,6 +162,7 @@ def bearer_matches(authorization: str | None, expected: str) -> bool:
     return bool(supplied) and hmac.compare_digest(supplied, expected)
 
 
+# 고유 임시 파일을 완성·동기화한 뒤 교체해 중단 시에도 기존 설정 파일을 보존한다.
 def write_atomic(path: Path, text: str, *, mode: int = 0o640) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -226,6 +232,7 @@ class EventJournal:
                 if unlock is not None:
                     unlock()
 
+    # 이벤트를 잠금 안에서 추가·동기화하고 최대 크기를 넘은 일지를 정리한다.
     def record(self, event_type: str, **details: Any) -> dict[str, Any]:
         payload = {
             "event_id": uuid.uuid4().hex,
@@ -244,6 +251,7 @@ class EventJournal:
             self._compact_if_needed()
         return payload
 
+    # UTF-8 바이트 크기로 계산해 최근 기록을 용량 한도의 절반 정도 남긴다.
     def _compact_if_needed(self) -> None:
         try:
             if self.path.stat().st_size <= self.max_bytes:
@@ -262,6 +270,7 @@ class EventJournal:
             size += line_size
         write_atomic(self.path, "".join(reversed(retained)))
 
+    # 커서 이후의 이벤트와 다음 커서를 돌려주며 이미 정리된 커서는 만료로 알린다.
     def page(
         self, *, after: str | None = None, limit: int = 100
     ) -> tuple[list[dict[str, Any]], str | None, bool]:

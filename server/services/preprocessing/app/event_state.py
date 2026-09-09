@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# 원시 탐지 결과에서 만들어진 등장 또는 퇴장 전환과 해당 사람의 마지막 신뢰도다.
 @dataclass(frozen=True)
 class TrackEvent:
     event_type: str
@@ -19,6 +20,7 @@ class TrackState:
         self._disappear_seconds = disappear_seconds
         self._tracks: dict[str, tuple[float, float | None]] = {}
 
+    # 새 사람은 즉시 등장으로 기록하고 마지막 관측 뒤 유예 시간이 지난 사람만 퇴장 처리한다.
     def update(self, detections: list[dict], now_monotonic: float) -> list[TrackEvent]:
         # monotonic 시간은 PC 시계가 보정되어도 뒤로 가지 않아 경과 시간 계산에 적합하다.
         events: list[TrackEvent] = []

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';
 import 'package:app/core/notifications/providers.dart';
 
+/// 현재 계정과 서버, 알림 수신 설정 및 기기 등록 상태를 표시한다.
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
   @override
@@ -13,6 +14,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool busy = false;
 
+  /// 설정 변경·재등록·로그아웃에 공통 대기 표시와 화면이 남아 있을 때의 오류 안내를 적용한다.
   Future<void> perform(Future<void> Function() action) async {
     setState(() => busy = true);
     try {
@@ -34,6 +36,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final notifications = ref.watch(notificationControllerProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('설정')),
+      // Provider는 같은 관리자 객체를 반환하므로 내부 상태 변경은 ChangeNotifier로 구독한다.
       body: ListenableBuilder(
         listenable: notifications,
         builder: (_, _) => ListView(

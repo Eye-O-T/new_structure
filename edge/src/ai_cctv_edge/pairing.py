@@ -48,6 +48,7 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
     ).encode("utf-8")
 
 
+# 파일 끝의 개행만 허용하며 공백·제어 문자로 의미가 달라질 수 있는 연결 키는 거부한다.
 def load_pairing_key(path: Path) -> str:
     try:
         raw = path.expanduser().resolve().read_text(encoding="utf-8")
@@ -64,6 +65,7 @@ def load_pairing_key(path: Path) -> str:
     return key
 
 
+# 장치 식별·서비스 포트·지원 프로필에 시각과 UUID를 붙여 서명된 발견 패킷을 만든다.
 def build_advertisement(
     *,
     device_id: str,
@@ -128,6 +130,7 @@ def build_advertisement(
     return result
 
 
+# 매회 새 시각과 메시지 ID로 LAN 광고를 보내고 일시적인 송신 오류 뒤에도 계속 시도한다.
 def advertise_until_stopped(
     stop: threading.Event,
     *,
@@ -164,6 +167,7 @@ def advertise_until_stopped(
             stop.wait(interval_seconds)
 
 
+# 중앙 서버가 최초 연결 때 전달할 공개 설정과 카메라별 송출 자격 증명의 입력 형식이다.
 class PairingCompletion(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -182,6 +186,7 @@ class PairingCompletion(BaseModel):
     publish_password: str = Field(min_length=16, max_length=1024)
 
 
+# 한 번의 초기 연결 상태와 완료 표식을 관리하며 요청 직렬화 잠금을 제공한다.
 @dataclass
 class PairingSession:
     config_path: Path
@@ -197,6 +202,7 @@ class PairingSession:
     def marker_path(self) -> Path:
         return self.config_path.parent / ".configured"
 
+    # 대상 장치와 자격 증명을 검증한 뒤 설정을 기록하고 같은 세션의 완료 재요청은 허용한다.
     def apply(self, request: PairingCompletion) -> EdgeConfig:
         if self.marker_path.exists():
             if self.completed.is_set():
@@ -271,6 +277,7 @@ class PairingSession:
         self.completed.set()
         return config
 
+    # Linux 서비스 계정이 있는 환경에서는 설정과 비밀 파일의 소유자를 해당 계정으로 맞춘다.
     @staticmethod
     def _set_edge_ownership(*paths: Path) -> None:
         if os.name == "nt":
@@ -286,6 +293,7 @@ class PairingSession:
                 shutil.chown(path, user=account.pw_uid, group=account.pw_gid)
 
 
+# 연결 키로 인증하는 최초 설정 API를 만들고 동시 완료 요청은 세션 잠금으로 묶는다.
 def create_pairing_app(session: PairingSession) -> FastAPI:
     authenticate = BearerAuthenticator(load_tokens(session.pairing_key_file))
     app = FastAPI(title="AI_CCTV Edge Pairing", version="0.3.0")

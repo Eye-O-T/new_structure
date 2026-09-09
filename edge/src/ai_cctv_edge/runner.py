@@ -43,14 +43,17 @@ except ImportError:  # pragma: no cover - 비POSIX 테스트 환경용
 LOGGER = logging.getLogger("ai_cctv.edge")
 
 
+# 캡처 정지나 프레임 무응답을 일반 실행 실패와 구별하는 오류다.
 class CameraInputLostError(RuntimeError):
     pass
 
 
+# 카메라 입력 손실 외의 파이프라인·자식 프로세스 실행 실패를 나타낸다.
 class PipelineStartError(RuntimeError):
     pass
 
 
+# 캡처·백업의 수명과 중앙 송출의 재접속을 각각 관리하는 감독 루프다.
 class EdgeRunner:
     def __init__(
         self,
@@ -89,6 +92,7 @@ class EdgeRunner:
         self._last_activity: tuple[str, int, int] | None = None
         self.lock_handle = None
 
+    # Linux에서 같은 카메라의 중복 실행을 막고 제어 서비스가 확인할 소유자를 기록한다.
     def _lock(self) -> None:
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         lock_path = self.runtime_root / f"{self.config.camera_id}.lock"
@@ -159,6 +163,7 @@ class EdgeRunner:
             self.config.monitoring.frame_timeout_seconds
         )
 
+    # 시스템 시각 보정의 영향을 받지 않는 단조 시계로 임시 요청의 유효 시간을 잰다.
     @staticmethod
     def _profile_request_expired(
         request: dict[str, object],
@@ -166,6 +171,7 @@ class EdgeRunner:
     ) -> bool:
         return time.monotonic() - float(request["requested_monotonic"]) >= timeout_seconds
 
+    # 적용 후 확정되지 않은 요청이 만료되면 재시작 루프에서 저장된 프로필로 돌아간다.
     def _expire_active_profile_request(self) -> bool:
         request = self.request_store.read()
         if request is None:
@@ -191,6 +197,7 @@ class EdgeRunner:
         )
         return True
 
+    # 입력·송출 상태를 구분한 스냅샷에 실행 인스턴스와 프로필 세대를 함께 기록한다.
     def _write_status(
         self,
         state: str,
@@ -219,9 +226,11 @@ class EdgeRunner:
         }
         self.status_store.write(payload)
 
+    # 자식이 생성한 하위 프로세스까지 함께 종료할 수 있도록 별도 세션으로 실행한다.
     def _spawn(self, command: list[str]) -> subprocess.Popen:
         return subprocess.Popen(command, start_new_session=True)
 
+    # 수신 방식에 맞는 보조 프로세스와 날짜별 백업 파이프라인을 준비한다.
     def _start_children(self) -> None:
         self.children = []
         if self.config.rtsp.mode == "central_pull":
@@ -245,6 +254,7 @@ class EdgeRunner:
             self._try_start_publisher()
         self._write_status("starting")
 
+    # 로컬 캡처 스트림을 중앙 서버로 전달할 독립 송출 프로세스를 실행한다.
     def _start_publisher(self) -> None:
         self.publisher = self._spawn(
             [
@@ -259,6 +269,7 @@ class EdgeRunner:
         if self.central_connection_status != "offline":
             self.central_connection_status = "connecting"
 
+    # 송출 실행 실패를 재접속 일정으로 바꾸어 캡처 루프까지 실패하지 않게 한다.
     def _try_start_publisher(self, now: float | None = None) -> None:
         """송출 프로세스 시작이 실패해도 캡처를 유지한다."""
 
@@ -275,6 +286,7 @@ class EdgeRunner:
             self.publisher_restart_at = current + self.publisher_delay
             self.publisher_delay = min(self.publisher_delay * 2, 30.0)
 
+    # 상태 파일의 PID가 현재 송출 프로세스와 같고 online 상태인지 확인한다.
     def _publisher_confirmed(self) -> bool:
         if self.publisher is None:
             return False
@@ -289,6 +301,7 @@ class EdgeRunner:
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return False
 
+    # 연결 상태가 바뀔 때만 이벤트를 남겨 반복 조회로 같은 장애가 중복 기록되지 않게 한다.
     def _set_central_status(self, status: str) -> None:
         previous = self.central_connection_status
         if previous == status:
@@ -329,6 +342,7 @@ class EdgeRunner:
         if now >= self.publisher_restart_at:
             self._try_start_publisher(now)
 
+    # 현재 캡처의 가장 최근 세그먼트 이름·크기·수정 시각을 활동 표식으로 반환한다.
     def _recording_activity(self) -> tuple[str, int, int] | None:
         if self.active_backup_dir is None:
             return None
@@ -374,6 +388,7 @@ class EdgeRunner:
             )
             raise CameraInputLostError("no_frame_timeout")
 
+    # 프로세스 그룹에 종료를 요청하고 공통 대기 기한이 지나면 남은 그룹을 강제 종료한다.
     def _stop_children(self) -> None:
         all_children = self.children + ([self.publisher] if self.publisher else [])
         for child in all_children:
@@ -396,6 +411,7 @@ class EdgeRunner:
         self.capture = None
         self.publisher = None
 
+    # 백그라운드에서 보존 한도를 적용하되 쓰는 중일 수 있는 최신 파일은 남긴다.
     def _retention_loop(self) -> None:
         while not self.stop_event.wait(30):
             camera_root = self.config.backup.root / self.config.camera_id
@@ -411,6 +427,7 @@ class EdgeRunner:
             except OSError:
                 LOGGER.exception("retention failed")
 
+    # 종료와 재설정 대기를 모두 깨워 재시도 중에도 종료 요청이 반영되게 한다.
     def request_stop(self, *_: object) -> None:
         self.stop_event.set()
         self.reload_event.set()
@@ -418,6 +435,7 @@ class EdgeRunner:
     def request_reload(self, *_: object) -> None:
         self.reload_event.set()
 
+    # 현재 실행이 소유한 잠금 파일만 지운 뒤 운영체제 잠금과 핸들을 해제한다.
     def _unlock(self) -> None:
         if self.lock_handle is None:
             return
@@ -450,6 +468,7 @@ class EdgeRunner:
             self.lock_handle.close()
             self.lock_handle = None
 
+    # 실행·감시·정리를 반복하며 프로필 변경, 날짜 변경, 장애에 맞춰 파이프라인을 다시 시작한다.
     def run(self) -> int:
         self._lock()
         self.state_root.mkdir(parents=True, exist_ok=True)

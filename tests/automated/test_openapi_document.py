@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi.openapi.models import OpenAPI
 
-from server.scripts.export_openapi import build_document, render_document
+from server.services.external.tools.export_openapi import build_document, render_document
 from server.services.external.app.config import Settings
 from server.services.external.app.main import create_app
 
@@ -13,6 +13,7 @@ from server.services.external.app.main import create_app
 ROOT = Path(__file__).resolve().parents[2]
 
 
+# 배포용 환경변수가 없어도 생성한 명세와 저장된 문서가 일치해야 한다.
 def test_openapi_is_current_without_deployment_settings(monkeypatch):
     def no_environment(*args, **kwargs):
         raise AssertionError("문서 생성은 운영 설정을 읽으면 안 된다")
@@ -21,6 +22,7 @@ def test_openapi_is_current_without_deployment_settings(monkeypatch):
     assert (ROOT / "docs/openapi.yaml").read_text(encoding="utf-8") == render_document()
 
 
+# 설명 보강이 FastAPI가 선언한 요청·응답 스키마와 필드 제약을 바꾸지 않는지 비교한다.
 def test_openapi_keeps_public_requests_and_declared_responses():
     original = create_app().openapi()
     document = build_document()
@@ -53,6 +55,7 @@ def test_openapi_keeps_public_requests_and_declared_responses():
         assert documented == expected
 
 
+# 모든 내부 참조를 따라가며 Bearer·쿠키·로그아웃 예외의 대체 인증 표현을 검사한다.
 def test_openapi_references_and_alternative_authentication_are_valid():
     document = build_document()
     OpenAPI.model_validate(document)

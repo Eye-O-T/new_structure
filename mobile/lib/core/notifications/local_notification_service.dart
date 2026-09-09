@@ -4,10 +4,12 @@ import 'dart:convert';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'notification_payload.dart';
 
+/// OS 알림 표시와 탭 payload 전달을 감싸는 공용 어댑터다.
 class LocalNotificationService {
   static final _notifications = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
 
+  /// 탭 콜백과 Android 알림 채널을 준비한 뒤 알림 표시를 허용한다.
   static Future<void> initialize({
     required void Function(String?) onTap,
   }) async {
@@ -32,6 +34,7 @@ class LocalNotificationService {
     _ready = true;
   }
 
+  /// 종료된 앱을 로컬 알림으로 시작했을 때만 화면 이동에 사용할 payload를 반환한다.
   static Future<String?> launchPayload() async {
     final launch = await _notifications.getNotificationAppLaunchDetails();
     return launch?.didNotificationLaunchApp == true
@@ -39,8 +42,10 @@ class LocalNotificationService {
         : null;
   }
 
+  /// 일반 안내 문구를 표시하고 상세 조회용 식별자는 탭 payload에 담는다.
   static Future<void> showEvent(NotificationPayload event) async {
     if (!_ready) return;
+    // 이벤트 ID를 Android가 받는 정수 범위로 줄여 같은 이벤트에 같은 알림 ID를 사용한다.
     final id = (int.tryParse(event.eventId) ?? event.eventId.hashCode)
         .remainder(2147483647);
     await _notifications.show(
@@ -60,6 +65,7 @@ class LocalNotificationService {
     );
   }
 
+  /// 계정 변경이나 수신 해제 후 이전 알림을 기기 알림함에서 제거한다.
   static Future<void> clear() async {
     if (_ready) await _notifications.cancelAll();
   }

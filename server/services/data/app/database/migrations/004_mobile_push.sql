@@ -1,3 +1,4 @@
+-- 단말 토큰은 하나의 등록에만 연결하고 사용자·로그인 계열·역할로 수신 자격을 재검사한다.
 CREATE TABLE mobile_devices (
     device_id TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -12,6 +13,7 @@ CREATE TABLE mobile_devices (
 );
 CREATE INDEX idx_mobile_devices_user ON mobile_devices(user_id, family_id);
 
+-- 이벤트·단말별 발송을 한 번 예약하고 임대·만료·재시도 상태를 DB에 남긴다.
 CREATE TABLE push_deliveries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,

@@ -18,6 +18,7 @@ def _validate_resource_id(value: str) -> str:
     return value
 
 
+# 시간대 없는 입력을 거절하고 다른 시간대의 조회 시각을 UTC로 통일한다.
 def _normalize_time(value: datetime | None, name: str) -> str | None:
     if value is None:
         return None
@@ -26,6 +27,7 @@ def _normalize_time(value: datetime | None, name: str) -> str | None:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+# 선택적 시작·종료를 정규화하되 둘 다 있으면 시작이 종료보다 앞서도록 요구한다.
 def _validated_time_range(
     start: datetime | None,
     end: datetime | None,
@@ -35,5 +37,6 @@ def _validated_time_range(
     return _normalize_time(start, "start"), _normalize_time(end, "end")
 
 
+# 공개 origin이 설정되면 절대 주소를, 없으면 동일 출처 상대 주소를 반환한다.
 def _public_media_url(settings: Settings, path: str) -> str:
     return f"{settings.public_base_url}{path}" if settings.public_base_url else path

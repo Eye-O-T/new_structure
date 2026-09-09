@@ -1,0 +1,42 @@
+/* 관리자 화면의 공통 색상·한글 글꼴과 기본 배치이다. */
+:root { color-scheme: light; font-family: system-ui, -apple-system, "Malgun Gothic", sans-serif; color: #182c3a; background: #f2f5f8; }
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.6; }
+header { background: #173b52; color: white; padding: 1.5rem max(1.25rem, calc((100% - 1080px) / 2)); display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+h1 { font-size: 1.5rem; margin: 0; }
+header p { margin: .25rem 0 0; color: #d0e0eb; }
+main { max-width: 1120px; margin: auto; padding: 1.25rem; }
+h2 { font-size: 1.2rem; margin: 0 0 .8rem; }
+h3 { margin-top: 1.75rem; font-size: 1rem; }
+p { margin: .7rem 0; }
+/* 작업 영역과 일회성 자격 증명 전달 영역을 시각적으로 구분한다. */
+.panel { padding: 1.5rem; background: white; border: 1px solid #dce4e9; border-radius: .6rem; margin-bottom: 1.25rem; }
+.narrow { max-width: 480px; margin: 1rem auto; }
+.handoff { border: 2px solid #b77710; background: #fffcf3; }
+.section-heading, .actions { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.section-heading { justify-content: space-between; }
+.actions { margin: .75rem 0; }
+/* 폼은 가능한 열 수에 맞춰 배치하고 입력 요소는 동일한 크기 규칙을 사용한다. */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 1.25rem; }
+label { display: block; margin: .7rem 0; font-weight: 600; }
+input, select { display: block; width: 100%; border: 1px solid #95a8b5; border-radius: .3rem; padding: .65rem; font: inherit; background: white; color: inherit; }
+button { background: #176087; color: white; border: 1px solid transparent; border-radius: .35rem; padding: .6rem .9rem; cursor: pointer; font: inherit; font-weight: 600; }
+button.secondary { color: #24485c; background: #edf3f7; border-color: #b9cbd6; }
+button.danger { background: #9e3535; }
+button:disabled { opacity: .5; cursor: default; }
+/* 키보드 조작 시 현재 초점을 확인할 수 있도록 대비가 있는 외곽선을 표시한다. */
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #e6a33d; outline-offset: 2px; }
+/* 긴 ID·오류 문자열이 주변 배치를 밀지 않도록 표 스크롤과 줄바꿈을 적용한다. */
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th, td { border-bottom: 1px solid #dce4e9; padding: .7rem; overflow-wrap: anywhere; }
+th { background: #f5f8fa; }
+.status-grid { display: grid; grid-template-columns: minmax(130px, 1fr) 2fr; gap: .3rem 1rem; }
+dt { color: #4e6575; }
+dd { margin: 0; overflow-wrap: anywhere; }
+#message:not(:empty) { padding: .8rem 1rem; background: #e5f1f7; border-left: 4px solid #176087; }
+#message.error { background: #fff0ef; border-color: #9e3535; }
+/* flex/grid 규칙보다 hidden 상태가 우선되어 로그인 전·미선택 영역이 노출되지 않게 한다. */
+[hidden] { display: none !important; }
+/* 좁은 화면에서는 폼을 한 열로 줄이고 패널 여백을 축소한다. */
+@media (max-width: 560px) { .panel { padding: 1rem; } header { align-items: flex-start; } .form-grid { grid-template-columns: 1fr; } }

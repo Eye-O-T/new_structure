@@ -11,6 +11,7 @@ from .config import CAMERA_ID_PATTERN
 Role = Literal["admin", "viewer"]
 
 
+# 공개 요청은 알 수 없는 필드를 거절하고 문자열 양끝 공백을 정리한다.
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -41,6 +42,7 @@ class CameraCreate(StrictModel):
     )
     enabled: bool = True
 
+    # Edge를 등록할 때 식별자·관리 주소·복구 주소·인증값을 모두 함께 요구한다.
     @model_validator(mode="after")
     def complete_edge_metadata(self) -> "CameraCreate":
         values = (
@@ -77,6 +79,7 @@ class VideoProfilePatch(StrictModel):
     profile: Literal["hd", "fhd"]
 
 
+# 응답 모델에 선언하지 않은 내부 필드는 직렬화 결과에서 제외한다.
 class PublicResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -272,6 +275,7 @@ class UserPatch(StrictModel):
 class CameraPermissions(StrictModel):
     camera_ids: list[str] = Field(max_length=256)
 
+    # 카메라 ID 형식을 확인하면서 최초 입력 순서를 유지한 중복 없는 권한 목록을 만든다.
     def normalized_camera_ids(self) -> list[str]:
         normalized: list[str] = []
         seen: set[str] = set()
@@ -290,6 +294,7 @@ class AuthVerifyRequest(StrictModel):
     resource_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
+# MediaMTX가 추가 필드를 보내도 수용하되 인증에 사용하는 값의 길이를 제한한다.
 class MediaAuthRequest(BaseModel):
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 

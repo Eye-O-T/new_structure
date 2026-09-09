@@ -23,6 +23,7 @@ def _command(name: str) -> Check:
     return Check(name, "OK" if path else "ERROR", path or "command not found")
 
 
+# GStreamer 플러그인 로딩 여부를 검사하고 실행 실패도 개별 진단 결과로 돌려준다.
 def _plugin(name: str) -> Check:
     try:
         result = subprocess.run(
@@ -41,6 +42,7 @@ def _plugin(name: str) -> Check:
         return Check(f"GStreamer {name}", "ERROR", type(exc).__name__)
 
 
+# 송수신 모드에 필요한 도구·저장소 쓰기·TCP 연결·비밀 파일의 존재를 차례로 진단한다.
 def run_checks(config: EdgeConfig) -> list[Check]:
     checks = [_command("gst-launch-1.0"), _command("gst-inspect-1.0")]
     for plugin in (

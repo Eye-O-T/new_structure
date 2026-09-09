@@ -16,6 +16,7 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
+# 모든 내부 목록 API에서 같은 items·limit·offset 구조를 사용한다.
 def _page(items: list[dict[str, Any]], limit: int, offset: int) -> dict[str, Any]:
     return {"items": items, "limit": limit, "offset": offset}
 

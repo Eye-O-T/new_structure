@@ -9,6 +9,7 @@ from ai_cctv_core.identifiers import safe_storage_path
 from ..errors import ApiError
 
 
+# 루트 밖 접근을 거부하고 DB에 저장할 POSIX 상대 경로와 실제 파일 경로를 함께 반환한다.
 def normalize_relative_path(root: Path, raw_path: str) -> tuple[str, Path]:
     # Linux는 Windows 드라이브·공유 경로를 절대 경로로 보지 않으므로 별도로 검사한다.
     windows_path = PureWindowsPath(raw_path)

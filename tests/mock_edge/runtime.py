@@ -39,6 +39,7 @@ VIDEO_PROFILES = {
 }
 
 
+# 중앙 RTSP 서버와 카메라별 송출 인증값을 하나로 묶어 주소 생성 전에 검증한다.
 @dataclass(frozen=True, slots=True)
 class CentralTarget:
     host: str
@@ -64,6 +65,7 @@ class CentralTarget:
         ):
             raise ValueError("publish password must contain at least 16 characters")
 
+    # 사용자명·비밀번호·카메라 ID를 각각 인코딩한다. 반환 주소에는 비밀값이 포함된다.
     @property
     def rtsp_url(self) -> str:
         self.validate()
@@ -115,6 +117,7 @@ def resolve_ffmpeg(executable: str) -> str:
     return resolved
 
 
+# 입력을 실시간 속도로 반복하고 원본 비율과 여백을 유지해 지정 프로필로 인코딩한다.
 def _common_encoding_arguments(
     video_path: Path,
     profile: VideoProfile,
@@ -222,6 +225,7 @@ def build_recorder_command(
     return command, pattern
 
 
+# FFmpeg 실행·종료와 비밀값을 가린 최근 오류 출력을 관리한다.
 class ManagedProcess:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -230,6 +234,7 @@ class ManagedProcess:
         self._stderr_lines: deque[str] = deque(maxlen=30)
         self._secrets: tuple[str, ...] = ()
 
+    # 중복 실행을 거부하고 Windows에서는 별도 콘솔 창 없이 자식 프로세스를 시작한다.
     def start(self, command: list[str], *, secrets: tuple[str, ...] = ()) -> None:
         if self.running:
             raise MockEdgeRuntimeError(f"{self.name} process is already running")
@@ -257,6 +262,7 @@ class ManagedProcess:
         )
         self._stderr_thread.start()
 
+    # 비밀번호 원문과 URL 인코딩 형태를 모두 가린 뒤 오류 메시지를 보관한다.
     def _redact(self, value: str) -> str:
         result = value
         for secret in self._secrets:
@@ -287,6 +293,7 @@ class ManagedProcess:
     def last_error(self) -> str | None:
         return self._stderr_lines[-1] if self._stderr_lines else None
 
+    # 종료 요청 뒤에도 남은 프로세스는 강제 종료하고 오류 출력 소비 스레드를 정리한다.
     def stop(self) -> None:
         process = self._process
         self._process = None
@@ -337,6 +344,7 @@ class MediaEngine:
         self._next_publish_attempt = 0.0
         self._last_error: str | None = None
 
+    # 송출 대상·프로필을 검증하고 이미 실행 중이면 새 설정으로 녹화와 송출을 재시작한다.
     def configure(self, target: CentralTarget, profile: str) -> None:
         target.validate()
         if profile not in VIDEO_PROFILES:
@@ -347,11 +355,13 @@ class MediaEngine:
             if self._started:
                 self._restart_media_locked()
 
+    # 실행 파일과 인코더 검사 결과를 재사용해 재접속마다 도구 검사를 반복하지 않는다.
     def _ffmpeg(self) -> str:
         if self._resolved_ffmpeg is None:
             self._resolved_ffmpeg = resolve_ffmpeg(self.ffmpeg_name)
         return self._resolved_ffmpeg
 
+    # 설정된 장치의 녹화·송출을 시작하고 미설정 상태에서도 감독 스레드는 준비한다.
     def start(self) -> None:
         with self._lock:
             if self._started:
@@ -368,6 +378,7 @@ class MediaEngine:
             )
             self._monitor.start()
 
+    # 프로세스 종료 후 잠금을 놓고 감독 스레드를 기다려 잠금 대기 교착을 피한다.
     def stop(self) -> None:
         with self._lock:
             self._started = False
@@ -378,6 +389,7 @@ class MediaEngine:
             self._monitor.join(timeout=3)
             self._monitor = None
 
+    # 호출자가 엔진 잠금을 보유한 상태에서 녹화가 꺼져 있을 때만 새 세그먼트 기록을 시작한다.
     def _start_recorder_locked(self) -> None:
         if self.recorder.running or self.target is None:
             return
@@ -392,6 +404,7 @@ class MediaEngine:
         self.recorder.start(command)
         LOGGER.info("로컬 MPEG-TS 백업 시작: %s", pattern)
 
+    # 수동 송출 중단 상태는 자동 시작하지 않으며 시작 직후에는 연결 확정을 보류한다.
     def _start_publisher_locked(self) -> None:
         if (
             self.publisher.running
@@ -424,6 +437,7 @@ class MediaEngine:
             self._start_recorder_locked()
             self._start_publisher_locked()
 
+    # 프로필 변경 중 실행 오류가 나면 이전 프로필로 다시 시작하고 복구 실패를 별도로 보고한다.
     def apply_profile(self, profile: str) -> tuple[bool, str | None]:
         if profile not in VIDEO_PROFILES:
             return False, "UNSUPPORTED_VIDEO_PROFILE"
@@ -445,6 +459,7 @@ class MediaEngine:
                 return False, "PIPELINE_START_FAILED"
         return True, None
 
+    # 중앙 장애 시험을 위해 송출만 멈추며 로컬 녹화를 유지하고 장애 이벤트를 한 번 기록한다.
     def suspend_publisher(self) -> None:
         with self._lock:
             if self._publisher_suspended:
@@ -458,6 +473,7 @@ class MediaEngine:
                 )
                 self._outage_reported = True
 
+    # 수동 중단 상태를 해제해 송출 재시도가 즉시 가능하게 한다.
     def resume_publisher(self) -> None:
         with self._lock:
             if not self._publisher_suspended:
@@ -486,6 +502,7 @@ class MediaEngine:
                     continue
                 if self.publisher.running:
                     if not self._publisher_confirmed and now >= self._confirm_after:
+                        # 모의 장치는 프로세스가 일정 시간 유지된 것으로 연결을 추정한다. 실제 프레임 수신 확인은 아니다.
                         self._publisher_confirmed = True
                         if self._outage_reported:
                             self.event_callback(

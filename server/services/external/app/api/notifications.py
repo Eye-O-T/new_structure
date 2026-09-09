@@ -26,6 +26,7 @@ class DeviceRegistration(BaseModel):
     # null은 모든 이벤트, 빈 목록은 수신 안 함을 뜻한다. 앱에서 선택한 설정을 그대로 받는다.
     event_types: list[str] | None = Field(max_length=100)
 
+    # FCM 단말 토큰에 공백이 섞여 전송 시 다른 값으로 해석되지 않게 한다.
     @field_validator("token")
     @classmethod
     def token_single_line(cls, value: SecretStr) -> SecretStr:
@@ -33,6 +34,7 @@ class DeviceRegistration(BaseModel):
             raise ValueError("Invalid device token")
         return value
 
+    # 확장 이벤트도 식별자 형식을 확인하고 정렬·중복 제거하되 None과 빈 목록은 구분한다.
     @field_validator("event_types")
     @classmethod
     def valid_event_types(cls, value: list[str] | None) -> list[str] | None:
@@ -56,6 +58,7 @@ async def push_status(
     return {"enabled": settings.push_enabled, "provider": "fcm"}
 
 
+# 접근 주체와 제출한 갱신 세션의 소유자·해시를 대조한 뒤 로그인 계열에 단말을 등록한다.
 @router.put("/devices")
 async def register_device(
     payload: DeviceRegistration,
@@ -94,6 +97,7 @@ async def register_device(
     )
 
 
+# 현재 사용자의 ID를 함께 보내 다른 계정의 단말 등록은 삭제할 수 없게 한다.
 @router.delete("/devices/{device_id}", status_code=204)
 async def unregister_device(
     device_id: str = Path(pattern=r"^[a-f0-9]{32}$"),

@@ -41,6 +41,7 @@ def _camera(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return result
 
 
+# 저장용 JSON과 SQLite 정수를 호출자가 쓰는 프로필 목록·불리언으로 복원한다.
 def _video_profile(row: sqlite3.Row | None) -> dict[str, Any] | None:
     result = _as_dict(row)
     if result is not None:
@@ -50,6 +51,7 @@ def _video_profile(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return result
 
 
+# 미관측 상태의 None은 유지하여 명시적으로 관측한 offline과 구분한다.
 def _runtime_status(row: sqlite3.Row | None) -> dict[str, Any] | None:
     result = _as_dict(row)
     if result is not None and "online" in result:
@@ -59,6 +61,7 @@ def _runtime_status(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return result
 
 
+# DB의 metadata_json 필드를 공개 자료 구조의 metadata 객체로 변환한다.
 def _event(row: sqlite3.Row | None) -> dict[str, Any] | None:
     result = _as_dict(row)
     if result is not None:

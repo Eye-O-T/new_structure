@@ -37,6 +37,7 @@ class DataConflict(DataServiceError):
     status_code = 409
 
 
+# 인증 헤더·연결 풀·오류 변환을 공유하는 Data 내부 API 접근 경계이다.
 class DataClient:
     def __init__(
         self,
@@ -60,6 +61,7 @@ class DataClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    # 생략할 질의값을 제거하고 내부 HTTP 오류를 제한된 공개 예외로 바꾸며 빈 응답도 처리한다.
     async def _request(
         self,
         method: str,
@@ -137,6 +139,7 @@ class DataClient:
         result = await self._request("POST", "push-deliveries/claim")
         return result["delivery"]
 
+    # 할당받은 임대 ID를 함께 보내 재할당된 발송 작업에 이전 결과가 적용되지 않게 한다.
     async def complete_push(
         self, delivery: dict[str, Any], outcome: str, error_code: str | None = None
     ) -> None:
@@ -191,6 +194,7 @@ class DataClient:
     async def create_refresh_token(self, payload: dict[str, Any]) -> Any:
         return await self._request("POST", "tokens/refresh", json=payload)
 
+    # 이전 jti를 새 토큰 기록에 포함해 Data가 발급과 기존 토큰 폐기를 원자적으로 처리하게 한다.
     async def rotate_refresh_token(self, old_jti: str, payload: dict[str, Any]) -> Any:
         rotation_payload = dict(payload)
         rotation_payload["rotated_from_jti"] = old_jti
@@ -202,6 +206,7 @@ class DataClient:
     async def revoke_refresh_token(self, jti: str) -> None:
         await self._request("DELETE", f"tokens/refresh/{quote(jti, safe='')}")
 
+    # 폐기 기록의 404는 미폐기로 해석하고 기록이 있으면 기본적으로 폐기된 토큰으로 판단한다.
     async def is_access_token_revoked(self, jti: str) -> bool:
         result = await self._request(
             "GET",
@@ -264,6 +269,7 @@ class DataClient:
             json=payload,
         )
 
+    # 아직 DB 송출 인증값이 없는 구형 카메라는 404 대신 None으로 표현한다.
     async def get_camera_publish_credential(
         self, camera_id: str
     ) -> dict[str, Any] | None:
@@ -326,6 +332,7 @@ class DataClient:
             params={"camera_id": camera_id, "limit": limit, "offset": offset},
         )
 
+    # 외부 검색의 start·end를 내부 계약의 from·to 질의 이름으로 바꾼다.
     async def list_recordings(self, **params: Any) -> Any:
         return await self._request(
             "GET",
@@ -346,6 +353,7 @@ class DataClient:
             params={"user_id": user_id},
         )
 
+    # 전체 파일을 메모리에 읽지 않고 응답 스트림을 열며 416도 범위 요청의 정상 응답으로 중계한다.
     async def open_recording_content(
         self,
         segment_id: str,
@@ -382,6 +390,7 @@ class DataClient:
             raise DataServiceUnavailable("data service unavailable")
         raise DataServiceError("data service rejected the request")
 
+    # 내부 이벤트 검색에 필요한 필터만 골라 전달하고 None 조건은 공통 요청 계층에서 뺀다.
     async def list_events(self, **params: Any) -> Any:
         return await self._request(
             "GET",

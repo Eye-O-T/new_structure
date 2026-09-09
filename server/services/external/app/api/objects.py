@@ -24,6 +24,7 @@ from ..security.permissions import (
 router = APIRouter()
 
 
+# 카메라 권한을 매번 확인하고 오래된 객체 좌표가 캐시에 남지 않도록 no-store로 응답한다.
 @router.get("/api/v1/cameras/{camera_id}/objects")
 async def get_live_objects(
     camera_id: str,

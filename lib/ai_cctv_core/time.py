@@ -16,6 +16,7 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+# ISO 문자열 또는 시간대가 있는 datetime을 받아 동일한 UTC 시점으로 정규화한다.
 def parse_utc(value: str | datetime) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -39,6 +40,7 @@ def central_recording_start(filename: str) -> datetime | None:
     match = _CENTRAL_RECORDING_FILENAME.fullmatch(filename)
     if match is None:
         return None
+    # 파일명의 소수 초를 datetime이 지원하는 마이크로초 여섯 자리로 맞춘다.
     fraction = match.group("fraction")[:6].ljust(6, "0")
     try:
         return datetime.strptime(

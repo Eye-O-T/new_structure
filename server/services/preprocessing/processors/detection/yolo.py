@@ -7,16 +7,22 @@ from typing import Any
 from .contracts import DetectionFrame, DetectionResult
 
 
+# YOLO의 추적 출력을 서비스 공통 DetectionResult 형식으로 변환하는 어댑터다.
 class YoloTracker:
     def __init__(self, model_path: Path, confidence: float, device: str):
+        # 없는 모델 이름을 Ultralytics에 넘기면 자동 다운로드할 수 있으므로 로컬 파일만 허용한다.
+        model_path = Path(model_path).expanduser().resolve()
+        if not model_path.is_file() or model_path.stat().st_size == 0:
+            raise ValueError("detection model must be a non-empty local file")
         from ultralytics import YOLO
 
         self._model = YOLO(str(model_path))
         self._confidence = confidence
         self._device = None if device == "auto" else device
 
+    # 영상 재접속 시 기존 ByteTrack 상태를 초기화해 이전 세션의 궤적을 이어 쓰지 않는다.
     def reset(self):
-        for tracker in getattr(self._model.predictor, "trackers", []):
+        for tracker in getattr(getattr(self._model, "predictor", None), "trackers", []):
             tracker.reset()
 
     def process(self, frame: DetectionFrame) -> DetectionResult:

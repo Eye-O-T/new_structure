@@ -2,11 +2,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+/// 현재 경로를 선택된 탭으로 표시하고 라우터의 하위 화면을 공통 틀 안에 배치한다.
 class HomePage extends StatelessWidget {
   const HomePage({super.key, required this.child});
 
   final Widget child;
 
+  // NavigationBar의 destinations 순서와 경로 순서가 같아야 선택 인덱스가 일치한다.
   static const List<String> _routes = ['/live', '/history', '/settings'];
 
   @override

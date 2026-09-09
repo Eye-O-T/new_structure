@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:app/features/events/presentation/event_history_view_model.dart';
 
+/// 선택 날짜가 속한 일요일 시작 주간을 표시하고 공용 날짜 상태를 갱신한다.
 class HistoryDateSelector extends ConsumerWidget {
   const HistoryDateSelector({super.key});
 
@@ -99,10 +100,12 @@ class HistoryDateSelector extends ConsumerWidget {
     );
   }
 
+  /// 시각이 달라도 같은 달력 날짜면 동일한 선택으로 표시한다.
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
+  /// DateTime의 월요일=1 규칙을 화면의 요일 약어로 변환한다.
   String _weekdayName(int weekday) {
     switch (weekday) {
       case DateTime.monday:
@@ -124,6 +127,7 @@ class HistoryDateSelector extends ConsumerWidget {
     }
   }
 
+  /// 1~7일을 1주차로 세는 월 내 날짜 구간을 제목에 사용한다.
   String _weekTitle(DateTime date) {
     final weekOfMonth = ((date.day - 1) ~/ 7) + 1;
 

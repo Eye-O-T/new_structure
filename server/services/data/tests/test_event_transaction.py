@@ -10,6 +10,7 @@ from server.services.data.app.database.connection import Database
 from server.services.data.app.database.repositories import DataRepository
 
 
+# 두 번째 객체 작업 삽입을 트리거로 실패시켜 이벤트·푸시·첫 번째 작업까지 모두 취소되는지 확인한다.
 def test_object_queue_failure_rolls_back_event_push_and_identity_job(tmp_path):
     repository = DataRepository(Database(tmp_path / "events.db"))
     repository.initialize()

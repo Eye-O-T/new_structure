@@ -14,6 +14,7 @@ from .base import _as_dict, _now
 class RecordingsRepositoryMixin:
     database: Database
 
+    # 멱등 키와 파일 경로로 중복을 확인하고 반환 불리언으로 실제 신규 생성 여부를 알린다.
     def create_segment(self, values: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         now = _now()
         with self.database.transaction() as connection:
@@ -77,6 +78,7 @@ class RecordingsRepositoryMixin:
                 ).fetchone()
             )
 
+    # 요청 구간과 양의 길이로 겹치는 녹화를 찾으며 삭제 확정 상태만 제외한다.
     def search_segments(
         self,
         camera_id: str,
@@ -100,6 +102,7 @@ class RecordingsRepositoryMixin:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    # 삭제 중·누락·손상 상태도 포함하여 파일 대조 작업에서 회복 여부를 판단하게 한다.
     def list_segments_for_reconcile(self) -> list[dict[str, Any]]:
         with self.database.connection() as connection:
             rows = connection.execute(
@@ -114,6 +117,7 @@ class RecordingsRepositoryMixin:
                 (status, _now(), segment_id),
             )
 
+    # 녹화 구간을 기준으로 post-roll은 왼쪽, pre-roll은 오른쪽으로 이벤트 조회 범위를 확장한다.
     def link_segment_to_events(
         self,
         segment: dict[str, Any],
@@ -156,6 +160,7 @@ class RecordingsRepositoryMixin:
                     (int(segment["id"]), *(int(event["id"]) for event in events)),
                 )
 
+    # 기준 시각보다 먼저 끝난 녹화만 선택하고 이미 삭제 중인 항목은 중복 처리하지 않는다.
     def retention_candidates(self, cutoff: str) -> list[dict[str, Any]]:
         with self.database.connection() as connection:
             rows = connection.execute(

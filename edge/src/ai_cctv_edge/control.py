@@ -45,6 +45,7 @@ except ImportError:  # pragma: no cover - 비POSIX 테스트 환경용
     fcntl = None  # type: ignore[assignment]
 
 
+# 하드웨어 지원 여부에서 검사 불가(None)와 실제 미지원(False)을 구별한다.
 @dataclass(frozen=True)
 class VideoCapabilities:
     supported_profiles: tuple[str, ...]
@@ -103,6 +104,7 @@ def _parse_primary_camera_modes(output: str) -> tuple[CameraMode, ...]:
     return tuple(modes)
 
 
+# 장치 조회를 교체할 수 있는 경계로 제어 흐름을 실제 카메라 없이도 검증할 수 있다.
 class CapabilityProbe(Protocol):
     def inspect(self, config: EdgeConfig) -> VideoCapabilities: ...
 
@@ -115,6 +117,7 @@ class LocalCapabilityProbe:
         self._cache: tuple[float, VideoCapabilities] | None = None
         self._lock = threading.Lock()
 
+    # GStreamer가 인코더를 로드할 수 있는지 확인하고 검사 도구 오류는 unknown으로 남긴다.
     def _encoder_available(self, encoder: str) -> bool | None:
         inspect = shutil.which("gst-inspect-1.0")
         if inspect is None:
@@ -155,6 +158,7 @@ class LocalCapabilityProbe:
             return None, None
         return True, modes
 
+    # 센서 조회에 성공하면 허용된 프로필 중 해상도와 FPS 조건을 만족하는 항목만 남긴다.
     @staticmethod
     def _supported_profiles(
         config: EdgeConfig,
@@ -175,6 +179,7 @@ class LocalCapabilityProbe:
                 supported.append(name)
         return tuple(supported)
 
+    # 빈번한 상태 조회가 검사 명령을 계속 실행하지 않도록 결과를 30초간 재사용한다.
     def inspect(self, config: EdgeConfig) -> VideoCapabilities:
         now = time.monotonic()
         with self._lock:
@@ -197,6 +202,7 @@ class ActivationResult:
     reason_code: str | None = None
 
 
+# 프로필 시험·임시 적용·상태 확인·영구 확정을 분리한 실행 계층의 계약이다.
 class ProfileRuntime(Protocol):
     def current_profile(self, default_profile: str) -> str: ...
 
@@ -227,6 +233,7 @@ class ApplyFailure(RuntimeError):
         self.message = message
 
 
+# 공유 상태 파일과 프로세스 신호를 통해 실행 중인 캡처에 프로필 변경을 전달한다.
 class LocalProfileRuntime:
     def __init__(
         self,
@@ -241,6 +248,7 @@ class LocalProfileRuntime:
         self.runtime_root = runtime_root or default_runtime_root()
         self.request_store = ProfileRequestStore(self.runtime_root)
 
+    # 캡처가 보고한 현재 프로필을 우선하고 상태가 없으면 저장된 선택을 사용한다.
     def current_profile(self, default_profile: str) -> str:
         status = self.status_store.read()
         profile = status.get("current_video_profile")
@@ -251,6 +259,7 @@ class LocalProfileRuntime:
     def persisted_profile(self, default_profile: str) -> str:
         return self.selection_store.read(default_profile)[0]
 
+    # 저장값과 실행 상태 중 큰 세대를 선택해 다음 요청이 이전 응답과 구분되게 한다.
     def generation(self, default_profile: str) -> int:
         selected_generation = self.selection_store.read(default_profile)[1]
         status = self.status_store.read()
@@ -260,6 +269,7 @@ class LocalProfileRuntime:
             status_generation = 0
         return max(selected_generation, status_generation)
 
+    # 실제 카메라를 점유하지 않는 시험 영상으로 후보 인코더 파이프라인을 검증한다.
     def preflight(self, candidate: EdgeConfig, timeout_seconds: float) -> None:
         try:
             result = subprocess.run(
@@ -282,6 +292,7 @@ class LocalProfileRuntime:
                 "PIPELINE_START_FAILED", "temporary encoder pipeline failed"
             )
 
+    # 잠금 소유자·프로세스 생존·상태 파일의 인스턴스가 일치해야 제어 신호를 보낸다.
     def _runner_identity(self) -> tuple[int, str]:
         lock_path = self.runtime_root / f"{self.config.camera_id}.lock"
         try:
@@ -326,6 +337,7 @@ class LocalProfileRuntime:
             ) from exc
         return pid, runner_instance_id
 
+    # 임시 요청을 저장한 뒤 캡처에 재설정 신호를 보내고 신호 실패 시 요청을 정리한다.
     def activate(self, profile: str, generation: int) -> None:
         pid, runner_instance_id = self._runner_identity()
         try:
@@ -354,6 +366,7 @@ class LocalProfileRuntime:
                 "EDGE_OFFLINE", "edge capture service is offline"
             ) from exc
 
+    # 확인한 요청이 아직 현재 세대일 때만 영구 설정에 저장한 후 임시 요청을 지운다.
     def commit(self, profile: str, generation: int) -> None:
         request = self.request_store.read()
         if (
@@ -391,6 +404,7 @@ class LocalProfileRuntime:
             except OSError:
                 pass
 
+    # 요청 세대의 캡처 입력과 필요한 중앙 송출이 모두 정상인지 제한 시간 동안 확인한다.
     def wait_for(
         self,
         profile: str,
@@ -422,6 +436,7 @@ class LocalProfileRuntime:
         return ActivationResult("timeout", "CONTROL_TIMEOUT")
 
 
+# 동시 변경을 직렬화하고 시험·적용·확정을 조정하며 실패하면 저장된 설정으로 복구를 시도한다.
 class ProfileManager:
     STATUS_BY_REASON = {
         "UNSUPPORTED_VIDEO_PROFILE": 422,
@@ -447,6 +462,7 @@ class ProfileManager:
         self.journal = journal
         self._lock = threading.Lock()
 
+    # 변경 실패의 원인 코드를 이벤트 일지와 HTTP 응답에 같은 값으로 남긴다.
     def _rejected(
         self,
         requested: str,
@@ -471,6 +487,7 @@ class ProfileManager:
             self.STATUS_BY_REASON.get(reason_code, 409),
         )
 
+    # 이미 적용·저장된 요청은 즉시 성공하며 새 요청은 건강 상태 확인 후에만 확정한다.
     def apply(self, requested: str) -> tuple[dict[str, object], int]:
         requested = requested.lower()
         timeout = self.config.control.apply_timeout_seconds
@@ -623,6 +640,7 @@ class VideoProfileRequest(BaseModel):
     profile: str
 
 
+# 제어 서비스의 생존과 캡처·중앙 연결 상태를 구분해 하나의 상태 응답으로 합친다.
 class EdgeStatusService:
     def __init__(
         self,
@@ -640,6 +658,7 @@ class EdgeStatusService:
         self.power_monitor = power_monitor
         self.capability_probe = capability_probe
 
+    # PID 존재를 확인하되 접근 권한이 없는 경우에도 프로세스는 존재하는 것으로 본다.
     @staticmethod
     def _capture_process_alive(runtime: dict[str, object]) -> bool | None:
         state = runtime.get("state")
@@ -656,6 +675,7 @@ class EdgeStatusService:
             return False
         return True
 
+    # 런타임 상태에 자원·전원·장치 지원 정보를 더하고 종료된 캡처 상태를 보정한다.
     def snapshot(self) -> dict[str, object]:
         runtime = self.status_store.read()
         resources = self.metrics.sample()
@@ -709,6 +729,7 @@ class EdgeStatusService:
         }
 
 
+# 관리 API를 조립하며 장치 검사와 프로필 실행은 테스트 대역으로 교체할 수 있다.
 def create_control_app(
     config_path: str | Path,
     *,
@@ -751,6 +772,7 @@ def create_control_app(
     manager = ProfileManager(config, probe, runtime, journal)
     authenticate = BearerAuthenticator(load_tokens(config.control.token_file))
 
+    # 전원 감시 스레드가 관리 API의 시작·종료와 함께 정리되게 한다.
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         monitor.start()
@@ -773,6 +795,7 @@ def create_control_app(
     def status():
         return status_service.snapshot()
 
+    # 프로필 목록과 검사 성공 여부를 함께 제공해 unknown을 지원 가능으로 오인하지 않게 한다.
     @app.get(
         "/internal/v1/capabilities/video",
         dependencies=[Depends(authenticate)],
@@ -791,6 +814,7 @@ def create_control_app(
             "encoder_available": capabilities.encoder_available,
         }
 
+    # 프로필 변경 결과의 원인에 맞는 HTTP 상태 코드를 그대로 전달한다.
     @app.put(
         "/internal/v1/config/video-profile",
         dependencies=[Depends(authenticate)],
@@ -799,6 +823,7 @@ def create_control_app(
         payload, status_code = manager.apply(request.profile)
         return JSONResponse(payload, status_code=status_code)
 
+    # 중앙 수집자가 마지막 커서부터 이어 읽고 일지 정리로 인한 누락 가능성도 알 수 있게 한다.
     @app.get("/internal/v1/events", dependencies=[Depends(authenticate)])
     def events(
         after: str | None = None,

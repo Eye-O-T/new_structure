@@ -1,150 +1,237 @@
-# Preprocessing 컨테이너 교체 규약
+# Preprocessing 컨테이너 교체 인수인계
 
-이 문서는 현재 서버의 다른 컨테이너를 변경하지 않고 `preprocessing`을 교체하기 위한 규약이다. 감지·카메라별 추적과 카메라 간 인물 연결(identity)이 모두 이 컨테이너의 책임이다. 구현 언어·모델은 자유이며 HTTP 요청·응답, 공유 파일, 상태 확인 규약을 유지한다. 전체 흐름은 [구조 설명](architecture.md), 별도 metadata 분석은 [Analysis 규약](SRS_interface_analysis.md)을 따른다.
+이 문서는 새 `preprocessing` 컨테이너를 만들어 기존 서버에 연결하는 담당자를 위한 **임시 인수인계 문서**다. 언어와 모델은 자유이며, 아래 실행·HTTP·파일 규약을 유지한다. 교체 검증과 인수 후에는 실제 구현의 README와 테스트를 남기고 이 문서를 삭제한다. 지금은 삭제하지 않는다.
 
-현재 감지는 YOLO/ByteTrack 구현이 있으며 모델 파일이 필요하다. 인물 연결은 입출력만 갖춘 블랙박스로 `unconfigured`를 반환한다. 연결되지 않은 사람의 `global_person_id`는 `null`로 둔다.
+## 1. 처음 5분: 무엇을 만들 것인가
 
-## 1. 실행 환경과 연결
-
-| 항목 | 교체 시 유지할 계약 |
+| 담당할 일 | 완료했을 때의 결과 |
 |---|---|
-| 배포 단위 | Compose의 `preprocessing` 서비스, `internal` 네트워크. 호스트 공개 포트 없음 |
-| Data API | `DATA_SERVICE_URL=http://nginx:8080/internal/data/v1`; 아래 HTTP 경로는 이 주소 뒤에 붙임 |
-| 영상 입력 | `MEDIAMTX_RTSP_BASE_URL=rtsp://mediamtx:8554` + `/` + 카메라의 `stream_path`. Nginx를 거치지 않는 RTSP/TCP |
-| 감지용 인증 | `X-Internal-Token: <DATA_INFERENCE_TOKEN>` |
-| 인물 연결용 인증 | `X-Internal-Token: <DATA_IDENTITY_TOKEN>`; 감지 토큰과 서로 다른 값 |
-| 영상 읽기 인증 | `MEDIA_READ_USERNAME`, `MEDIA_READ_PASSWORD`를 RTSP Basic 인증에 사용. 읽기 계정이며 게시 권한 없음 |
-| 설정 | `AI_CCTV_CONFIG_FILE=/app/config/config.yaml`, 읽기 전용 |
-| 이미지 | `SNAPSHOTS_ROOT=/snapshots`, 읽기·쓰기. Data와 같은 호스트 저장소 |
-| 모델 | `/models`, 읽기 전용. 기본 `MODEL_PATH=/models/default.pt`; Compose는 `MODEL_FILE`로 파일명 지정 |
-| 상태 확인 | 컨테이너의 `0.0.0.0:8000`에서 7절의 HTTP 경로 제공 |
-| 파일 권한 | Compose의 UID/GID로 `/snapshots`에 쓸 수 있어야 함. SQLite·녹화 저장소 직접 접근 없음 |
+| 사람 감지·카메라별 추적 | MediaMTX 영상을 읽어 사람별 로컬 ID와 원본 픽셀 좌표 생성 |
+| 등장·사라짐과 대표 이미지 | 등장마다 이미지 파일을 먼저 저장하고 Data에 이벤트 전송 |
+| 실시간 좌표 | Data에 최신 프레임의 박스·ID 전송. 앱이 영상 위에 표시 |
+| 카메라 간 인물 연결(identity) | 크롭의 특징 벡터를 보고하고 Data가 영속 gallery에서 전역 ID 연결 |
+| 실행·장애 처리 | 카메라·identity를 독립 실행하고 8000번 상태 API 제공 |
 
-토큰·비밀번호는 `preprocessing.env`로 전달하고 로그·결과 metadata에 넣지 않는다. RTSP URL에 인증 정보를 결합하는 구현은 사용자명·비밀번호를 URL 인코딩해야 한다. 기본 내부 HTTP와 RTSP에는 TLS가 없다. HTTP 클라이언트가 호스트의 외부 프록시 설정으로 내부 토큰을 보내지 않도록 한다.
+현재 감지·추적은 YOLO/ByteTrack, 기본 identity는 `LocalAppearanceIdentity`다. 모델 없이 CPU 외관 특징을 추출하거나 명시한 로컬 ONNX의 특징을 반환하며, Data가 저장한 gallery와 비교해 전역 ID를 결정한다. 같은 사람임을 확정하는 신원 인증은 아니다. 이전 `IdentityBlackBox`를 명시적으로 선택하면 `unconfigured`를 반환한다.
 
-현재 배포 설정과 호환하려면 `config.yaml`의 `inference` 설정을 읽고 환경변수를 우선 적용한다. `inference`는 이 컨테이너의 감지 설정 이름이며 별도 컨테이너가 아니다. 카메라 운영 목록은 Data API에서 받는다. 아래 환경변수는 **컨테이너 내부 기준**이다. `server/.env`에 이름만 추가해서 전달되지는 않으므로 Compose의 해당 서비스 `environment`에 연결한다. 기본 비밀 파일에는 허용된 인증키만 둔다.
+중앙 업무 SQLite·객체 작업 대기열·gallery·결과 병합은 Data, 영상 수신·녹화·HLS는 MediaMTX, 앱 API·푸시는 External, 옷 색상 등 metadata 분석은 별도 Analysis의 책임이다. Preprocessing은 Data DB·녹화 파일을 직접 열거나 Edge·앱·Firebase에 직접 연결하지 않는다. Data 전송 전 이벤트를 보존하는 로컬 SQLite outbox는 스냅샷 폴더에 별도로 둔다.
 
-| 환경변수 | YAML의 `inference` 항목 | 기본값·의미 |
-|---|---|---|
-| `INFERENCE_ENABLED` | `enabled` | `true`; 감지 실행 여부 |
-| `MODEL_PATH` | `model_path` | `/models/default.pt`; 모델 위치 |
-| `INFERENCE_DEVICE` | `device` | `auto`; 현재 구현은 `cpu`, `cuda`, `cuda:N`도 지원 |
-| `INFERENCE_CONFIDENCE` | `confidence_threshold` | `0.4`; 감지 채택 기준, 0~1 |
-| `ANALYSIS_FPS` | `analysis_fps` | `5`; **감지** 처리 빈도, 양수 |
-| `DISAPPEAR_SECONDS` | `disappear_seconds` | `3`; 마지막 감지 후 사라짐으로 판단할 시간, 양수 |
-| `CAMERA_REFRESH_SECONDS` | 없음 | `15`; 활성 카메라 재조회 주기 |
-
-기존 이미지의 `DETECTION_PLUGIN`, `IDENTITY_PLUGIN`은 Python 구현의 선택 장치다. 컨테이너 전체 교체에서는 그 클래스나 함수 모양을 구현할 필요가 없다. 이미지·의존성·자체 healthcheck 명령은 교체할 수 있으며, Compose의 기존 healthcheck가 Python 명령인 점도 함께 조정한다.
-
-## 2. 카메라 조회와 상태 보고
-
-모든 JSON 요청은 `Content-Type: application/json`을 사용한다. 아래 네 경로에는 **감지용 토큰**을 사용하며, identity 토큰으로 호출하면 403이다.
-
-| 요청 | 입력 | 성공 응답 |
-|---|---|---|
-| `GET /cameras/enabled` | 본문 없음 | 200, `{"items":[카메라 객체,...]}` |
-| `PATCH /cameras/{camera_id}/status` | `{"status":"online"}` 또는 `{"status":"offline"}` | 200, 갱신한 카메라 객체 |
-| `POST /events` | 4절의 이벤트 | 201, 저장한 이벤트 객체 |
-| `PUT /cameras/{camera_id}/objects` | 5절의 최신 좌표 | 200, `{"accepted":true}` |
-
-카메라 객체의 전체 형식은 다음과 같다. 감지에는 `camera_id`, `stream_path`가 필요하고, 나머지 운영 필드는 소비자가 무시할 수 있다.
-
-```json
-{"id":1,"camera_id":"cam-001","name":"entrance","stream_path":"cam-001","edge_device_id":null,"source_url":null,"enabled":true,"status":"offline","created_at":"2026-09-07T00:00:00Z","updated_at":"2026-09-07T00:00:00Z"}
+```text
+Edge → MediaMTX → preprocessing 감지 → Data: 이벤트·최신 좌표
+                         └→ /snapshots: 원본·크롭·박스 이미지
+Data: identity 작업 → preprocessing 특징 추출 → Data: gallery 비교·ID 연결
+Data: analysis 작업 → 별도 Analysis           → Data: 완료 결과
 ```
 
-`camera_id`와 `stream_path`는 현재 `^[a-z0-9][a-z0-9_-]{0,63}$` 형식이다. 활성 카메라는 최대 4대이며 목록에서 빠지면 해당 영상 처리를 중지한다. `source_url`로 Edge에 직접 접속하지 않는다. 목록 조회 실패가 이미 실행 중인 카메라 수신을 중단시켜서는 안 된다.
+필요한 Data API는 다음 7개다. **경로는 모두 `DATA_SERVICE_URL` 뒤에 붙인다.** 본문이 있으면 `Content-Type: application/json`, 인증은 `X-Internal-Token` 헤더를 사용한다. 요청의 정의되지 않은 필드는 거부하므로 아래에 명시한 것만 보내고, 응답의 사용하지 않는 필드는 무시한다.
 
-RTSP에서 첫 프레임을 받으면 `online`, 열기·읽기 실패 시 `offline`을 보고한다. API 자체는 `degraded`, `disabled`도 받지만, 사용자의 활성화 설정을 감지기가 임의로 변경하지 않는다. 현재 구현은 연결 실패 시 1초부터 최대 15초까지 재접속 간격을 늘린다.
+| 토큰 환경변수 | 메서드·경로 | 요청 → 성공 응답 |
+|---|---|---|
+| `DATA_INFERENCE_TOKEN` | `GET /cameras/enabled` | 본문·조회 조건 없음 → 200, `{"items":[...]}` |
+| 위와 같음 | `PATCH /cameras/{camera_id}/status` | `{"status":"online"}` → 200, 갱신한 카메라 |
+| 위와 같음 | `POST /events` | 4절 이벤트 → 201, 저장한 이벤트 |
+| 위와 같음 | `PUT /cameras/{camera_id}/objects` | 5절 좌표 → 200, `{"accepted":true}` |
+| `DATA_IDENTITY_TOKEN` | `POST /object-jobs/identity/claim` | 본문 없음 → 200, `{"job":null}` 또는 작업 1개 |
+| 위와 같음 | `POST /object-jobs/identity/{job_id}/complete` | 6절 완료 결과 → 200, `{"accepted":true}` 또는 `false` |
+| 위와 같음 | `POST /object-jobs/identity/requeue-unconfigured` | 본문 없음 → 200, `{"requeued":3}`; 한 번에 0~100건 |
 
-## 3. 객체와 식별자
+감지·identity 토큰은 서로 바꿔 쓰지 않는다. identity 토큰에는 이벤트 조회·다른 단계 작업·관리 API 권한이 없다.
 
-| 필드 | 규칙 |
+## 2. 컨테이너 실행 계약
+
+### 네트워크·파일·설정
+
+| 항목 | 유지할 값·조건 |
 |---|---|
-| `person_id` | 카메라 내부 추적 ID인 1~256자 문자열. 숫자 ID도 문자열로 전송 |
-| `tracking_session_id` | 소문자 16진수 32자. 프로세스 재시작·RTSP 재접속·추적기 초기화 때 새 값 생성 |
-| 로컬 추적의 키 | `(camera_id, tracking_session_id, person_id)`; 카메라나 세션이 다르면 같은 번호라도 별개 추적 |
-| `global_person_id` | 카메라 간 동일 인물 연결 결과인 1~256자 문자열. 미연결은 `null`; 실명·앱 사용자 ID가 아님 |
-| `bbox` | 원본 프레임 픽셀의 정수 `[x1,y1,x2,y2]`, 왼쪽 위 기준. `0 ≤ x1 < x2 ≤ width`, `0 ≤ y1 < y2 ≤ height` |
-| 프레임 크기 | `frame_width`, `frame_height` 각각 1~16384 |
-| `confidence` | 감지 모델의 확신 정도, 0~1. 동일 인물 판정 확률과 구별 |
-| 시각 | UTC를 나타내는 RFC 3339 문자열. 예: `2026-09-07T00:00:00.123Z`; 최신 좌표에는 시간대 필수 |
+| 서비스·네트워크 | Compose `preprocessing`, `internal` 네트워크. 호스트 공개 포트 없음 |
+| Data | `DATA_SERVICE_URL=http://nginx:8080/internal/data/v1`. 예: 목록 조회는 `http://nginx:8080/internal/data/v1/cameras/enabled` |
+| 영상 | `MEDIAMTX_RTSP_BASE_URL=rtsp://mediamtx:8554` + `/` + 카메라의 `stream_path`, RTSP/TCP |
+| 인증 | `DATA_INFERENCE_TOKEN`, `DATA_IDENTITY_TOKEN`, `MEDIA_READ_USERNAME`, `MEDIA_READ_PASSWORD`를 배포 비밀 파일에서 받음 |
+| 설정 | `AI_CCTV_CONFIG_FILE=/app/config/config.yaml` ← 호스트 `CONFIG_FILE`, 읽기 전용 |
+| 이미지 | `SNAPSHOTS_ROOT=/snapshots` ← 호스트 `SNAPSHOTS_DIR`, 읽기·쓰기. Data·Analysis와 같은 폴더 공유 |
+| 모델 | `/models` ← 호스트 `MODELS_DIR`, 읽기 전용. `MODEL_PATH=/models/${MODEL_FILE}`, `MODEL_FILE` 기본 `default.pt` |
+| 사용자 | Compose의 `AI_CCTV_UID:AI_CCTV_GID`, 기본 `1000:1000`. 이 권한으로 이미지 쓰기·다른 처리기의 읽기가 가능해야 함 |
+| 상태 서버 | `0.0.0.0:8000`, 아래 3개 경로. 인증 없이 컨테이너 내부망에서 조회 |
 
-화면 밖 좌표는 경계 안으로 잘라내고 면적 없는 박스는 제외한다. 한 프레임은 최대 100개 객체이며 `person_id`는 중복될 수 없다.
+기본 비밀 파일은 `server/secrets/preprocessing.env`이며 `PREPROCESSING_SECRETS_FILE`로 바꾼다. 기존 생성 파일을 사용하고 Data·MediaMTX 쪽 인증값과 맞춘다. 현재 실행기는 identity 토큰과 영상 읽기 비밀번호를 각각 최소 32자로 검사한다. 감지 토큰의 구형 이름 `INTERNAL_SERVICE_TOKEN`은 기존 Python 실행기의 호환용이며 새 배포에는 `DATA_INFERENCE_TOKEN`을 사용한다.
 
-처음 보인 추적에는 `person_appeared`를 한 번 보낸다. 계속 보이는 동안 반복 발행하지 않으며, 설정 시간 동안 보이지 않으면 `person_disappeared`를 한 번 보낸다. 사라진 후 재등장은 새 등장 이벤트지만, 같은 세션의 같은 ID를 다른 사람에게 재사용하면 안 된다. RTSP 단절을 퇴장으로 추정하지 않고 새 연결에서 추적 세션을 초기화한다.
+RTSP 기본 주소에는 인증정보·query·fragment를 넣지 않는다. 읽기 계정을 URL에 넣는 클라이언트는 사용자명·비밀번호를 각각 URL 인코딩하고 인증 URL을 로그에 남기지 않는다. 내부 HTTP·RTSP에는 기본 TLS가 없으며 HTTP 클라이언트는 외부 프록시 환경변수를 따르지 않는다. 비밀값은 이미지·metadata·로그에 포함하지 않는다.
 
-## 4. 이벤트와 이미지
+기존 설정 우선순위는 **컨테이너 환경변수 → YAML의 `inference` → 기본값**이다. `inference`와 `ANALYSIS_FPS`는 여기서 수행하는 감지 설정 이름이다.
 
-등장 이벤트의 완전한 요청 예시다. 경로의 파일을 **먼저 저장 완료한 뒤** 요청한다.
+| 환경변수 | YAML 키 | 기본값·동작 |
+|---|---|---|
+| `INFERENCE_ENABLED` | `enabled` | `true`; `false`이면 감지를 생략하고 영상 연결 감시는 유지 |
+| `MODEL_PATH` | `model_path` | Compose가 위 모델 경로를 지정하므로 YAML보다 우선 |
+| `INFERENCE_DEVICE` | `device` | `auto`; 기존 구현은 `cpu`, `cuda`, `cuda:N` 지원 |
+| `INFERENCE_CONFIDENCE` | `confidence_threshold` | `0.4`, 0~1 |
+| `ANALYSIS_FPS` | `analysis_fps` | `5`, 양수; YAML 최대 30 |
+| `DISAPPEAR_SECONDS` | `disappear_seconds` | `3`, 양수; 마지막 감지 후 사라짐 대기 시간 |
+| `CAMERA_REFRESH_SECONDS` | 없음 | `15`, 활성 목록 재조회 간격. 양수 사용 |
+| `IDENTITY_PLUGIN` | 없음 | `server.services.preprocessing.processors.identity:LocalAppearanceIdentity` |
+| `IDENTITY_MODEL_PATH` | 없음 | 미설정·정확히 빈 문자열이면 기본 CPU 특징. 지정 시 `/models` 안의 ONNX만 사용 |
+| `OBJECT_MODEL_TIMEOUT_SECONDS` | 없음 | `120`, `0 < 값 ≤ 240`; identity 1회 호출 제한 |
+| `OBJECT_STARTUP_TIMEOUT_SECONDS` | 없음 | `30`, `0 < 값 ≤ 120`; identity 팩토리 초기화 제한 |
+| `RTSP_TIMEOUT_SECONDS` | 없음 | `5`, 최대 30초; 열기·읽기 각각의 제한 |
+| `MODEL_RETRY_SECONDS` | 없음 | `30`; 감지 모델 재준비 간격 |
+| `DETECTION_SHUTDOWN_SECONDS` | 없음 | `15`, 최대 60초; 감독자의 공통 종료 제한. Compose 종료 유예는 75초 |
+| `EVENT_OUTBOX_MAX_PENDING` | 없음 | `10000`; 거부 보관 항목을 포함한 큐 최대 건수 |
+| `EVENT_OUTBOX_MAX_BYTES` | 없음 | `67108864`; 큐 JSON 바이트 합 상한. SQLite 실제 파일 크기와 다름 |
+
+`server/.env`에 쓴 값이 모두 컨테이너에 전달되는 것은 아니다. `MODEL_FILE`은 Compose에 연결되어 있고, 감지 빈도 등은 기본적으로 YAML을 편집한다. 환경변수로 덮어쓰려면 해당 서비스의 `environment`에도 연결한다. GPU는 장치 문자열 외에 호스트 드라이버·컨테이너 GPU 접근 설정이 필요하다. 기존 YOLO는 클래스 0을 사람으로 해석하며, 다른 모델은 클래스·전처리·좌표 복원을 직접 맞춘다.
+
+### 상태 API
+
+| 경로 | 상태 코드·본문 |
+|---|---|
+| `GET /health/live` | 200, `{"status":"alive","service":"preprocessing"}` |
+| `GET /health/ready` | 감지용 카메라 목록 조회 실패 시 503, `{"detail":"Data Service is not ready"}`; 그 외 200과 아래 상태 |
+| `GET /internal/v1/status` | 200, 아래 JSON에서 최상위 `status`만 제외 |
+
+다음 예시는 감지와 기본 identity 처리 경로가 준비되고 특징 처리 한 건을 완료한 상태다.
+
+```json
+{
+  "status": "ready",
+  "data_ready": true,
+  "last_error": null,
+  "workers": {
+    "cam-001": {
+      "camera_id": "cam-001",
+      "state": "online",
+      "model_ready": true,
+      "last_error": null,
+      "last_frame_at": "2026-09-09T00:00:00.300Z"
+    }
+  },
+  "identity": {
+    "ready": true,
+    "stalled": false,
+    "last_error": null,
+    "last_outcome": "complete",
+    "backend": "server.services.preprocessing.processors.identity:LocalAppearanceIdentity",
+    "model_ready": true
+  }
+}
+```
+
+`data_ready`는 최근 목록 조회 결과다. `workers`는 카메라별 상태이며 없으면 `{}`, `state`는 `starting|online|offline|stopped`, 프레임 시각·오류는 없으면 `null`이다. `identity.ready`는 claim 가능 여부, `stalled`는 안전한 재시작이 불가능해 추가 수신을 중단했는지 나타낸다. `last_outcome`은 `complete|retry|failed|unconfigured|rejected|null`이다. `rejected`는 완료 거부의 진단값이며 완료 요청에 보내는 값은 아니다.
+
+`identity.backend`는 선택 플러그인, `model_ready`는 그 실행 경로의 준비 상태다. 외관 특징의 `complete`나 임계값 이상 cosine 점수만으로 같은 사람임이 증명되지는 않는다. outbox의 대기·거부·포화와 종료 시 미보존 이벤트도 카메라·감독자 상태에서 함께 확인한다.
+
+감지가 켜진 카메라의 모델 미준비·offline·stopped·오래된 프레임, identity 미준비·정지·오류, 이벤트 보존·송신 오류와 거부 항목은 200 `degraded`로 표시한다. 카메라별 `frame_age_seconds`는 마지막 프레임 수신 후 단조 시계 경과 시간이며 미수신이면 `null`이다. 상태 조회는 `max(30초, RTSP_TIMEOUT_SECONDS×2)` 이상 경과를 `frame_stale:true`로 계산한다. 첫 프레임 이전은 작업자 생성 시점부터 같은 유예시간을 사용한다. **HTTP 200·Compose healthy만으로 모델이나 영상의 성공을 판정하지 말고 실제 출력을 확인한다.**
+
+## 3. 카메라·추적·좌표 공통 규칙
+
+활성 목록의 `items`에서 감지기가 필요한 값은 문자열 `camera_id`, `stream_path`다. 숫자 `id`는 DB 번호이므로 URL에 쓰지 않는다. `source_url`은 사용하지 않으며, 사용자별 목록을 만드는 `user_id` 조회 조건도 보내지 않는다. 카메라는 최대 4대이고 빈 목록은 `{"items":[]}`다.
+
+추가된 카메라는 시작하고 빠진 카메라는 중지한다. **목록 조회 실패는 빈 목록과 다르다.** 기존 카메라를 유지하며 재조회하고 상태에 장애를 표시한다. 첫 프레임을 받아야 `online`, 영상 열기·읽기 실패는 `offline`이다. 상태 PATCH의 허용값은 `online|offline|degraded|disabled`이며 본문은 `status`만 보낸다. 감지기가 `enabled`나 사용자 설정을 바꾸지 않는다.
+
+현재 Python 작업자는 실행 중 `stream_path` 변경을 즉시 적용하지 않는다. 이 경우 비활성화 → 목록 갱신으로 작업자 종료 확인 → 재활성화 또는 컨테이너 재시작으로 반영한다. 새 구현이 경로 변경을 자동 반영한다면 추적 세션도 새로 시작한다.
+
+| 값 | 형식·한계 |
+|---|---|
+| `camera_id`, `stream_path` | `^[a-z0-9][a-z0-9_-]{0,63}$` |
+| `person_id` | 카메라 내부 추적 ID, 1~256자 문자열. 숫자도 `"7"`처럼 전송 |
+| `tracking_session_id` | 소문자 16진수 32자 |
+| `global_person_id` | 여러 관측을 같은 사람으로 묶는 1~256자 문자열 또는 `null`. 실명·앱 사용자 ID가 아님 |
+| `bbox` | 정수 배열 `[x1,y1,x2,y2]`, 원본 프레임 왼쪽 위가 원점. `0 ≤ x1 < x2 ≤ frame_width`, `0 ≤ y1 < y2 ≤ frame_height` |
+| 프레임 크기 | `frame_width`, `frame_height` 각각 정수 1~16384 |
+| `confidence` | 감지 확신도 0~1, 재식별 확률과 구별 |
+| 시각 | 시간대가 있는 UTC RFC 3339, 예: `2026-09-09T00:00:00.123Z` |
+
+추적의 식별자는 **`(camera_id, tracking_session_id, person_id)`**다. 프로세스 재시작·RTSP 재접속·추적기 초기화마다 세션을 새로 만들고, 같은 세션의 같은 ID를 다른 사람에게 재사용하지 않는다. 프레임당 최대 100명, 같은 배열의 ID 중복은 금지한다. 모델 좌표는 원본 크기로 복원해 경계 안으로 자르고 면적 없는 박스는 버린다.
+
+## 4. 등장·사라짐 이벤트와 파일
+
+`POST /events`의 필수 필드는 `camera_id`, `event_type`, `occurred_at`이다. 사람 이벤트에는 추가로 비어 있지 않은 `person_id`와 `metadata.tracking_session_id`를 넣는다. 범용 Data API가 이를 모두 강제하지 않더라도 송신자가 지킬 규약이다.
+
+| 이벤트 | 발생 시점·추가 값 |
+|---|---|
+| `person_appeared` | 새로 보인 추적마다 1회. 확신도와 같은 프레임의 원본·크롭·박스 이미지, `object_observation` 포함 |
+| `person_disappeared` | 마지막 감지 후 대기 시간이 지나면 1회. 같은 ID·세션, 마지막 확신도, 사라짐 판단 시각. 이미지·관측은 생략 또는 `null` |
+| `inference_stream_lost` | 영상 열기·읽기 실패 시 1회. 사람·이미지 없이 `metadata.reason`에 `rtsp_open_failed` 또는 `rtsp_read_failed` |
+| `inference_stream_restored` | 위 장애 후 첫 프레임 수신 시 1회. `metadata.reason:"rtsp_stream_available"` |
+
+계속 보이는 동안 등장 이벤트를 반복하지 않고, 사라짐 후 다시 보이면 새 등장 이벤트를 만든다. RTSP 단절을 퇴장으로 추정하지 않으며 같은 장애의 재접속 시도마다 이벤트를 쌓지 않는다. **`central_connection_*`는 Edge→중앙 장애·녹화 복구용이므로 여기서 만들지 않는다.**
+
+등장 요청 예시다. 예시 날짜는 형식 확인용이며 실제 전송에는 현재 관측 시각과 **저장을 끝낸 실제 파일 경로**를 사용한다.
 
 ```json
 {
   "camera_id": "cam-001",
   "event_type": "person_appeared",
-  "occurred_at": "2026-09-07T00:00:00Z",
+  "source_event_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "occurred_at": "2026-09-09T00:00:00.123Z",
   "person_id": "7",
-  "global_person_id": null,
   "confidence": 0.92,
-  "snapshot_path": "cam-001/2026/09/07/original.jpg",
-  "metadata": {"tracking_session_id":"0123456789abcdef0123456789abcdef"},
+  "snapshot_path": "cam-001/a.jpg",
+  "metadata": {
+    "tracking_session_id": "0123456789abcdef0123456789abcdef"
+  },
   "object_observation": {
     "schema_version": 1,
     "tracking_session_id": "0123456789abcdef0123456789abcdef",
     "object_class": "person",
-    "bbox": [100,50,300,600],
+    "bbox": [100, 50, 300, 600],
     "frame_width": 1280,
     "frame_height": 720,
-    "crop_path": "cam-001/2026/09/07/example_crop.jpg",
-    "annotated_snapshot_path": "cam-001/2026/09/07/example_boxed.jpg"
+    "crop_path": "cam-001/a_crop.jpg",
+    "annotated_snapshot_path": "cam-001/a_boxed.jpg"
   }
 }
 ```
 
-- 필수 입력은 `camera_id`, `event_type`, `occurred_at`이다. 사람 이벤트에는 `person_id`와 `metadata.tracking_session_id`를 함께 보낸다. 감지 단계는 `global_person_id`를 `null`로 두고, 전역 ID 결정은 6절의 identity 완료로 수행한다.
-- `snapshot_path`는 원본 JPEG, `crop_path`는 해당 박스의 사람 영역 JPEG, `annotated_snapshot_path`는 같은 프레임에 해당 박스와 로컬 ID를 그린 JPEG다. 파일명은 예시이며 충돌하지 않게 생성한다.
-- 경로는 `/snapshots` 기준 상대 경로이고 최대 4096자다. 절대 경로·드라이브 경로·저장소 밖으로 벗어나는 경로를 보내지 않는다. 크롭을 읽을 때도 실제 경로가 저장소 내부 파일인지 확인한다. 분석 입력 파일을 덮어쓰지 않는다.
-- `object_observation`은 `person_appeared`와 비어 있지 않은 `person_id`가 있을 때만 허용한다. `schema_version`은 1, `object_class`는 `person`이며 `crop_path`는 필수다. `annotated_snapshot_path`는 생략하거나 `null` 가능하다. 정의되지 않은 관측 필드는 422로 거부한다.
-- 원본 저장 실패는 `snapshot_path:null`, 크롭 저장 실패는 `object_observation:null`로 보고할 수 있다. 이때 이벤트는 유지되지만 관측이 없으면 identity·analysis 작업은 생성되지 않는다. 현재 관측은 등장마다 한 번이며 매 프레임 저장하지 않는다.
-- 사라짐 이벤트는 `event_type:"person_disappeared"`, 같은 `person_id`·세션, 마지막 확신도와 현재 발생 시각을 보내고 이미지·관측은 `null`로 둔다.
+`confidence`, `snapshot_path`, `object_observation`의 API 기본값은 `null`, `metadata`는 `{}`다. 감지 단계의 `global_person_id`는 생략 또는 `null`로 두고 Data가 identity 완료를 반영할 때 결정한다. `source_event_id`는 이벤트 생성 시 한 번 만든 소문자 16진수 32자리 UUID이며 재전송에도 유지한다. 녹화 연결 필드 `recording_segment_id(s)`와 Edge 중복 식별용 `edge_event_id`는 보내지 않는다.
 
-성공 응답에는 `id`(정수), `created_at`, 요청의 기본 이벤트 필드, `recording_segment_id`, `recording_segment_ids`, `edge_event_id`가 포함된다. 관측은 응답 최상위가 아닌 `metadata.object`에 들어가며, Data는 `metadata.tracking_session_id`를 관측과 일치시키고 `metadata.identity`, `metadata.analysis`를 각각 `{"status":"pending"}`으로 설정한다. 감지기는 녹화 ID와 `edge_event_id`를 생략한다. Data가 관련 녹화·알림·두 객체 작업을 같은 트랜잭션으로 저장한다.
+`object_observation`은 `person_appeared`이고 `person_id`가 있을 때만 허용한다. 필수값은 세션·bbox·원본 크기·`crop_path`이며, `schema_version`은 기본 1만, `object_class`는 기본 `person`만 허용한다. `annotated_snapshot_path` 기본값은 `null`이다. 세 경로의 길이는 최대 4096자이고 `crop_path`는 비어 있을 수 없다. 관측과 이벤트 metadata의 세션은 같아야 한다.
 
-영상 소비 구간 장애는 `inference_stream_lost`, 프레임 수신 재개는 `inference_stream_restored` 이벤트다. 사람 ID·이미지 없이 `metadata.reason`을 넣고, 같은 장애의 반복 연결 시도마다 이벤트를 만들지 않는다. Edge→중앙 구간의 `central_connection_*` 이벤트를 대신 생성하면 녹화 복구 구간이 잘못 정해질 수 있다.
+이미지 바이트는 HTTP 본문에 넣지 않고 파일 경로만 전달한다. 파일 계약은 다음과 같다.
 
-현재 감지 이벤트에는 Data 도착 전 내구 송신 대기열이 없다. 응답이 유실된 POST를 무조건 재전송하면 이벤트·푸시가 중복될 수 있으며, HTTP 실패 중 감지 이벤트 무손실은 보장하지 않는다. 이미지 파일 저장과 HTTP 이벤트 저장도 하나의 트랜잭션이 아니다.
+1. `snapshot_path`는 원본 JPEG, `crop_path`는 **같은 원본에서 해당 bbox만 자른 JPEG**, `annotated_snapshot_path`는 복사본에 해당 박스·로컬 ID를 그린 JPEG다. 크롭에 다른 사람의 박스 표시를 섞지 않는다.
+2. 경로는 `/snapshots` 기준 상대 경로다. 절대 경로·Windows 드라이브·`..`를 통한 이탈을 금지하고 심볼릭 링크 해석 후에도 저장소 안인지 확인한다.
+3. 충돌하지 않는 파일명으로 쓰기·닫기를 마친 뒤 이벤트를 보낸다. 임시 파일 작성 후 같은 저장소에서 이름을 바꾸는 방식을 권장한다. 다른 작업자가 읽는 파일을 임의로 덮어쓰거나 지우지 않는다.
+4. 저장 실패를 가짜 경로로 숨기지 않는다. 원본 실패 시 `snapshot_path:null`, 박스 이미지 실패 시 해당 경로만 `null`일 수 있다. 크롭 저장 실패는 현재 프레임을 유지하고 추가 추론을 중단한 채 0.5~5초 간격으로 재시도한다. 성공 전에 관측 없는 등장 이벤트로 대체하지 않는다. 원본 스냅샷은 처음 한 번만 만들며 `observation_error`·`observation_persistence_failures`로 실패를 드러낸다. 종료까지 저장하지 못하면 `event_shutdown_losses`에 기록한다. identity는 파일 존재·저장소 경계·이미지 디코딩을 다시 검사한다.
 
-## 5. 실시간 박스
+201 응답은 저장된 이벤트 객체다. 필요한 값은 양의 정수 `id`이며, 전송한 관측은 최상위가 아닌 `metadata.object`에 저장된다. Data가 `metadata.identity`, `metadata.analysis`를 각각 `{"status":"pending"}`으로 만들고 이벤트·녹화 연결·푸시 예약·두 작업을 같은 DB 트랜잭션에 저장한다. 이미지 저장은 이 트랜잭션에 포함되지 않는다.
 
-`PUT /cameras/cam-001/objects`에 최대 초당 2회 최신 상태를 보낸다.
+crop 저장이나 이벤트 전송 재시도에 시간이 걸려도 등장·사라짐의 `occurred_at`은 원래 프레임 수신 시각을 유지한다. 완료 시각으로 바꾸어 영상·추적·gallery의 시간 관계를 왜곡하지 않는다.
+
+현재 구현은 이미지 저장 후 이벤트 JSON을 `SNAPSHOTS_ROOT/.event-outbox.sqlite3`에 먼저 기록하고 독립 송신 흐름에서 전달한다. Data는 `(camera_id, source_event_id)`의 유일성으로 같은 이벤트의 재전송에 기존 결과를 돌려주며 작업·푸시를 중복 생성하지 않는다. `edge_event_id`와는 별도의 중복 제거 규칙이다. outbox는 재시작 후에도 남고, 응답 유실·일시 장애는 0.5~30초 간격으로 재시도한다. HTTP 400·404·413·422는 거부 항목으로 보관한 뒤 다음 항목을 처리한다.
+
+큐는 거부 항목을 포함해 기본 10,000건·JSON 합 64 MiB로 제한된다. 페이지·WAL 오버헤드를 포함한 SQLite 파일 크기는 더 클 수 있다. 무제한 무손실 큐가 아니므로 디스크 오류·큐 포화·종료 시 보존하지 못한 이벤트를 상태에서 확인해야 한다. 재연결 때 최신 좌표는 이 대기열로 복원하지 않고 최신 상태만 다시 전송한다.
+
+큐가 차거나 쓰기가 실패하면 카메라별 현재 이벤트 한 건·스냅샷을 유지한 채 추가 추론과 스냅샷 생성을 멈추고 0.5~5초 간격으로 같은 ID의 영속화를 재시도한다. `event_backpressure`·`event_delivery_error`·`event_persistence_failures`와 `event_delivery.pending/rejected/last_error`를 확인한다. SQLite를 조회할 수 없으면 건수는 `null`, 오류는 `EVENT_STORAGE`다. 종료는 이 대기를 깨며 아직 영속화하지 못한 건은 `event_shutdown_losses`와 ERROR 로그로 남긴다. 남은 스냅샷만으로 재시작 후 이벤트 복원을 보장하지 않는다. 큐 상한에는 JPEG 파일 총용량이 포함되지 않는다.
+
+## 5. 최신 박스 전송
+
+`PUT /cameras/{camera_id}/objects`는 영상과 별도로 앱에 표시할 최신 상태를 보낸다. **최대 초당 2회**, 느릴 때는 최신 값만 남기고 밀린 좌표를 계속 쌓지 않는다. 다음 필드는 모두 필수이고 `null`은 허용하지 않는다.
 
 ```json
 {
   "tracking_session_id": "0123456789abcdef0123456789abcdef",
-  "observed_at": "2026-09-07T00:00:00.123Z",
+  "observed_at": "2026-09-09T00:00:00.123Z",
   "frame_width": 1280,
   "frame_height": 720,
-  "objects": [{"person_id":"7","bbox":[100,50,300,600],"confidence":0.92}]
+  "objects": [
+    {"person_id": "7", "bbox": [100, 50, 300, 600], "confidence": 0.92}
+  ]
 }
 ```
 
-모든 필드가 필수이며 정의되지 않은 필드는 거부한다. 사람이 없으면 `objects:[]`를 보낸다. 객체별 `global_person_id`는 **전송하지 않는다**. Data가 identity 연결표를 조회해 앱 응답에 추가한다.
+사람이 없으면 `objects:[]`를 보내며, 객체 항목에는 위 3개 필드만 넣는다. `global_person_id`는 Data가 연결표에서 조회해 앱 응답에 추가한다.
 
-전송이 느리면 오래된 대기 좌표를 버리고 최신 것만 남긴다. Data는 기존 값보다 `observed_at`이 큰 요청만 반영하지만, 무시한 과거·동일 시각 요청에도 `accepted:true`를 반환한다. 미래 시각 또는 3초를 초과한 관측은 앱 조회 시 빈 목록과 `stale:true`가 된다. 시스템 시계를 맞추고 순서가 뒤바뀐 좌표를 보내지 않는다.
+Data는 저장된 값보다 `observed_at`이 큰 요청만 반영한다. 과거·동일 시각 요청을 무시해도 응답은 200 `{"accepted":true}`다. 앱 조회 시 관측이 미래이거나 **3초 초과**, 카메라 비활성 또는 저장값 없음이면 `objects:[]`, `stale:true`가 된다. 시계를 맞추고 관측 시각을 처리 완료·전송 시각으로 바꾸지 않는다.
 
-이 API는 최신 상태 전달용이며 HLS 영상 프레임과의 정확한 동기화를 보장하지 않는다. 영상 자체에 박스가 합성되는 것도 아니다. 동일 프레임을 확인할 때는 박스 스냅샷을 사용한다.
+HLS 영상과 좌표는 프레임 단위로 동기화되지 않으며 영상 자체에 박스가 합성되는 것도 아니다. 같은 프레임의 결과 확인에는 저장한 박스 이미지를 사용한다.
 
-## 6. 전역 인물 연결 작업
+## 6. identity: 작업 가져오기와 결과 보고
 
-아래 요청에는 **identity 토큰**만 사용한다. 처리기가 `claim`을 주기적으로 호출해 작업을 가져가는 방식이며 Data가 먼저 연결하지 않는다. identity는 analysis 완료를 기다리지 않으며, 다른 단계의 API·이벤트 조회·DB 접근 권한이 없다.
+### 작업과 완료 본문
 
-| 요청 | 입력 | 응답 |
-|---|---|---|
-| `POST /object-jobs/identity/claim` | 본문 없음 | 200, `{"job":null}` 또는 아래 작업 |
-| `POST /object-jobs/identity/{id}/complete` | 아래 완료 JSON | 200, `{"accepted":true}` 또는 `false` |
-| `POST /object-jobs/identity/requeue-unconfigured` | 본문 없음 | 200, `{"requeued":수량}`; 최대 100건 |
+감지와 독립된 처리기에서 `claim → 크롭 검증·모델 실행 → complete`를 반복한다. 한 번에 처리 가능한 작업만 가져온다. `job:null`은 현재 작업 없음이며 잠시 기다렸다가 다시 조회한다.
 
-claim 응답 예시:
+claim의 `job`에는 다음 값이 들어온다. `id`·`event_id`는 양의 정수로 **완료 경로에는 이벤트 ID가 아닌 작업 `id`**를 넣는다. `attempts`는 이번 claim 직전 횟수(0~4)이고 `lease_id`는 이번 처리 권한이다.
 
 ```json
 {
@@ -155,84 +242,218 @@ claim 응답 예시:
     "camera_id": "cam-001",
     "person_id": "7",
     "global_person_id": null,
-    "occurred_at": "2026-09-07T00:00:00Z",
-    "lease_id": "fedcba9876543210fedcba9876543210",
+    "occurred_at": "2026-09-09T00:00:00.123Z",
     "object_observation": {
-      "schema_version":1,
-      "tracking_session_id":"0123456789abcdef0123456789abcdef",
-      "object_class":"person",
-      "bbox":[100,50,300,600],
-      "frame_width":1280,
-      "frame_height":720,
-      "crop_path":"cam-001/2026/09/07/example_crop.jpg",
-      "annotated_snapshot_path":"cam-001/2026/09/07/example_boxed.jpg"
-    }
+      "schema_version": 1,
+      "tracking_session_id": "0123456789abcdef0123456789abcdef",
+      "object_class": "person",
+      "bbox": [100, 50, 300, 600],
+      "frame_width": 1280,
+      "frame_height": 720,
+      "crop_path": "cam-001/a_crop.jpg",
+      "annotated_snapshot_path": "cam-001/a_boxed.jpg"
+    },
+    "lease_id": "abcdef0123456789abcdef0123456789"
   }
 }
 ```
 
-`id`는 작업 ID, `event_id`는 원래 등장 이벤트 ID다. `attempts`는 **이번 claim 직전** 실행 횟수여서 첫 응답은 0이다. 작업에는 전체 이벤트 metadata나 별도의 인물 검색 목록이 포함되지 않는다.
+작업에는 전체 이벤트 metadata·원본 `snapshot_path`·다른 인물 검색 목록이 없다. `object_observation.crop_path`를 `/snapshots` 안에서 읽는다. claim 시 이미 전역 연결이 있으면 `global_person_id`가 채워질 수 있다. **gallery는 Data 내부에 영속 저장되며 플러그인에 검색 API나 벡터 목록을 노출하지 않는다.** 기본 플러그인은 상태를 저장하지 않고 새 특징만 완료 요청에 담는다.
 
-완료 요청 예시:
+위 작업의 완료 요청은 `POST /object-jobs/identity/21/complete`에 같은 lease를 넣는다. 다음은 descriptor 형식을 설명하는 16차원 단위벡터 예시이며 실제 기본 추출기는 `appearance-hsv-v1` 공간의 392차원 측정값을 반환한다.
 
 ```json
 {
-  "lease_id": "fedcba9876543210fedcba9876543210",
+  "lease_id": "abcdef0123456789abcdef0123456789",
   "outcome": "complete",
-  "global_person_id": "global-42",
-  "metadata": {"backend":"example-reid","version":"1"}
+  "identity_descriptor": {
+    "schema_version": 1,
+    "space_id": "example-descriptor-v1",
+    "features": [0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
+  },
+  "metadata": {"backend": "example-reid", "version": "1", "method": "example", "quality": {}}
 }
 ```
 
-`lease_id`는 claim에서 받은 소문자 16진수 32자를 그대로 전달한다. `outcome`은 필수이고 다음 네 값만 허용한다. `metadata`는 생략 가능한 JSON 객체(기본 `{}`), NaN·Infinity 금지, Data의 `json.dumps(metadata, allow_nan=False)`를 UTF-8로 바꾼 기준 65,536바이트 이하이다. 이 직렬화는 한글을 `\uXXXX`로 바꾸고 구분자 공백을 포함하므로 전송한 압축 JSON 크기와 다를 수 있다. 추가 최상위 필드는 금지한다.
+필수 필드는 `lease_id`(소문자 16진수 32자), `outcome`이며 `global_person_id`·`identity_descriptor`의 기본값은 `null`, `metadata`는 `{}`다. descriptor는 `schema_version:1`, 1~128자의 `space_id`, 유한 실수 16~2048개인 `features`를 가지며 L2 norm은 `1±0.001`이어야 한다. `complete`인 identity 결과에서만 사용할 수 있고 명시 `global_person_id`와 동시에 보낼 수 없다. 기존 직접 ID 플러그인의 완료 방식은 호환용으로 유지한다.
 
-| outcome | 의미와 Data 동작 |
+metadata는 모델 결과 자체를 담는 JSON 객체로, `identity`로 다시 감싸지 않는다. 기본 구현은 backend·version·method·quality만 넣고 벡터를 복제하지 않는다. 내부 키는 자유지만 NaN·Infinity는 금지한다. **Python `json.dumps(metadata, allow_nan=False).encode("utf-8")` 기준 65,536바이트 이하**다. 기본 직렬화는 한글을 이스케이프하고 공백을 포함하므로 압축한 전송 크기와 다르다.
+
+| `outcome` | 사용할 때 | 전역 ID·후속 처리 |
+|---|---|---|
+| `complete` | 정상 처리 | 기본 descriptor를 Data가 비교하거나 교체 플러그인의 명시 ID를 반영 |
+| `unconfigured` | 모델 미구현·미설정 | ID 없음, 자동 재시도 없음 |
+| `retry` | 일시적인 모델·의존성 장애 | ID 없음, 한도 내 재시도 |
+| `failed` | 크롭 누락·손상, 복구 불가능한 입력·결과 | ID 없음, 자동 재시도 없음 |
+
+Data는 해당 이벤트의 `metadata.identity`만 `{"status":저장상태,"updated_at":UTC시각,"result":제출metadata}` 형태로 갱신하며 object·analysis 결과는 보존한다. identity·analysis 완료 순서는 상관없고 후속 완료로 새 이벤트·추가 푸시를 만들지 않는다.
+
+### 특징 추출과 gallery 비교
+
+기본 `LocalAppearanceIdentity`는 네 몸통 띠의 HSV·무채색 밝기·경사 특징 392개를 단위 길이로 정규화한다. `IDENTITY_MODEL_PATH`가 없거나 정확히 빈 문자열이면 외부 모델이나 다운로드 없이 CPU로 실행한다. 공백만 있는 값은 오류다. 파일을 지정하면 `/models` 안의 256 MiB 이하 ONNX만 로드한다. 입력은 RGB `float32` `1×3×256×128`, `[0,1]` 변환 뒤 ImageNet 평균 `[0.485,0.456,0.406]`·표준편차 `[0.229,0.224,0.225]`를 적용한다. 단일 `1×D` 출력만 허용하며 공간명은 `onnx-reid:<SHA-256>:rgb256x128-imagenet-v1`이다. 파일·출력 오류를 기본 특징으로 대체하지 않는다.
+
+Data는 유효 lease를 확인한 트랜잭션 안에서 특징·추적 연결·이벤트·작업 완료를 함께 확정한다. 같은 공간·차원만 비교하며 인물별 최고 cosine 점수 중 1위가 0.97 이상이고 2위와 차이가 0.05 이상이어야 기존 ID로 연결한다. 후보가 없거나 낮거나 모호하면 새 `person-<uuid>`를 만든다. 같은 카메라의 다른 추적이 관측 시각 ±30초 안에 있는 후보 ID는 제외하고, 동일 추적의 이미 저장된 연결은 항상 우선한다.
+
+gallery는 최대 관측 시각을 기준으로 최근 1,800초·최대 5,000개 표본을 유지하며 추적 연결은 영속 보존한다. 재시작 후에도 연결이 유지되지만 오래 지난 새 추적은 새 ID가 될 수 있다. 값은 [Data identity 저장소](../server/services/data/app/database/repositories/identity.py)의 상수이며 현재 환경변수 설정은 없다. 비공개 벡터는 공개 이벤트에 포함하지 않고 `metadata.identity.result.match`에 `method:appearance`, `decision:new|matched|existing_track`, `similarity`만 추가한다. cosine은 동일인 확률이 아니며 비슷한 의복·가림·조명 변화에 의한 오연결·분리가 가능하다.
+
+전역 ID는 같은 `(camera_id, tracking_session_id, person_id)`의 기존 이벤트와 이후 이벤트·최신 좌표에 연결된다. 한 추적에 이미 연결한 전역 ID를 다른 ID로 바꾸면 유효한 임대의 완료에서도 409 `OBJECT_RESULT_CONFLICT`다. 다른 세션·카메라의 추적을 같은 전역 ID로 묶는 것은 가능하다.
+
+### 임대·재시도·중복의 한계
+
+- Data의 임대는 **5분**, 갱신 API와 만료 시각 응답은 없다. 처리 가능한 시점에 claim하고 제한 안에 완료한다.
+- claim은 총 최대 5회다. `retry`는 30·60·120·240초 대기 후 다시 가능하며 5번째는 `failed`가 된다. 작업자 중단·완료 전송 실패 후 임대가 만료되면 같은 작업에 새 lease가 발급될 수 있다.
+- 같은 완료의 재전송·만료 lease·없는 작업은 **200 `{"accepted":false}`**다. HTTP 성공만으로 반영을 판단하지 않는다. 완료 응답 유실 시 원래 job·lease·본문으로 재전송할 수 있지만, `false`만으로 첫 요청의 수락 여부를 구별할 수는 없다. `last_outcome:rejected` 진단은 유지하되 이후 정상 빈 claim에서 해당 오류를 지워 유휴 상태를 영구 장애로 표시하지 않는다. 작업 상태 조회 API는 없다.
+- 이전 작업자의 늦은 결과는 거부된다. 모델의 외부 부작용도 반복될 수 있으므로 필요하면 `job.id`로 중복을 구별한다. 거부된 결과를 임의 새 lease로 제출하지 않는다.
+- 모델 연결 후 `requeue-unconfigured`로 한 번에 최대 100건의 시도 횟수를 0으로 되돌린다. 크롭이 남아 있어야 하고, `failed` 일괄 재처리 API는 없다. 재등록·임대 한도 정리 때 이벤트 metadata의 이전 상태가 새 작업 상태와 잠시 다를 수 있다.
+
+현재 Python 실행기는 팩토리와 모델 호출을 별도 `spawn` 프로세스에서 실행한다. 초기화 기본 30초·호출 기본 120초를 각각 설정된 상한 안에서 제한하며 시간 초과한 자식을 종료한 뒤 재생성한다. 호출 시간 초과는 `retry/MODEL_TIMEOUT`, 초기화 실패는 30초 후 재시도한다. 자식 종료 실패는 정지 상태로 드러내어 중첩 실행을 막는다. 이 제한은 5분 임대와 별개다. 완료 HTTP 실패 때는 같은 결과·lease를 메모리에 보관해 재추론 없이 전송하되, 전체 프로세스가 중단되면 임대 만료 후 재처리될 수 있다.
+
+## 7. 장애 처리와 구현·연결 순서
+
+카메라별 추적·영상 수신, identity, 상태 HTTP 응답을 독립적으로 유지한다. 감지 모델 로드·실행 실패 후 영상 연결 감시는 계속하고 기본 30초 뒤 모델을 재준비한다. RTSP 열기·읽기 각각 기본 5초 제한을 적용하며 실패 시 캡처를 해제하고 1~15초 뒤 재연결한다. identity 초기화 실패는 별도로 30초 후 재시도한다. 재접속·모델 재준비 시 추적 세션을 새로 만들어 이전 로컬 ID와 혼동하지 않는다.
+
+감지 네이티브 함수 자체의 교착은 카메라 스레드에서 강제 종료할 수 없다. 감독자는 공통 종료 기한을 넘기면 경고한다. 이 한계는 별도 프로세스로 실행해 종료할 수 있는 identity·analysis의 모델 호출과 구분한다.
+
+Data 오류는 보통 `{"error":{"code":"...","message":"...","details":{}}}` 형태다. 검증 오류의 `details`는 `location` 배열·`message`·`type`을 가진 항목 배열이다. 판단은 오류 코드로 한다.
+
+| 응답 | 처리 |
 |---|---|
-| `complete` | 처리 완료. `global_person_id`는 생략·null도 가능하며, 유효한 판정이 있을 때만 지정 |
-| `unconfigured` | 아직 모델을 연결하지 않음. 전역 ID 없음, 자동 재시도하지 않음 |
-| `retry` | 일시 장애. 전역 ID 없음, 실행 한도 내에서 다시 대기 |
-| `failed` | 잘못된 크롭·복구 불가능한 입력 등. 전역 ID 없음, 자동 재시도하지 않음 |
+| 401 `INVALID_INTERNAL_TOKEN` / 403 `INTERNAL_SCOPE_FORBIDDEN` | 비밀 파일·헤더·감지/identity 역할 확인 |
+| 404 `CAMERA_NOT_FOUND` | 활성 목록 재조회·작업 정리 |
+| 409 `OBJECT_RESULT_CONFLICT` | 세션·전역 ID 판정 확인, 같은 충돌 반복 제출 금지 |
+| 422 `VALIDATION_ERROR`, `INVALID_OBJECT_EVENT`, `INVALID_STORAGE_PATH` | 잘못된 필드·좌표·경로 수정 |
+| 503 `INTERNAL_TOKEN_NOT_CONFIGURED` | Data와 호출자의 인증 설정 확인 |
+| 500·연결 실패·시간 초과 | 대기 후 복구하되 이벤트 POST 수락 여부 불확실성과 작업 임대를 고려 |
 
-Data는 완료 시 해당 이벤트의 `metadata.identity`만 `{"status":"complete","updated_at":"...","result":{...}}` 형태로 바꾸며, `result`가 제출한 `metadata`다. 다른 분석 결과를 덮어쓰지 않는다. `retry`는 저장 상태 `pending` 또는 한도 초과 시 `failed`로 표시된다. 후속 완료로 새 이벤트·추가 푸시는 생성하지 않는다.
+Nginx의 413·502·504는 JSON을 보장하지 않으며 전체 요청은 **2 MiB** 제한을 따른다. 모든 HTTP 요청에 시간 제한을 둔다. 현재 일반 요청 10초·좌표 2초, identity의 빈 대기열·통신 실패 후 대기는 1초다.
 
-전역 ID는 로컬 추적 키에 연결되며 같은 추적의 기존 이벤트·이후 사라짐 이벤트·실시간 박스에 반영된다. 한 로컬 추적에 이미 연결된 전역 ID와 다른 ID를 제출하면 409 `OBJECT_RESULT_CONFLICT`다. 여러 카메라·추적을 같은 전역 ID로 묶는 것은 허용한다. 연결을 취소하거나 이미 확정된 ID를 바꾸는 API는 없다.
+종료 신호에서는 새 claim·카메라 시작을 멈추고 연결을 닫는다. 미완료 작업은 임대 만료로 회수되며 저장된 파일·Data 상태는 보존한다. Compose의 `restart: unless-stopped`는 프로세스 종료에 대한 정책으로 **unhealthy만으로 자동 재시작하지 않는다.**
 
-임대와 장애 처리는 다음을 지킨다.
+### 구현하고 새 이미지로 연결하기
 
-1. claim은 작업을 5분간 임대한다. 만료 시각은 응답에 없고 갱신 API도 없다. 작업을 미리 많이 가져와 대기시키지 말고 임대 안에 완료한다.
-2. 프로세스 중단·완료 전송 실패 시 임대 만료 후 다시 실행될 수 있다. 작업 ID로 외부 부수 효과의 중복을 막는다. 같은 작업이라도 재claim한 `lease_id`는 달라진다.
-3. 만료·다른 lease·이미 완료·없는 작업은 완료 요청에 200 `accepted:false`를 반환한다. 성공 코드만 보고 결과 반영으로 판단하지 않는다. 409는 ID 충돌 등 별도 규약 위반이다.
-4. claim은 총 최대 5회이며, `retry` 지연은 실행 횟수에 따라 30·60·120·240초다. 5번째 실패는 `failed`다. 임대 만료를 통해 한도 초과가 확정되는 경우 작업 상태와 이벤트 metadata의 마지막 상태가 다를 수 있다.
-5. 현재 참고 실행기는 모델을 120초 기다린 뒤 `retry`를 보고하고 해당 identity 작업자의 추가 수신을 멈춘다. 이미 실행 중인 모델 스레드는 강제 종료하지 못하므로 운영자가 컨테이너를 재시작한다. 교체 구현도 무제한 대기·작업 누적을 막고 감지는 계속해야 한다.
-6. 모델 구현 후 `requeue-unconfigured`를 호출하면 미설정 작업을 다시 대기시키고 실행 횟수를 0으로 만든다. 크롭이 남아 있어야 하며, 100건보다 많으면 나눠 호출한다. 이벤트 metadata는 새 완료 결과가 오기 전까지 이전 상태일 수 있다. `failed` 일괄 재처리 API는 없다.
+1. 설정·토큰·UID·공유 경로 검증과 상태 서버를 만든다.
+2. 활성 카메라 조회, RTSP 수신, 세션과 카메라별 상태를 구현한다.
+3. 감지·추적 → 최신 좌표 → 등장 이미지 선저장·이벤트 → 독립 identity 순서로 연결한다.
+4. 시간 초과·종료·재시도·인수 테스트를 구현한다.
+5. `server/services/preprocessing/`에 실제 구현·의존성 파일·Dockerfile을 둔다. Compose의 빌드 context는 저장소 루트이므로 Dockerfile `COPY`도 그 기준이다.
 
-현재 프로토콜은 관측 크롭과 결과 저장을 제공한다. 인물 특징 벡터·검색 인덱스·갤러리를 저장하거나 조회하는 전용 Data API는 없다. 재식별 알고리즘이 추가 영속 저장을 필요로 하면 별도 설계가 필요하며, 현재 DB를 직접 열어 해결해서는 안 된다.
+서비스 이름·네트워크·인증·마운트·8000 상태 API를 유지하고 해당 서비스의 이미지 빌드·실행 명령을 새 구현에 맞춘다. **현재 Compose 공통 healthcheck는 Python으로 `/health/ready`를 호출하므로 Python 없는 이미지에서는 이 명령도 교체한다.**
 
-## 7. 준비 상태·오류·교체 확인
+아래 Dockerfile은 **대상 장비 아키텍처에 맞는 정적 링크 Linux 실행 파일을 사전 빌드한 경우**의 최소 예시다. `bin/preprocessing`과 `serve`·`healthcheck` 하위 명령은 담당자가 구현해야 한다. 동적 라이브러리·언어 런타임이 필요한 구현은 해당 의존성과 빌드 단계를 추가한다.
 
-| 경로 | 현재 응답 의미 |
-|---|---|
-| `GET /health/live` | 200, `{"status":"alive","service":"preprocessing"}` |
-| `GET /health/ready` | Data 목록 조회 불가 시 503 `{"detail":"Data Service is not ready"}`; 가능 시 200과 아래 상태 |
-| `GET /internal/v1/status` | 200, 아래 상태에서 최상위 `status`만 제외 |
-
-```json
-{"status":"ready","data_ready":true,"last_error":null,"workers":{"cam-001":{"camera_id":"cam-001","state":"online","model_ready":true,"last_error":null,"last_frame_at":"2026-09-07T00:00:00Z"}},"identity":{"ready":true,"stalled":false,"last_error":null,"last_outcome":"unconfigured"}}
+```dockerfile
+FROM debian:12-slim
+WORKDIR /app
+COPY --chmod=0555 server/services/preprocessing/bin/preprocessing /app/preprocessing
+USER 65532:65532
+ENTRYPOINT ["/app/preprocessing"]
+CMD ["serve"]
 ```
 
-감지가 켜져 있는데 모델이 준비되지 않았거나 identity가 준비되지 않음·정지·오류 상태이면 `status:"degraded"`로 보고한다. identity 장애만으로 감지·영상 수신을 중지하지 않는다. `unconfigured`는 미구현 상태이며 HTTP 준비 성공이나 `ready`가 모델 완성을 의미하지 않는다. 카메라의 `state`와 `last_frame_at`도 확인해야 한다. 이 경로들은 현재 인증 없이 내부에서 사용하며 외부에 공개하지 않는다.
+`serve`는 상태 서버·카메라 처리·identity 루프를 시작한다. `healthcheck`는 지정 URL을 제한 시간 안에 조회해 HTTP 200일 때만 종료 코드 0을 반환한다. `.dockerignore`가 `build/`·`dist/`를 제외하므로 예시는 `bin/`을 사용한다. 실제 산출물이 빌드 context에 포함되는지 확인한다.
 
-인물 연결 완료 응답이 `accepted:true`가 아니면 identity 상태의 `last_outcome="rejected"`, `last_error="COMPLETION_NOT_ACCEPTED"`로 표시한다. 이 거절만으로 수신을 중단하지 않으며 이후 작업이 정상 완료되면 오류를 해제한다. `rejected`는 진단값이며 완료 요청의 `outcome`에는 사용하지 않는다.
+기존 preprocessing의 `image`를 인수 버전 태그(예: `ai-cctv-preprocessing:handoff-v1`)로 지정하고 **해당 서비스의 healthcheck만** 다음처럼 재정의한다. 공통 healthcheck는 다른 서비스에 그대로 둔다.
 
-Data 오류는 `{"error":{"code":"...","message":"...","details":{}}}` 구조다(`details`는 검증 오류에서 배열 가능). 401은 없는·잘못된 토큰, 403은 범위가 다른 토큰, 404는 없는 카메라, 422는 필드·좌표·경로 오류, 409는 결과 충돌이다. 토큰 미설정은 503이며, 서버·통신 장애에는 제한된 재시도를 적용한다. Nginx가 직접 반환한 오류는 이 JSON 형식을 보장하지 않으며 전체 요청 본문은 Nginx의 2 MiB 제한도 따른다. 비밀값이나 모델 예외 원문을 결과에 싣지 않는다.
+```yaml
+preprocessing:
+  healthcheck:
+    test: ["CMD", "/app/preprocessing", "healthcheck", "http://127.0.0.1:8000/health/ready"]
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 20s
+```
 
-교체 완료 전에는 다음을 실제 연결로 확인한다.
+이 YAML은 기존 서비스에서 바꿀 부분만 보여 준다. 기존 `build`·`env_file`·`environment`·`volumes`·`depends_on`·`networks`·`user`를 보존하고 필요한 값만 맞춘다. 모델 로딩이 길면 healthcheck의 시작 유예를 조정한다. Compose의 실행 UID가 위 Dockerfile의 USER보다 우선한다.
 
-- 활성 카메라 추가·중지, RTSP 인증·재접속, 새 세션 생성, 감지 실패 중 영상 수신 유지.
-- 등장·사라짐 각 1회, 동일 프레임 크롭·박스, 빈 좌표·화면 경계·오래된 관측 처리.
-- 토큰 교차 사용 403, 경로 이탈·잘못된 bbox 422, identity ID 충돌 409.
-- identity/analysis의 완료 순서를 바꿔도 결과 공존, 동일 인물 ID가 다른 카메라에 연결되고 같은 로컬 추적에 전파.
-- 중복 완료·임대 만료의 `accepted:false`, 재시도 한도, 모델 미설정 재처리, 작업 정지 중 감지 지속.
-- 교체 이미지의 권한·마운트·8000 상태 확인과 모바일 박스 표시. 모델 정확도는 통신 계약 검사와 별도로 평가.
+개발 Compose까지 사용할 경우 `server/compose.dev.yml`의 preprocessing에 지정된 `development` 단계·Python 실행 명령·코드 마운트도 맞춘다. 아래는 기본 Compose만 쓰는 교체 확인 절차다.
 
-구현 근거: [Compose](../server/compose.yml), [Data API](../server/services/data/app/api/objects.py), [객체 스키마](../lib/ai_cctv_core/contracts/objects.py), [작업 저장 규칙](../server/services/data/app/database/repositories/objects.py). 설치·공통 확인은 [README](../README.md)를 따른다.
+[소스 배포 안내](guide.md#소스-배포)로 **운영과 분리된 개발 배포**를 준비한다. 별도 소스 사본·env·비밀 파일·DB·영상·스냅샷 경로·공개 포트를 사용한다. 프로젝트 이름만 바꿔서는 경로·포트가 분리되지 않는다. 카메라와 모델을 준비한 뒤 저장소 루트의 PowerShell에서 실행하며, 실패하면 다음 단계로 넘어가지 않는다.
+
+먼저 `nginx`를 기동하면 필요한 Data·External·MediaMTX도 준비된다. 이후 선택한 서비스만 빌드·재생성하여 새 이미지 반영을 확인한다.
+
+```powershell
+docker compose --env-file server/.env -f server/compose.yml config --quiet
+docker compose --env-file server/.env -f server/compose.yml up -d --build --wait nginx
+docker compose --env-file server/.env -f server/compose.yml stop preprocessing
+docker compose --env-file server/.env -f server/compose.yml build preprocessing
+docker compose --env-file server/.env -f server/compose.yml up -d --no-deps --force-recreate --wait preprocessing
+$preprocessingContainer = docker compose --env-file server/.env -f server/compose.yml ps -q preprocessing
+docker inspect --format '{{.Image}}' $preprocessingContainer
+docker image inspect --format '{{.Id}}' ai-cctv-preprocessing:handoff-v1
+docker inspect --format '{{json .Mounts}}' $preprocessingContainer
+docker inspect --format '{{.Config.User}}' $preprocessingContainer
+docker compose --env-file server/.env -f server/compose.yml logs --tail 100 preprocessing
+```
+
+컨테이너 ID가 비어 있지 않고 **두 이미지 ID가 같은지** 확인한다. Mounts는 의도한 호스트 경로이며 `/snapshots`는 `RW=true`, `/models`와 `/app/config/config.yaml`은 `RW=false`여야 한다. User는 배포의 `AI_CCTV_UID:AI_CCTV_GID`(기본 `1000:1000`)와 비교한다. 실제 태그가 다르면 비교 명령도 맞춘다. `restart`만으로는 새 이미지·환경이 적용되지 않는다.
+
+아래 상태 조회의 Python은 **Data 컨테이너에 있는 도구**이므로 새 preprocessing 이미지에는 Python이 필요 없다.
+
+```powershell
+docker compose --env-file server/.env -f server/compose.yml exec -T data python -c "import urllib.request; opener=urllib.request.build_opener(urllib.request.ProxyHandler({})); print(opener.open('http://preprocessing:8000/health/ready', timeout=3).read().decode())"
+```
+
+`--wait`와 상태 확인 이후에도 실제 프레임·이벤트·파일·identity 결과를 확인한다.
+
+실제 카메라에서 사람 등장·퇴장을 만든 뒤 아래로 직전 5분의 이벤트(최대 200건)와 최신 좌표를 조회한다. `camera_id`를 실제 값으로 바꾸고, 좌표는 **영상에 사람이 들어오는 동안** 확인한다. 3초 초과 좌표는 빈 배열이 된다. 이 검사는 Data 컨테이너의 기존 External 토큰으로 읽기만 수행하며 preprocessing에 토큰을 추가하거나 claim·complete를 수동 호출하지 않는다.
+
+```powershell
+@'
+import json, os, urllib.parse, urllib.request
+from datetime import datetime, timedelta, timezone
+camera_id = "cam-001"
+base = "http://nginx:8080/internal/data/v1"
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+query = urllib.parse.urlencode({"camera_id": camera_id, "limit": 200,
+    "from": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()})
+for path in (f"/events?{query}", f"/cameras/{camera_id}/objects"):
+    request = urllib.request.Request(base + path, headers={
+        "X-Internal-Token": os.environ["DATA_EXTERNAL_TOKEN"]
+    })
+    with opener.open(request, timeout=10) as response:
+        print(path, json.dumps(json.load(response), ensure_ascii=False, indent=2))
+'@ | docker compose --env-file server/.env -f server/compose.yml exec -T data python -
+```
+
+이벤트의 `items`에서 등장·사라짐·세션·이미지 경로와 `metadata.identity`/`metadata.analysis` 결과를 확인하고, 좌표 응답에서 bbox·로컬/전역 ID를 확인한다. 고유 시험 시각과 비교하여 이전 실행의 이벤트를 새 구현 결과로 혼동하지 않는다.
+
+기존 회귀 검사는 다음과 같다. 새 언어·새 이미지의 통과를 대신하지 않으므로 **교체 컨테이너를 실제 실행하여 Data와 주고받는 검사를 추가**한다.
+
+```powershell
+docker compose -f server/compose.test.yml build tests
+docker compose -f server/compose.test.yml run --rm tests python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/preprocessing/tests tests/automated/test_object_processing.py tests/automated/test_person_identifiers.py -q
+```
+
+이 테스트 Compose는 단독 구성으로, 운영 Compose와 합치지 않는다.
+
+이번 구현의 로컬 검증은 합성 JPEG의 실제 특징 계산, YOLO/ByteTrack 어댑터의 모델 대역, ONNX 입력·출력 대역, RTSP/HTTP 장애와 이벤트 대기열·Data gallery 계약에 대한 자동 검사다. 실제 YOLO/ONNX 모델 파일이나 Docker·실제 RTSP 카메라를 사용한 정확도·지연·실기동은 검증하지 않았다. 모델 대역 테스트의 성공을 실제 모델 인수로 제시하지 않는다.
+
+실장비 재현 시 검증한 사람 클래스 0의 YOLO 가중치를 `MODELS_DIR`에 두고 `MODEL_FILE`을 맞춘다. ONNX를 사용할 경우 6절 전처리에 맞는 모델의 해시를 기록한다. 개발 Compose 기동 후 같은 사람·다른 옷의 사람·비슷한 옷의 다른 사람을 포함한 시험 영상으로 crop·시각·로컬 추적·전역 ID·`match` 결정을 함께 수집한다. 시간차 1,800초, 같은 카메라의 동시 인물, 카메라 재연결과 Data 재시작을 나누어 확인하며 오연결·분리율과 처리시간을 별도로 기록한다.
+
+### 선택: 기존 Python 실행기를 재사용할 때만
+
+전체 컨테이너를 새로 구현한다면 이 항목은 필요 없다.
+
+- `DETECTION_PLUGIN=모듈:팩토리`: 팩토리 `(model_path: Path, confidence: float, device: str)`가 카메라마다 `reset()`·`process(frame)` 객체를 만든다. frame은 [DetectionFrame](../server/services/preprocessing/processors/detection/contracts.py)이며 `camera_id`, 세션, 시간대 있는 `datetime`, `uint8 H×W×3 BGR` 이미지 속성을 가진다. 입력을 수정하지 않고 `DetectionResult` 또는 `{"schema_version":1,"objects":[...]}`를 반환한다. objects는 5절의 3개 필드이며 최대 100개를 **반환 전에** 제한한다. 검증이 좌표 자르기보다 먼저다.
+- `IDENTITY_PLUGIN=모듈:팩토리`: 인자 없는 팩토리가 `process(job, crop_path: Path)` 객체를 만든다. job은 6절의 작업 dict이며 결과는 **lease_id를 제외한** 완료 dict다. 실행기가 lease를 붙인다.
+
+## 8. 인수와 이 문서의 삭제 조건
+
+| 확인 | 통과 기준 |
+|---|---|
+| 등장·사라짐 | 등장 1회, 계속 보일 때 중복 없음, 대기 후 사라짐 1회. 같은 ID·세션 |
+| 파일·좌표 | 크롭·박스·원본이 같은 프레임. UID 권한 정상. 빈 배열·3초 초과 좌표 제거 확인 |
+| 재접속·격리 | 단절/복구 각 1회와 새 세션. 다른 카메라·identity·상태 서버 계속 응답 |
+| Data 장애 | 영속 큐·재전송의 동일 source ID, 중복 작업·푸시 방지, 포화 시 생성 중단과 종료 손실 상태 확인 |
+| identity 연결 | 실제 특징→Data gallery→이벤트·좌표 ID 반영. 모호함·동시 인물 제외·재시작·공개 응답의 벡터 제외 확인 |
+| 검증·권한 | 토큰 교차 사용 403, 잘못된 경로·박스 422, 기존 전역 ID 변경 409 |
+| 임대·실패 | 중복 완료 `accepted:false`, 중단 후 새 lease, 늦은 결과 거부. 시간 초과·누락 크롭 구분 |
+| 미설정 호환 | 명시한 BlackBox는 `unconfigured`·전역 ID 없음. 기본 구현으로 교체 후 requeue와 완료 확인 |
+| 실제 성능 | 장비·모델·동시 카메라 수·영상 FPS·실제 감지 FPS·지연·정확도 측정 조건과 결과 기록 |
+
+영상 송출 30fps와 기본 감지 5fps는 서로 다른 설정이며, 4대 제한도 처리 성능 실측값이 아니다. 시험용 고정 ID는 연결 검증에만 사용한다.
+
+인수 전에 새 `server/services/preprocessing/README.md`에 **실제 빌드·기동·상태 확인 명령, env·마운트·UID, 모델 준비·제약, 실제 입출력·실패 처리, 테스트 명령·결과와 실장비 검증 범위**를 남긴다. 새 구현 테스트와 영향받은 기존 회귀 검사가 통과하고 담당자의 교체 인수가 끝난 뒤 이 SRS를 삭제한다. 삭제 시 문서 색인·상호 링크·패키징 포함 목록도 함께 정리한다.
+
+구현 대조용 원문: [Compose](../server/compose.yml), [감지 실행기](../server/services/preprocessing/app/pipeline.py), [HTTP 객체 형식](../lib/ai_cctv_core/contracts/objects.py), [이벤트 API](../server/services/data/app/api/events.py), [작업 저장·임대](../server/services/data/app/database/repositories/objects.py). 별도 SRS나 구조 문서를 먼저 읽을 필요는 없다.

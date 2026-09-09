@@ -4,12 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';
 import 'protected_video.dart';
 
+/// 카메라별 Edge 연결·전원·저장 상태를 조회하고 구독이 끝나면 캐시를 해제한다.
 final cameraStatusProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, String>(
       (ref, id) => ref
           .watch(apiClientProvider)
           .request('GET', '/api/v1/cameras/${Uri.encodeComponent(id)}/status'),
     );
+/// 서버가 확인한 현재 영상 품질과 이 카메라에서 지원하는 품질 목록을 조회한다.
 final videoProfileProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, String>(
       (ref, id) => ref
@@ -20,6 +22,7 @@ final videoProfileProvider = FutureProvider.autoDispose
           ),
     );
 
+/// 한 카메라의 실시간 재생과 운영 상태를 표시하고 관리자의 품질 변경을 요청한다.
 class CameraScreen extends ConsumerStatefulWidget {
   const CameraScreen({super.key, required this.cameraId});
   final String cameraId;
@@ -29,6 +32,7 @@ class CameraScreen extends ConsumerStatefulWidget {
 
 class _CameraScreenState extends ConsumerState<CameraScreen> {
   bool busy = false;
+  /// 품질 변경이 끝날 때까지 선택 버튼을 잠그고 완료 후 확인된 상태를 다시 조회한다.
   Future<void> changeProfile(String profile) async {
     setState(() => busy = true);
     try {

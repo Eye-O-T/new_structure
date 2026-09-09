@@ -12,6 +12,7 @@ from .database.repositories import DataRepository
 LOGGER = logging.getLogger("ai_cctv.data")
 
 
+# 스키마와 중단 작업을 복원하고 최초 계정·카메라 및 설정 파일의 Edge 연결 정보를 반영한다.
 def initialize_runtime(repository: DataRepository, settings: Settings) -> None:
     settings.prepare_directories()
 

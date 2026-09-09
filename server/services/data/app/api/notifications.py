@@ -20,6 +20,7 @@ from ..schemas import (
 router = APIRouter()
 
 
+# 저장소의 세션 소유권·유효성 실패를 단말 등록 거절로 변환한다.
 @router.put("/mobile-devices")
 def put_mobile_device(payload: MobileDevicePut, repository: Repo) -> dict[str, Any]:
     try:
@@ -36,11 +37,13 @@ def delete_mobile_device(
     return Response(status_code=204)
 
 
+# 발송할 항목이 없으면 delivery를 null로 반환하여 작업자가 대기할 수 있게 한다.
 @router.post("/push-deliveries/claim")
 def claim_push_delivery(repository: Repo) -> dict[str, Any]:
     return {"delivery": repository.claim_push()}
 
 
+# 임대 ID를 포함한 완료 보고를 전달하고 오래된 보고의 거절 여부도 반환한다.
 @router.post("/push-deliveries/{delivery_id}/complete")
 def complete_push_delivery(
     delivery_id: int, payload: PushCompletion, repository: Repo

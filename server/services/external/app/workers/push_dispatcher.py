@@ -21,6 +21,7 @@ class PushDispatcher:
         self.data = data_client
         self.sender = sender or FirebaseSender(settings)
 
+    # 작업 하나를 임대받아 발송하고 결과를 Data에 기록하며 빈 대기열은 False로 알린다.
     async def dispatch_once(self) -> bool:
         delivery = await self.data.claim_push()
         if delivery is None:
@@ -37,6 +38,7 @@ class PushDispatcher:
             await self.data.complete_push(delivery, "sent")
         return True
 
+    # 작업이 있으면 빠르게 다음 항목을 처리하고 실패·빈 대기열에는 설정 간격을 적용한다.
     async def run(self) -> None:
         try:
             while True:

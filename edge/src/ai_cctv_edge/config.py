@@ -14,6 +14,7 @@ CAMERA_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 VideoProfileName = Literal["hd", "fhd"]
 
 
+# 해상도·FPS·비트레이트를 함께 고정한 HD/FHD 품질 단위다.
 @dataclass(frozen=True)
 class VideoProfile:
     name: VideoProfileName
@@ -40,6 +41,7 @@ class VideoConfig:
     profile: VideoProfileName = "hd"
     supported_profiles: tuple[VideoProfileName, ...] = ("hd", "fhd")
 
+    # 프로필의 표준 영상 값을 사용하되 인코더와 장치별 허용 프로필은 호출자가 지정한다.
     @classmethod
     def from_profile(
         cls,
@@ -62,6 +64,7 @@ class VideoConfig:
             supported_profiles=supported_profiles,
         )
 
+    # 현재 인코더와 지원 목록을 유지한 새 불변 영상 설정을 만든다.
     def with_profile(self, profile: str) -> "VideoConfig":
         return self.from_profile(
             profile,
@@ -70,6 +73,7 @@ class VideoConfig:
         )
 
 
+# 중앙 송출 또는 Edge 수신 모드의 접속 정보이며 비밀번호는 파일 경로로만 보관한다.
 @dataclass(frozen=True)
 class RtspConfig:
     mode: Literal["central_pull", "central_publish"] = "central_publish"
@@ -81,6 +85,7 @@ class RtspConfig:
     mediamtx_binary: Path = Path("/usr/lib/ai-cctv-edge/mediamtx")
 
 
+# 중앙 연결 상태와 관계없이 유지할 로컬 TS 녹화의 분할·보존 한도다.
 @dataclass(frozen=True)
 class BackupConfig:
     root: Path = Path("/var/lib/ai-cctv-edge/recordings")
@@ -126,6 +131,7 @@ class EdgeConfig:
     control: ControlConfig = ControlConfig()
     monitoring: MonitoringConfig = MonitoringConfig()
 
+    # TOML의 누락 가능한 항목을 기본값으로 채우고 구형 영상 설정까지 해석한 뒤 검증한다.
     @classmethod
     def load(cls, path: str | Path) -> "EdgeConfig":
         with Path(path).open("rb") as handle:
@@ -235,6 +241,7 @@ class EdgeConfig:
         config.validate()
         return config
 
+    # 설정 충돌과 선택 프로필·배터리 임계값·보존 한도의 계약을 검사한다.
     def validate(self) -> None:
         if self.schema_version != 1:
             raise ValueError("unsupported edge config schema_version")
@@ -315,6 +322,7 @@ class EdgeConfig:
     def stream_path(self) -> str:
         return self.camera_id
 
+    # 모드에 맞는 표시용 스트림 주소를 만든다. pull 주소는 실제 Edge 주소로 치환해야 한다.
     @property
     def source_url(self) -> str:
         if self.rtsp.mode == "central_pull":
@@ -324,11 +332,13 @@ class EdgeConfig:
         )
 
 
+# 경로의 역슬래시와 따옴표가 TOML 문자열 문법으로 해석되지 않도록 이스케이프한다.
 def _quote(value: str | Path) -> str:
     escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
 
+# 검증된 설정 객체를 비밀값 대신 비밀 파일 경로를 포함한 TOML로 직렬화한다.
 def render_toml(config: EdgeConfig) -> str:
     return "\n".join(
         [

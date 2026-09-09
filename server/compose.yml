@@ -251,6 +251,8 @@ services:
       context: ..
       dockerfile: server/services/preprocessing/Dockerfile
     image: ai-cctv-preprocessing:${AI_CCTV_VERSION:-0.3.0}
+    # 작업자 종료 상한(최대 60초)과 자식 모델 정리 시간을 보장한다.
+    stop_grace_period: 75s
     user: ${AI_CCTV_UID:-1000}:${AI_CCTV_GID:-1000}
     init: true
     restart: unless-stopped
@@ -258,7 +260,15 @@ services:
       - ${PREPROCESSING_SECRETS_FILE:-./secrets/preprocessing.env}
     environment:
       DETECTION_PLUGIN: ${DETECTION_PLUGIN:-server.services.preprocessing.processors.detection.yolo:YoloTracker}
-      IDENTITY_PLUGIN: ${IDENTITY_PLUGIN:-server.services.preprocessing.processors.identity:IdentityBlackBox}
+      IDENTITY_PLUGIN: ${IDENTITY_PLUGIN:-server.services.preprocessing.processors.identity:LocalAppearanceIdentity}
+      IDENTITY_MODEL_PATH: ${IDENTITY_MODEL_PATH:-}
+      OBJECT_MODEL_TIMEOUT_SECONDS: ${OBJECT_MODEL_TIMEOUT_SECONDS:-120}
+      OBJECT_STARTUP_TIMEOUT_SECONDS: ${OBJECT_STARTUP_TIMEOUT_SECONDS:-30}
+      RTSP_TIMEOUT_SECONDS: ${RTSP_TIMEOUT_SECONDS:-5}
+      MODEL_RETRY_SECONDS: ${MODEL_RETRY_SECONDS:-30}
+      DETECTION_SHUTDOWN_SECONDS: ${DETECTION_SHUTDOWN_SECONDS:-15}
+      EVENT_OUTBOX_MAX_PENDING: ${EVENT_OUTBOX_MAX_PENDING:-10000}
+      EVENT_OUTBOX_MAX_BYTES: ${EVENT_OUTBOX_MAX_BYTES:-67108864}
       AI_CCTV_CONFIG_FILE: /app/config/config.yaml
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
       MEDIAMTX_RTSP_BASE_URL: rtsp://mediamtx:8554
@@ -297,7 +307,7 @@ services:
     logging: *service-logging
 
 
-  # 추가 분석은 별도 개발자가 모델을 넣는 영역이다. 모델·스냅샷은 읽기 전용이다.
+  # 기본 CPU 분석을 제공하며 플러그인으로 교체할 수 있다. 모델·스냅샷은 읽기 전용이다.
   analysis:
     build:
       context: ..
@@ -309,7 +319,9 @@ services:
     env_file:
       - ${ANALYSIS_SECRETS_FILE:-./secrets/analysis.env}
     environment:
-      ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors:MetadataBlackBox}
+      ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors:LocalAppearanceAnalyzer}
+      OBJECT_MODEL_TIMEOUT_SECONDS: ${OBJECT_MODEL_TIMEOUT_SECONDS:-120}
+      OBJECT_STARTUP_TIMEOUT_SECONDS: ${OBJECT_STARTUP_TIMEOUT_SECONDS:-30}
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
       SNAPSHOTS_ROOT: /snapshots
       TZ: UTC

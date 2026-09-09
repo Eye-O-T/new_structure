@@ -1,10 +1,15 @@
-# 다른 개발자가 구현할 인물 재식별(Re-ID)의 연결 지점이다.
-# 재식별은 여러 카메라에서 관측된 사람이 같은 사람인지 판단해 global_person_id를 정한다.
-# 현재는 미구현 상태만 반환한다. 임의 ID를 발급해 식별이 완료된 것처럼 보이게 하지 않는다.
+# 기본 외관 특징 추출기와 기존 배포의 미설정 플러그인을 공통 경로에서 제공한다.
+# 특징 비교·지속적인 global_person_id 연결은 Data가 맡고 여기서는 이미지만 읽는다.
 
 from pathlib import Path
 
+from .appearance import LocalAppearanceIdentity
 
+
+__all__ = ["IdentityBlackBox", "LocalAppearanceIdentity"]
+
+
+# 식별 모델 연결 전에도 작업 프로토콜을 검증할 수 있도록 미구현 결과를 반환하는 기본 구현이다.
 class IdentityBlackBox:
     def process(self, job: dict, crop_path: Path) -> dict:
         # job에는 관측 정보가, crop_path에는 검증된 사람 이미지 경로가 전달된다.

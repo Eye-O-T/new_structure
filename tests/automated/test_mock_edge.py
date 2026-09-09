@@ -1,3 +1,4 @@
+# 모의 Edge가 실제 설치·제어·이벤트·복구 프로토콜을 따르는지 미디어 프로세스 없이 확인한다.
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +9,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from configurator.edge_discovery import parse_advertisement
+from server.setup.install_helper.edge_discovery import parse_advertisement
 from tests.mock_edge.app import MockEdgeService, create_control_app, create_recovery_app
 from tests.mock_edge.protocol import build_advertisement
 from tests.mock_edge.runtime import (
@@ -23,6 +24,7 @@ PAIRING_KEY = "mock-edge-shared-key-0123456789abcdef"
 AUTH = {"Authorization": f"Bearer {PAIRING_KEY}"}
 
 
+# FFmpeg를 실행하지 않고 송출·녹화·품질 변경의 상태 전환만 재현한다.
 class FakeMediaEngine:
     def __init__(self) -> None:
         self.configured = False
@@ -66,6 +68,7 @@ class FakeMediaEngine:
         self.publisher_running = self.started and self.configured
 
 
+# 테스트마다 독립 상태·녹화 디렉터리를 갖는 서비스와 관찰 가능한 미디어 대역을 만든다.
 def make_service(tmp_path: Path) -> tuple[MockEdgeService, FakeMediaEngine]:
     media = FakeMediaEngine()
     video = tmp_path / "input.mp4"
@@ -82,6 +85,7 @@ def make_service(tmp_path: Path) -> tuple[MockEdgeService, FakeMediaEngine]:
     return service, media
 
 
+# 실제 설치 도우미가 전달하는 중앙 송출 정보와 일회성 자격 증명의 형태를 재현한다.
 def pairing_body() -> dict[str, object]:
     return {
         "device_id": "mock-edge-001",
@@ -96,7 +100,8 @@ def pairing_body() -> dict[str, object]:
     }
 
 
-def test_discovery_packet_is_accepted_by_configurator() -> None:
+# 모의 Edge의 서명된 광고를 운영 설치 도우미 파서가 그대로 수용해야 한다.
+def test_discovery_packet_is_accepted_by_install_helper() -> None:
     payload = build_advertisement(
         device_id="mock-edge-001",
         camera_id="cam-001",
@@ -119,6 +124,7 @@ def test_discovery_packet_is_accepted_by_configurator() -> None:
     assert edge.supported_profiles == ("hd", "fhd")
 
 
+# 반복 송출·분할 녹화 명령과 특수문자 자격 증명의 URL 인코딩을 확인한다.
 def test_loop_sender_style_commands_publish_and_record(tmp_path: Path) -> None:
     video = tmp_path / "source file.mp4"
     target = CentralTarget(
@@ -151,6 +157,7 @@ def test_loop_sender_style_commands_publish_and_record(tmp_path: Path) -> None:
     assert pattern.parent.as_posix().endswith("cam-001/2026/08/24")
 
 
+# 페어링부터 인증된 상태 조회·품질 변경·장애 이벤트까지 같은 모의 서비스에서 실행한다.
 def test_pairing_management_profile_and_event_contract(tmp_path: Path) -> None:
     service, media = make_service(tmp_path)
     client = TestClient(create_control_app(service))
@@ -247,6 +254,7 @@ def test_pairing_management_profile_and_event_contract(tmp_path: Path) -> None:
     assert any(item["event_type"] == "storage_critical" for item in events)
 
 
+# 완료된 녹화의 manifest·해시·다운로드를 확인하고 쓰기 중인 마지막 조각은 제외한다.
 def test_recovery_manifest_hash_download_and_open_segment_guard(tmp_path: Path) -> None:
     service, media = make_service(tmp_path)
     camera_root = tmp_path / "recordings" / "cam-001" / "2026" / "08" / "24"
@@ -292,6 +300,7 @@ def test_recovery_manifest_hash_download_and_open_segment_guard(tmp_path: Path) 
     assert len(manifest["items"]) == 2
 
 
+# 재생성한 서비스가 기존 연결 설정을 읽어 재페어링 없이 송출을 재개해야 한다.
 def test_stored_configuration_resumes_without_repairing(tmp_path: Path) -> None:
     service, _media = make_service(tmp_path)
     client = TestClient(create_control_app(service))

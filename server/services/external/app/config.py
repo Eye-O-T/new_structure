@@ -17,6 +17,7 @@ class PublishCredential:
     password: str
 
 
+# 명시한 참·거짓 표현만 허용하여 잘못된 환경값이 조용히 기본값으로 바뀌지 않게 한다.
 def _read_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -51,6 +52,7 @@ def _read_positive_float(name: str, default: float) -> float:
     return value
 
 
+# 초 단위 설정을 우선하고 구형 분·일 단위 환경값만 지정되면 초로 환산한다.
 def _read_ttl_seconds(
     seconds_name: str,
     legacy_name: str,
@@ -64,6 +66,7 @@ def _read_ttl_seconds(
     return default_seconds
 
 
+# 카메라 ID별 초기 송출 사용자명·비밀번호 JSON을 검증하여 불완전한 등록을 거절한다.
 def _read_publish_credentials() -> dict[str, PublishCredential]:
     raw = os.getenv("MEDIA_PUBLISH_CREDENTIALS_JSON", "{}")
     try:
@@ -94,6 +97,7 @@ def _read_publish_credentials() -> dict[str, PublishCredential]:
     return credentials
 
 
+# 서비스 주소에 인증값이 포함되지 않게 검사하고 이후 경로 결합을 위한 끝 슬래시를 제거한다.
 def _validate_http_url(name: str, value: str) -> str:
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -144,6 +148,7 @@ class Settings:
         default_factory=dict
     )
 
+    # 직접 생성한 설정에도 인증·쿠키·공개 주소·임계값·제어 제한 시간의 운영 조건을 적용한다.
     def __post_init__(self) -> None:
         if self.push_enabled and (
             not self.firebase_project_id or not self.firebase_credentials_file
@@ -209,6 +214,7 @@ class Settings:
                 "Edge lock, apply and rollback window"
             )
 
+    # 환경값과 호환용 이전 변수명을 해석한 뒤 Settings의 공통 검증을 통과시킨다.
     @classmethod
     def from_env(cls) -> "Settings":
         data_base_url = os.getenv(

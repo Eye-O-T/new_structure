@@ -19,6 +19,7 @@ from .workers.maintenance import maintain_storage
 from .workers.recovery import recover_outages
 
 
+# 설정·저장소를 주입할 수 있는 앱 팩터리로 운영 실행과 테스트의 구성 경계를 제공한다.
 def create_app(
     settings: Settings | None = None, repository: DataRepository | None = None
 ) -> FastAPI:
@@ -30,6 +31,7 @@ def create_app(
         )
     )
 
+    # 요청 수신 전에 초기화와 파일 대조를 마치고 종료 시 백그라운드 작업 취소를 기다린다.
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         initialize_runtime(data_repository, runtime_settings)

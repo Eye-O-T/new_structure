@@ -1,3 +1,4 @@
+// 모의 중앙 API로 로그인부터 카메라 목록·히스토리·이벤트 상세까지 실제 화면 흐름을 검증한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +12,7 @@ void main() {
   testWidgets('login to central API, browse history, open event details', (
     tester,
   ) async {
+    // 히스토리의 초기 선택인 오늘에 속하는 동일 이벤트를 목록과 상세 응답에서 재사용한다.
     final event = {
       'id': 42,
       'camera_id': 'cam-001',
@@ -43,6 +45,7 @@ void main() {
       }),
     );
     await api.restore();
+    // 공용 API만 교체해 실제 라우터와 화면, 조회 provider가 함께 동작하도록 한다.
     final container = ProviderContainer(
       overrides: [apiClientProvider.overrideWithValue(api)],
     );

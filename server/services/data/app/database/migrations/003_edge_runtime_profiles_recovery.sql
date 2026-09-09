@@ -1,3 +1,4 @@
+-- Edge 연결·인증 정보와 장치 관측값을 카메라의 기본 등록 정보에서 분리한다.
 CREATE TABLE edge_devices (
     edge_device_id TEXT PRIMARY KEY,
     management_url TEXT NOT NULL UNIQUE,
@@ -22,6 +23,7 @@ CREATE TABLE edge_runtime_status (
     updated_at TEXT NOT NULL
 );
 
+-- 카메라 입력·중앙 연결·일지 커서는 카메라별 관측 상태로 보관한다.
 CREATE TABLE camera_runtime_status (
     camera_id TEXT PRIMARY KEY REFERENCES cameras(camera_id)
         ON UPDATE CASCADE ON DELETE CASCADE,
@@ -37,6 +39,7 @@ CREATE TABLE camera_runtime_status (
     updated_at TEXT NOT NULL
 );
 
+-- 요청 프로필과 실제 적용 프로필을 구분하여 제어 실패 후에도 두 상태를 비교할 수 있다.
 CREATE TABLE camera_video_profiles (
     camera_id TEXT PRIMARY KEY REFERENCES cameras(camera_id)
         ON UPDATE CASCADE ON DELETE CASCADE,
@@ -51,6 +54,7 @@ CREATE TABLE camera_video_profiles (
     updated_at TEXT NOT NULL
 );
 
+-- 복구 구간의 revision으로 구간 확장 뒤 도착한 이전 작업의 완료 보고를 구분한다.
 CREATE TABLE recovery_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     camera_id TEXT NOT NULL REFERENCES cameras(camera_id)
@@ -75,9 +79,11 @@ ON recovery_jobs(status, next_retry_at, id);
 
 ALTER TABLE events ADD COLUMN edge_event_id TEXT;
 
+-- Edge ID가 있는 이벤트에만 중복 제약을 적용하여 재수집을 멱등하게 만든다.
 CREATE UNIQUE INDEX idx_events_edge_event_id
 ON events(camera_id, edge_event_id) WHERE edge_event_id IS NOT NULL;
 
+-- 기존 카메라에도 새 상태·프로필 행을 채워 마이그레이션 직후 조회가 가능하게 한다.
 INSERT INTO camera_runtime_status(camera_id, updated_at)
 SELECT camera_id, updated_at FROM cameras;
 

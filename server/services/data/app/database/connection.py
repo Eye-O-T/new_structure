@@ -21,6 +21,7 @@ class Database:
         default_migrations = Path(__file__).parent / "migrations"
         self.migrations_dir = Path(migrations_dir or default_migrations)
 
+    # 각 연결에 외래 키 검사와 잠금 대기를 적용하며 트랜잭션 시작은 호출자가 명시한다.
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
             self.path,
@@ -32,6 +33,7 @@ class Database:
         connection.execute(f"PRAGMA busy_timeout = {self.busy_timeout_ms}")
         return connection
 
+    # 읽기나 백업 중 예외가 발생해도 SQLite 연결을 닫는 자원 수명 경계이다.
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
         connection = self.connect()
@@ -40,6 +42,7 @@ class Database:
         finally:
             connection.close()
 
+    # 조회 후 쓰기를 하나의 배타적 쓰기 트랜잭션으로 묶어 경쟁하는 갱신을 직렬화한다.
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         with self.connection() as connection:
@@ -54,6 +57,7 @@ class Database:
             else:
                 connection.commit()
 
+    # 미적용 SQL을 파일명 순으로 실행하고 스키마 변경과 적용 이력을 함께 확정한다.
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connection() as connection:
@@ -88,6 +92,7 @@ class Database:
                     + "COMMIT;"
                 )
 
+    # 실제 쿼리를 수행하여 연결 가능 여부와 외래 키·WAL 설정을 보고한다.
     def health(self) -> dict[str, object]:
         with self.connection() as connection:
             connection.execute("SELECT 1").fetchone()
@@ -100,6 +105,7 @@ class Database:
             "journal_mode": journal_mode,
         }
 
+    # 실행 중인 원본 연결에서 SQLite 백업 API로 일관된 사본을 작성한다.
     def backup(self, destination: str | Path) -> Path:
         target = Path(destination)
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,7 @@ from ..schemas import (
 router = APIRouter()
 
 
+# 교체할 토큰의 부재와 이미 소모된 토큰의 충돌을 구분해 갱신 실패를 전달한다.
 @router.post("/tokens/refresh", status_code=status.HTTP_201_CREATED)
 def issue_refresh_token(
     payload: RefreshTokenCreate, repository: Repo
@@ -51,6 +52,7 @@ def delete_refresh_token(jti: str, repository: Repo) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# 폐기 토큰 만료 시각을 DB 비교에 사용하는 UTC 형식으로 정규화한다.
 @router.put("/tokens/revoked/{jti}")
 def put_revoked_token(
     jti: str, payload: RevokedTokenPut, repository: Repo

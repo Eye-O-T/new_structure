@@ -1,5 +1,6 @@
 // 이벤트 API 응답을 화면에서 쓰는 자료형으로 변환한다. 시각은 UTC로 보관하고 표시할 때만 바꾼다.
 // globalPersonId와 metadata는 서버 작업 결과이며 미설정인 재식별·분석 결과를 앱이 채우지 않는다.
+/// 하나의 서버 이벤트와 선택적으로 연결된 인물·녹화·분석 정보를 표현한다.
 class Event {
   final String id;
   final String cameraId;
@@ -23,6 +24,7 @@ class Event {
     this.metadata = const {},
   });
 
+  /// 단일·복수 녹화 연결 필드를 함께 지원하고 중복 ID를 제거해 화면 모델을 만든다.
   factory Event.fromJson(Map<String, dynamic> json) {
     final ids = <String>{
       ...((json['recording_segment_ids'] as List?) ?? []).map(
@@ -44,9 +46,11 @@ class Event {
     );
   }
 
+  /// 앱에 아직 등록되지 않은 이벤트도 숨기지 않고 서버의 원래 종류를 표시한다.
   String get title => eventLabels[eventType] ?? eventType;
 }
 
+/// 서버 이벤트 종류를 목록과 상세 화면에서 공통으로 쓰는 한글 이름에 대응시킨다.
 const eventLabels = {
   'person_detected': '사람 감지',
   'person_appeared': '사람 등장',

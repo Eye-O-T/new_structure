@@ -6,6 +6,7 @@ import 'event_card.dart';
 import 'event_history_view_model.dart';
 import 'history_date_selector.dart';
 
+/// 날짜·카메라 필터와 조회 상태를 묶어 보여주고 수동 재조회 동작을 제공한다.
 class HistoryScreen extends ConsumerWidget {
   const HistoryScreen({super.key});
 
@@ -27,6 +28,7 @@ class HistoryScreen extends ConsumerWidget {
             ),
             data: (rows) {
               final ids = rows.map((c) => c['camera_id'].toString()).toSet();
+              // 접근 목록에서 빠진 카메라를 선택값으로 남기지 않도록 조회 로직과 같이 보정한다.
               final effective = ids.contains(selected)
                   ? selected
                   : admin
@@ -86,6 +88,7 @@ class HistoryScreen extends ConsumerWidget {
                 ),
               ),
               data: (rows) => RefreshIndicator(
+                // 다시 조회한 Future가 끝날 때까지 당겨서 새로고침 표시를 유지한다.
                 onRefresh: () async {
                   ref.invalidate(eventsProvider);
                   await ref.read(eventsProvider.future);

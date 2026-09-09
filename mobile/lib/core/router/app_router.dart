@@ -12,6 +12,7 @@ import 'package:app/features/live/presentation/protected_video.dart';
 import 'package:app/features/settings/presentation/settings_screen.dart';
 import 'home_page.dart';
 
+/// 세션 복원·로그인 상태를 관찰하면서 공통 탭 화면과 독립 상세 화면을 구성한다.
 final appRouterProvider = Provider<GoRouter>((ref) {
   final api = ref.watch(apiClientProvider);
   final router = GoRouter(
@@ -32,6 +33,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             const Scaffold(body: Center(child: CircularProgressIndicator())),
       ),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
+      // 세 탭에만 하단 메뉴를 유지하고 이벤트·카메라·녹화 상세는 별도 화면으로 연다.
       ShellRoute(
         builder: (_, _, child) => HomePage(child: child),
         routes: [

@@ -20,6 +20,7 @@ def health_live() -> dict[str, str]:
     return {"status": "alive"}
 
 
+# DB 쿼리와 영속 폴더 접근을 모두 확인해야 준비 완료로 응답한다.
 @router.get("/health/ready")
 def health_ready(repository: Repo, settings: RuntimeSettings) -> dict[str, Any]:
     try:

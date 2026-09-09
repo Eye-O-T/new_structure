@@ -1,3 +1,4 @@
+// 푸시 서비스 연결 없이 전경 알림 중복 제거와 로그인 세션별 탭 허용 범위를 검증한다.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:app/core/network/api_client.dart';
@@ -18,6 +19,7 @@ void main() {
         ),
       );
       await api.login('https://cctv.test', 'admin', 'password');
+      // false는 조회 갱신, true는 상세 화면 이동이므로 한 이벤트의 두 의도를 구분한다.
       final received = <bool>[];
       final controller = NotificationController(
         api,
@@ -40,6 +42,7 @@ void main() {
       controller.openEvent(data);
       controller.openEvent({...data, 'user_id': '2'});
       expect(received, [false, true]);
+      // 같은 계정으로 재로그인해도 이전 로그인 기기 ID의 알림은 다시 열리지 않아야 한다.
       await api.logout();
       await api.login('https://cctv.test', 'admin', 'password');
       controller.openEvent(data);

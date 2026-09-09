@@ -54,6 +54,7 @@ def get_user(user_id: int, repository: Repo) -> dict[str, Any]:
     return user
 
 
+# 필드 생략은 허용하되 명시한 null은 거절하여 기존 계정 값이 지워지지 않게 한다.
 @router.patch("/users/{user_id}")
 def update_user(user_id: int, payload: UserUpdate, repository: Repo) -> dict[str, Any]:
     values = payload.model_dump(mode="json", exclude_unset=True)
@@ -72,6 +73,7 @@ def delete_user(user_id: int, repository: Repo) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# 사용자와 카메라가 모두 존재하는 경우에만 권한을 부여한다.
 @router.put("/users/{user_id}/camera-permissions/{camera_id}")
 def grant_camera_permission(
     user_id: int, camera_id: str, repository: Repo
@@ -104,6 +106,7 @@ def list_camera_permissions(user_id: int, repository: Repo) -> dict[str, Any]:
     return {"items": repository.list_user_cameras(user_id)}
 
 
+# 전체 교체의 검증 실패를 사용자 또는 카메라 미존재 오류로 구분한다.
 @router.put("/users/{user_id}/camera-permissions")
 def replace_camera_permissions(
     user_id: int,

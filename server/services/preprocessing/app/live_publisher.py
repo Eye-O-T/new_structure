@@ -5,6 +5,7 @@ import queue
 import threading
 
 
+# 최신 좌표 한 건만 보관하는 비동기 전송기로 탐지 스레드의 네트워크 대기를 줄인다.
 class LivePublisher:
     def __init__(self, data_client, camera_id):
         self.data = data_client
@@ -15,7 +16,10 @@ class LivePublisher:
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
+    # 생산자를 기다리게 하지 않고 전송 대기 중인 좌표를 최신 관측으로 교체한다.
     def submit(self, payload):
+        if self.stopped.is_set():
+            return
         try:
             self.pending.put_nowait(payload)
         except queue.Full:
@@ -35,11 +39,14 @@ class LivePublisher:
                 payload = self.pending.get(timeout=0.5)
             except queue.Empty:
                 continue
+            if self.stopped.is_set():
+                break
             try:
                 self.data.put_live_objects(self.camera_id, payload)
             except Exception:
                 pass  # 좌표는 일시적인 상태다. 소비자는 오래된 박스를 버리고 다음 갱신을 기다린다.
 
+    # 종료를 요청하고 제한 시간만 기다린다. 남은 좌표를 모두 전송하는 보장은 하지 않는다.
     def close(self):
         self.stopped.set()
         self.thread.join(timeout=3)

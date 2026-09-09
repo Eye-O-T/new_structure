@@ -1,3 +1,4 @@
+// 실제 네트워크·보안 저장소 없이 인증 회전, 이벤트 계약, URL·알림 검증을 확인한다.
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +11,7 @@ import 'package:app/core/notifications/notification_payload.dart';
 import 'package:app/features/events/data/api_event_repository.dart';
 import 'package:app/features/events/domain/event.dart';
 
+/// 플랫폼 플러그인 없이 저장·삭제 결과를 직접 검사할 수 있는 메모리 저장소다.
 class MemoryStore implements SessionStore {
   final values = <String, String>{};
   @override
@@ -24,6 +26,7 @@ class MemoryStore implements SessionStore {
   }
 }
 
+/// 로그인·갱신 응답의 공통 fixture이며 토큰 값을 바꿔 회전 전후를 구분한다.
 Map<String, dynamic> session([
   String access = 'old',
   String refresh = 'refresh-old',
@@ -33,6 +36,7 @@ Map<String, dynamic> session([
   'expires_in': 900,
   'user': {'id': 1, 'username': 'admin', 'role': 'admin', 'is_active': true},
 };
+/// UTF-8 JSON 응답을 만들어 실제 API 응답 디코딩 경로를 테스트한다.
 http.Response json(Object value, [int status = 200]) => http.Response(
   jsonEncode(value),
   status,
@@ -40,6 +44,7 @@ http.Response json(Object value, [int status = 200]) => http.Response(
 );
 
 void main() {
+  // 인증 성공 후에는 비밀번호 저장 없이 HTTPS 요청에 Bearer 토큰을 붙여야 한다.
   test(
     'login stores session without password and requests use HTTPS Bearer',
     () async {
@@ -69,9 +74,11 @@ void main() {
     },
   );
 
+  // 두 요청이 같은 만료 토큰으로 실패해도 refresh 토큰 회전은 한 번만 수행해야 한다.
   test('concurrent 401 responses rotate the refresh token only once', () async {
     var refreshCount = 0;
     var oldRequests = 0;
+    // 두 요청이 모두 도착할 때까지 401 응답을 보류해 경쟁 상황을 의도적으로 만든다.
     final bothRequests = Completer<void>();
     final api = ApiClient(
       store: MemoryStore(),
@@ -103,6 +110,7 @@ void main() {
     expect(api.refreshToken, 'refresh-new');
   });
 
+  // 로그아웃 통신 실패는 재시도 가능하지만 refresh 자격 거부는 로그인 해제로 이어져야 한다.
   test(
     'failed refresh clears session; failed logout preserves it for retry',
     () async {
@@ -138,6 +146,7 @@ void main() {
     },
   );
 
+  // 현지 날짜의 UTC 전송, 빈 페이지까지 조회, 알 수 없는 이벤트 종류의 보존을 확인한다.
   test('event contract paginates to empty and sends UTC bounds', () async {
     final offsets = <String>[];
     final api = ApiClient(
@@ -177,6 +186,7 @@ void main() {
     expect(events.single.metadata['custom'], 42);
   });
 
+  // 재생에 필요한 쿼리는 유지하면서 다른 origin과 URL 내 자격 증명은 거부해야 한다.
   test('media URLs preserve query and reject cross-origin credentials', () {
     final origin = ApiConfig.parseOrigin('https://cctv.test');
     expect(
@@ -200,6 +210,7 @@ void main() {
     );
   });
 
+  // 자정 근처 이벤트도 사용자의 현지 날짜에 속하고 수신 사용자·기기 검사를 유지해야 한다.
   test('notification identity and local day survive UTC midnight boundary', () {
     final localTime = DateTime(2026, 9, 6, 0, 30);
     final payload = NotificationPayload.parse({
@@ -218,6 +229,7 @@ void main() {
     );
   });
 
+  // 구·신규 녹화 필드를 함께 받아도 중복 링크를 만들지 않고 선택적 AI 필드를 허용한다.
   test(
     'recording links are deduplicated and optional AI fields are not required',
     () {

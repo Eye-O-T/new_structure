@@ -33,6 +33,7 @@ def _unauthorized(detail: str = "Authentication required") -> HTTPException:
     )
 
 
+# Bearer를 쿠키보다 우선하고 JWT 검증 뒤 폐기 여부·현재 계정 역할까지 다시 확인한다.
 async def get_current_principal(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer),
@@ -81,6 +82,7 @@ async def get_current_principal(
     )
 
 
+# 인증된 주체의 역할을 검사하여 관리자 전용 변경 API의 공통 경계로 사용한다.
 def require_admin(
     principal: Principal = Depends(get_current_principal),
 ) -> Principal:
@@ -91,6 +93,7 @@ def require_admin(
     return principal
 
 
+# 목록·페이지 및 문자열·객체 형식의 권한 응답을 카메라 ID 집합으로 통일한다.
 def _camera_ids_from_permissions(payload: Any) -> set[str]:
     if isinstance(payload, dict):
         items = payload.get("items", payload.get("camera_ids", []))
@@ -108,6 +111,7 @@ def _camera_ids_from_permissions(payload: Any) -> set[str]:
     return camera_ids
 
 
+# 일반 사용자의 현재 카메라 권한을 확인한 뒤 실제 카메라 자료를 조회한다.
 async def _ensure_camera_access(
     data: DataClient,
     principal: Principal,

@@ -54,12 +54,14 @@ class MediaMtxClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    # 네트워크 실패를 송출 제어 불가로 변환하고 HTTP 상태 해석은 개별 작업에 맡긴다.
     async def _request(self, method: str, path: str) -> httpx.Response:
         try:
             return await self._client.request(method, path)
         except httpx.RequestError as exc:
             raise MediaControlError("MediaMTX control API is unavailable.") from exc
 
+    # 활성 소스가 없으면 None을 반환하고 해제 가능한 RTSP 세션인지 확인한다.
     async def _publisher_session(self, camera_id: str) -> str | None:
         response = await self._request(
             "GET", f"v3/paths/get/{quote(camera_id, safe='')}"
@@ -95,6 +97,7 @@ class MediaMtxClient:
             )
         return session_id
 
+    # 조회 후 이미 종료된 세션은 실패로 보지 않고 실제 연결 해제 여부만 반환한다.
     async def _kick_publisher_session(self, session_id: str) -> bool:
         kicked = await self._request(
             "POST", f"v3/rtspsessions/kick/{quote(session_id, safe='')}"

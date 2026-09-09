@@ -13,6 +13,7 @@ class _AttemptState:
     blocked_until: float
 
 
+# 현재 프로세스의 접속 주소·계정별 실패 이력을 잠금으로 보호한다.
 class LoginBackoff:
     def __init__(self, base_seconds: int, max_seconds: int) -> None:
         self.base_seconds = base_seconds
@@ -20,6 +21,7 @@ class LoginBackoff:
         self._attempts: dict[str, _AttemptState] = {}
         self._lock = threading.Lock()
 
+    # 시스템 시각 변경에 영향받지 않는 단조 시계로 Retry-After의 남은 초를 올림 계산한다.
     def retry_after(self, key: str) -> int:
         now = time.monotonic()
         with self._lock:
@@ -28,6 +30,7 @@ class LoginBackoff:
                 return 0
             return max(1, math.ceil(state.blocked_until - now))
 
+    # 실패 횟수를 제한하면서 대기 시간을 두 배씩 늘리고 설정한 최대값에서 멈춘다.
     def record_failure(self, key: str) -> int:
         now = time.monotonic()
         with self._lock:
@@ -40,6 +43,7 @@ class LoginBackoff:
             )
             return delay
 
+    # 정상 로그인한 키의 누적 실패 이력을 제거한다.
     def clear(self, key: str) -> None:
         with self._lock:
             self._attempts.pop(key, None)

@@ -32,6 +32,7 @@ from .validation import _validate_resource_id
 router = APIRouter()
 
 
+# 관리자 목록에서도 비밀번호 해시 등 내부 필드를 제거한다.
 @router.get("/api/v1/admin/users", response_model=UserPageResponse)
 async def list_users(
     limit: int = Query(default=50, ge=1, le=100),
@@ -42,6 +43,7 @@ async def list_users(
     return _public_users(await data.list_users(limit=limit, offset=offset))
 
 
+# 비밀번호 원문은 이 경계에서 해시로 바꾸어 Data에는 저장 가능한 값만 보낸다.
 @router.post("/api/v1/admin/users", status_code=201, response_model=UserResponse)
 async def create_user(
     payload: UserCreate,
@@ -57,6 +59,7 @@ async def create_user(
     return _public_user(await data.create_user(body))
 
 
+# 미전송 필드는 유지하고 새 비밀번호가 있을 때만 해시를 생성하여 교체한다.
 @router.patch("/api/v1/admin/users/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: str,
@@ -73,6 +76,7 @@ async def update_user(
     return _public_user(await data.update_user(user_id, body))
 
 
+# 사용자 ID를 검증한 뒤 관리자가 현재 카메라 배정을 읽도록 한다.
 @router.get(
     "/api/v1/admin/users/{user_id}/camera-permissions",
     response_model=CameraPermissionListResponse,
@@ -85,6 +89,7 @@ async def get_user_permissions(
     return await data.get_camera_permissions(_validate_resource_id(user_id))
 
 
+# 카메라 ID를 검증·중복 제거한 전체 목록을 Data의 원자적 권한 교체에 전달한다.
 @router.put(
     "/api/v1/admin/users/{user_id}/camera-permissions",
     response_model=CameraPermissionListResponse,

@@ -17,6 +17,7 @@ from .state import default_state_root, utc_timestamp
 LOGGER = logging.getLogger("ai_cctv.edge.publisher")
 
 
+# 감독 프로세스가 이전 송출의 상태와 구분하도록 카메라·PID·갱신 시각을 함께 저장한다.
 def _write_status(camera_id: str, status: str, error: str | None = None) -> None:
     write_atomic(
         default_state_root() / "publisher-status.json",
@@ -35,6 +36,7 @@ def _write_status(camera_id: str, status: str, error: str | None = None) -> None
     )
 
 
+# 공유 메모리 입력을 인증된 중앙 RTSP로 전달하며 종료·오류를 감독 프로세스에 알린다.
 def publish(config_path: str | Path) -> int:
     config = EdgeConfig.load(config_path)
     if config.rtsp.mode != "central_publish":
@@ -83,6 +85,7 @@ def publish(config_path: str | Path) -> int:
     try:
         if pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("GStreamer publisher could not enter PLAYING state")
+        # 상태 변경 요청 수락만으로 online을 기록하지 않고 실제 PLAYING 전환까지 확인한다.
         _change, current, _pending = pipeline.get_state(5 * Gst.SECOND)
         if current != Gst.State.PLAYING:
             raise RuntimeError("RTSP publisher did not reach PLAYING state")
@@ -114,6 +117,7 @@ def publish(config_path: str | Path) -> int:
     return result
 
 
+# 송출 전용 프로세스의 설정 경로와 로그를 준비한 뒤 실행 결과를 종료 코드로 전달한다.
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ai-cctv-edge-publisher")
     parser.add_argument("--config", type=Path, required=True)

@@ -1,4 +1,4 @@
-# 작업 실행기와 분석 연결부만 준비한다. 실제 metadata 모델·의존성은 담당자가 추가한다.
+# 기본 CPU 대표색·이미지 품질 분석기와 교체 플러그인 실행기를 함께 배포한다.
 FROM python:3.11.9-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
 WORKDIR /app

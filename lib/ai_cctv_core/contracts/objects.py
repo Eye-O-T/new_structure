@@ -4,7 +4,7 @@
 from typing import Any, Literal
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 
 class ObjectObservation(BaseModel):
@@ -30,6 +30,25 @@ class ObjectObservation(BaseModel):
         return self
 
 
+class IdentityDescriptor(BaseModel):
+    # 추론기는 정규화한 특징만 제출하고, Data가 비공개 갤러리 안에서 인물 ID를 결정한다.
+    # 공간 이름에는 모델/전처리 버전을 포함하여 서로 다른 특징 좌표계를 비교하지 않는다.
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    space_id: str = Field(min_length=1, max_length=128)
+    features: list[FiniteFloat] = Field(min_length=16, max_length=2048)
+
+    @model_validator(mode="after")
+    def normalized_features(self):
+        import math
+
+        if not math.isclose(
+            math.hypot(*self.features), 1.0, rel_tol=0.0, abs_tol=0.001
+        ):
+            raise ValueError("identity features must have unit L2 norm")
+        return self
+
+
 class ObjectJobCompletion(BaseModel):
     # lease_id는 작업을 가져갈 때 받은 임시 처리 권한의 번호다. Data가 이를 확인해
     # 만료되거나 다른 작업자에게 넘어간 작업의 오래된 결과를 구별한다.
@@ -37,6 +56,7 @@ class ObjectJobCompletion(BaseModel):
     lease_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     outcome: Literal["complete", "retry", "failed", "unconfigured"]
     global_person_id: str | None = Field(default=None, min_length=1, max_length=256)
+    identity_descriptor: IdentityDescriptor | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -48,6 +68,11 @@ class ObjectJobCompletion(BaseModel):
             raise ValueError("analysis metadata exceeds 64 KiB")
         if self.global_person_id is not None and self.outcome != "complete":
             raise ValueError("only a completed identity result can assign a global ID")
+        if self.identity_descriptor is not None:
+            if self.outcome != "complete":
+                raise ValueError("only a completed identity result can submit features")
+            if self.global_person_id is not None:
+                raise ValueError("submit either identity features or a global ID")
         return self
 
 
@@ -70,6 +95,7 @@ class LiveObjects(BaseModel):
     frame_height: int = Field(gt=0, le=16384)
     objects: list[LiveObject] = Field(max_length=100)
 
+    # 한 프레임의 시간대, 사람 ID 중복, 모든 박스의 영상 경계를 함께 검사한다.
     @model_validator(mode="after")
     def valid_frame(self):
         if self.observed_at.tzinfo is None:

@@ -9,8 +9,6 @@
 !server/**
 !tests/
 !tests/**
-!configurator/
-!configurator/**
 !edge/
 !edge/**
 !docs/

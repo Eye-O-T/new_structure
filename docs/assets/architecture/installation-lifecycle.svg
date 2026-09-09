@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="790" viewBox="0 0 1120 790" role="img" aria-labelledby="title desc">
+<title id="title">05  최초 설치와 기존 서버 관리</title>
+<desc id="desc">호스트 설치 도우미는 저장된 설치 상태에 따라 다른 화면과 동작을 제공한다.</desc>
+<defs>
+<marker id="a2563eb" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#2563eb"/></marker>
+<marker id="a0f766e" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#0f766e"/></marker>
+<marker id="a7c3aed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#7c3aed"/></marker>
+<marker id="ab45309" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#b45309"/></marker>
+<marker id="a475569" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#475569"/></marker>
+</defs>
+<rect width="1120" height="790" fill="#ffffff"/>
+<text x="32" y="43" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">05  최초 설치와 기존 서버 관리</text>
+<text x="32" y="76" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">호스트 설치 도우미는 저장된 설치 상태에 따라 다른 화면과 동작을 제공한다.</text>
+<rect x="385" y="120" width="350" height="80" rx="12" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+<text x="560.0" y="154.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">설치 도우미 실행</text>
+<text x="560.0" y="183.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">관리할 저장 위치 선택</text>
+<path d="M 560 200 L 560 245" fill="none" stroke="#475569" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="560,245 555.0,234.0 565.0,234.0" fill="#475569"/>
+<path d="M560 245 L745 325 L560 405 L375 325 Z" fill="#fff7ed" stroke="#b45309" stroke-width="2"/>
+<text x="560" y="322" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">기존 설치가 있는가?</text>
+<text x="560" y="350" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">설정 · 배포 파일 확인</text>
+<rect x="40" y="465" width="445" height="115" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="262.5" y="503.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">최초 설치</text>
+<text x="262.5" y="532.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">필수 프로그램 · 모델 · 인증서 검사</text>
+<text x="262.5" y="559.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">기본값 또는 고급 설정 → 관리자 · 설정 생성</text>
+<rect x="635" y="465" width="445" height="115" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="857.5" y="503.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">기존 설치 관리</text>
+<text x="857.5" y="532.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">저장된 설정 · 인증값 유지</text>
+<text x="857.5" y="559.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">시작 / 업데이트 적용 · 재시작 · 중지</text>
+<path d="M 375 325 L 262 325 L 262 465" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="262,465 257.0,454.0 267.0,454.0" fill="#2563eb"/>
+<rect x="287.0" y="295" width="46.0" height="23" rx="4" fill="#ffffff"/>
+<text x="310" y="313" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">없음</text>
+<path d="M 745 325 L 857 325 L 857 465" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="857,465 852.0,454.0 862.0,454.0" fill="#0f766e"/>
+<rect x="788.0" y="295" width="46.0" height="23" rx="4" fill="#ffffff"/>
+<text x="811" y="313" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">있음</text>
+<rect x="325" y="645" width="470" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="560.0" y="681.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">서버 실행 후 카메라 · 앱 연결</text>
+<text x="560.0" y="710.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">최초 Edge 연결은 도우미, 운영 관리는 웹·앱</text>
+<path d="M 262 580 L 262 687 L 325 687" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="325,687 314.0,692.0 314.0,682.0" fill="#2563eb"/>
+<path d="M 857 580 L 857 687 L 795 687" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="795,687 806.0,682.0 806.0,692.0" fill="#0f766e"/>
+<rect x="802.0" y="606" width="106.0" height="23" rx="4" fill="#ffffff"/>
+<text x="855" y="624" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">서버 실행 시</text>
+<text x="32" y="768" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">불완전한 기존 설치는 문제를 안내하며 자동 초기화하지 않는다. 새 버전 적용은 새 코드·설치 파일을 먼저 준비한다.</text>
+</svg>

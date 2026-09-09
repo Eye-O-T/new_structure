@@ -1,3 +1,4 @@
+# 감지 crop부터 독립 재식별·분석 작업, 권한·임대 복구, 기존 배포 이전까지 계약을 확인한다.
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
@@ -24,6 +25,7 @@ TOKENS = {
 TOKENS["identity"] = "d" * 40
 
 
+# 분리된 내부 토큰과 두 카메라를 갖는 실제 Data API·저장소를 테스트마다 준비한다.
 @pytest.fixture
 def objects(tmp_path):
     settings = Settings(
@@ -44,6 +46,7 @@ def objects(tmp_path):
         yield client, repo, settings
 
 
+# 추적 세션과 crop 정보를 포함한 등장 이벤트를 만들어 후속 객체 작업을 생성한다.
 def appearance(
     client, camera="cam-001", person="7", session="a" * 32, crop="cam-001/crop.jpg"
 ):
@@ -68,6 +71,7 @@ def appearance(
     return response.json()
 
 
+# 화면 밖 감지 박스를 자른 범위와 crop 크기가 일치하고 주석 영상이 원본 픽셀을 바꾸지 않아야 한다.
 def test_crop_matches_clipped_box_and_drawing_does_not_mutate_source(tmp_path):
     import cv2
 
@@ -90,6 +94,7 @@ def test_crop_matches_clipped_box_and_drawing_does_not_mutate_source(tmp_path):
     assert np.all(frame == 80)
 
 
+# 분석 결과를 보존하면서 인물 연결을 병합하고 같은 카메라·추적 세션에만 연결을 전파한다.
 def test_identity_and_metadata_merge_independently_and_propagate_by_session(objects):
     client, repo, _ = objects
     event = appearance(client)
@@ -132,6 +137,7 @@ def test_identity_and_metadata_merge_independently_and_propagate_by_session(obje
     assert appearance(client, camera="cam-002")["global_person_id"] is None
 
 
+# 동시 작업 획득과 임대 만료를 재현해 단일 소유권·늦은 완료 거부·미설정 재처리를 확인한다.
 def test_jobs_recover_from_worker_crash_and_ignore_stale_completion(objects):
     client, repo, _ = objects
     appearance(client)
@@ -163,6 +169,7 @@ def test_jobs_recover_from_worker_crash_and_ignore_stale_completion(objects):
     assert repo.claim_object_job("identity") is not None
 
 
+# 단계별 내부 권한과 박스 경계를 검사하며 분석 단계가 통합 인물 ID를 지정할 수 없어야 한다.
 def test_internal_scopes_and_object_validation(objects):
     client, repo, _ = objects
     appearance(client)
@@ -217,6 +224,7 @@ def test_internal_scopes_and_object_validation(objects):
     )
 
 
+# 늦게 도착한 과거 프레임은 최신 좌표를 덮지 않고 오래된 최신 좌표도 결국 숨겨야 한다.
 def test_live_objects_expire_and_reject_out_of_order_frames(objects):
     _, repo, _ = objects
     now = utc_now()
@@ -243,6 +251,7 @@ def test_live_objects_expire_and_reject_out_of_order_frames(objects):
     }
 
 
+# 미설정 모델은 분석 결과를 만들지 않으며 해당 단계 권한으로만 작업을 다시 대기시킨다.
 def test_metadata_blackbox_status_and_requeue_are_scoped(objects):
     client, repo, _ = objects
     event = appearance(client)
@@ -266,6 +275,7 @@ def test_metadata_blackbox_status_and_requeue_are_scoped(objects):
     assert repo.claim_object_job("analysis")["id"] == job["id"]
 
 
+# 모델 미연결 상태는 identity·analysis 모두 unconfigured로 보고하고 crop 경로를 제한한다.
 @pytest.mark.asyncio
 async def test_workers_report_both_blackboxes_as_unconfigured(tmp_path):
     crop = tmp_path / "crop.jpg"
@@ -308,6 +318,7 @@ async def test_workers_report_both_blackboxes_as_unconfigured(tmp_path):
         safe_crop(tmp_path / "nested", "../crop.jpg")
 
 
+# 처리 중 임대가 만료되어 완료가 거부되어도 다음 작업으로 복구할 수 있어야 한다.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["identity", "analysis"])
 async def test_worker_reports_rejected_lease_and_recovers_on_next_job(objects, stage):
@@ -355,10 +366,11 @@ async def test_worker_reports_rejected_lease_and_recovers_on_next_job(objects, s
         assert repo.get_event(event["id"])["metadata"][stage]["status"] == "complete"
 
 
+# 객체 처리 기능을 추가할 때 기존 토큰·미디어 자격 증명·푸시 설정을 보존하고 반복 실행은 무해해야 한다.
 def test_existing_deployment_upgrade_keeps_existing_tokens(tmp_path, monkeypatch):
-    from server.scripts.enable_object_processing import enable
-    from server.scripts.doctor import read_deployment_env
-    from server.scripts import generate_secrets
+    from server.setup.tools.enable_object_processing import enable
+    from server.setup.validation import read_deployment_env
+    from server.setup.tools import generate_secrets
 
     monkeypatch.setattr(generate_secrets, "restrict_private_file", lambda _: None)
     secrets_root = tmp_path / "secrets"
@@ -408,9 +420,9 @@ def test_existing_deployment_upgrade_keeps_existing_tokens(tmp_path, monkeypatch
     for key, expected in (
         (
             "IDENTITY_PLUGIN",
-            "server.services.preprocessing.processors.identity:IdentityBlackBox",
+            "server.services.preprocessing.processors.identity:LocalAppearanceIdentity",
         ),
-        ("ANALYSIS_PLUGIN", "server.services.analysis.processors:MetadataBlackBox"),
+        ("ANALYSIS_PLUGIN", "server.services.analysis.processors:LocalAppearanceAnalyzer"),
         (
             "DETECTION_PLUGIN",
             "server.services.preprocessing.processors.detection.yolo:YoloTracker",
@@ -423,10 +435,11 @@ def test_existing_deployment_upgrade_keeps_existing_tokens(tmp_path, monkeypatch
     assert {path: path.read_bytes() for path in tmp_path.rglob("*.env")} == first_files
 
 
+# 사용자 지정 경로와 분리된 기존 비밀 파일을 가진 7서비스 배포 상태를 재현한다.
 @pytest.fixture
 def legacy_object_deployment(tmp_path, monkeypatch):
     """A seven-service installation with real split-token/media relationships."""
-    from server.scripts import generate_secrets
+    from server.setup.tools import generate_secrets
 
     monkeypatch.setattr(generate_secrets, "restrict_private_file", lambda _: None)
     credentials = tmp_path / "credentials"
@@ -466,11 +479,12 @@ def legacy_object_deployment(tmp_path, monkeypatch):
     return tmp_path, env, data, inference, identity, analysis, tokens
 
 
+# 옛 서비스 경로를 새 구조로 옮겨도 사용자 플러그인과 기존 비밀 파일은 보존해야 한다.
 def test_existing_deployment_upgrade_migrates_custom_legacy_paths(
     legacy_object_deployment,
 ):
-    from server.scripts.doctor import read_deployment_env
-    from server.scripts.enable_object_processing import enable
+    from server.setup.validation import read_deployment_env
+    from server.setup.tools.enable_object_processing import enable
 
     root, env, data, inference, identity, analysis, tokens = legacy_object_deployment
     before = {path: path.read_bytes() for path in (data, inference, identity, analysis)}
@@ -487,11 +501,11 @@ def test_existing_deployment_upgrade_migrates_custom_legacy_paths(
     assert config["ANALYSIS_SECRETS_FILE"] == str(analysis)
     assert (
         config["IDENTITY_PLUGIN"]
-        == "server.services.preprocessing.processors.identity:IdentityBlackBox"
+        == "server.services.preprocessing.processors.identity:LocalAppearanceIdentity"
     )
     assert (
         config["ANALYSIS_PLUGIN"]
-        == "server.services.analysis.processors:MetadataBlackBox"
+        == "server.services.analysis.processors:LocalAppearanceAnalyzer"
     )
     assert config["DETECTION_PLUGIN"] == "custom.detector:Detector"
     assert config["PUSH_ENABLED"] == "true"
@@ -500,6 +514,7 @@ def test_existing_deployment_upgrade_migrates_custom_legacy_paths(
     assert {path: path.read_bytes() for path in root.rglob("*.env")} == first_files
 
 
+# 충돌한 토큰·누락된 미디어 자격 증명·출력 경로 겹침은 파일을 쓰기 전에 거부한다.
 @pytest.mark.parametrize(
     "invalid",
     ["conflicting_identity", "duplicate_token", "missing_media", "colliding_output"],
@@ -507,7 +522,7 @@ def test_existing_deployment_upgrade_migrates_custom_legacy_paths(
 def test_existing_deployment_upgrade_validates_before_writing(
     legacy_object_deployment, invalid
 ):
-    from server.scripts.enable_object_processing import enable
+    from server.setup.tools.enable_object_processing import enable
 
     root, env, data, inference, identity, analysis, tokens = legacy_object_deployment
     if invalid == "conflicting_identity":
@@ -538,11 +553,12 @@ def test_existing_deployment_upgrade_validates_before_writing(
     assert {path: path.read_bytes() for path in root.rglob("*.env")} == before
 
 
+# Data 비밀 파일에서 빠진 토큰도 기존 단계별 비밀 파일에서 복구해 연결을 유지한다.
 def test_existing_deployment_upgrade_reuses_tokens_missing_from_data(
     legacy_object_deployment,
 ):
-    from server.scripts.doctor import read_deployment_env
-    from server.scripts.enable_object_processing import enable
+    from server.setup.validation import read_deployment_env
+    from server.setup.tools.enable_object_processing import enable
 
     root, env, data, _inference, _identity, _analysis, tokens = legacy_object_deployment
     data.write_text(
@@ -557,6 +573,7 @@ def test_existing_deployment_upgrade_reuses_tokens_missing_from_data(
     assert read_deployment_env(data) == tokens
 
 
+# 처리 서비스는 DB를 직접 마운트하지 않고 모델·스냅샷의 필요한 읽기·쓰기 권한만 가져야 한다.
 def test_compose_has_six_services_and_processing_has_no_database_mount():
     from pathlib import Path
     import yaml
@@ -599,6 +616,7 @@ def test_compose_has_six_services_and_processing_has_no_database_mount():
                 assert source.is_file()
 
 
+# 한 가짜 프레임을 실제 전처리와 Data API에 흘려 저장된 crop과 분석 작업의 박스 연결을 검증한다.
 def test_camera_worker_passes_real_crops_and_boxes_into_data_jobs(objects, monkeypatch):
     import cv2
     from server.services.preprocessing.app.pipeline import CameraWorker

@@ -16,6 +16,7 @@ from .supervisor import DetectionSupervisor
 LOGGER = logging.getLogger("ai_cctv.preprocessing")
 
 
+# 탐지 감독자와 비동기 식별 작업자를 조립하고 두 처리 경로의 상태를 노출한다.
 def create_app(settings: Settings | None = None):
     runtime_settings = settings or Settings.from_env()
 
@@ -77,6 +78,7 @@ def create_app(settings: Settings | None = None):
     app.state.identity_worker = None
     app.state.identity_error = None
 
+    # 카메라별 탐지 상태와 식별 준비·오류 상태를 하나의 응답으로 합친다.
     def status():
         supervisor = app.state.supervisor
         detection = (
@@ -93,6 +95,7 @@ def create_app(settings: Settings | None = None):
     def health_live():
         return {"status": "alive", "service": "preprocessing"}
 
+    # Data 연결 실패는 503으로, 연결 이후 모델·식별 장애는 degraded 상태로 구분한다.
     @app.get("/health/ready")
     def health_ready():
         state = status()
@@ -101,14 +104,22 @@ def create_app(settings: Settings | None = None):
         # Data에 연결되면 HTTP 200을 유지할 수 있지만, 모델·식별 장애는 degraded로
         # 표시한다. 따라서 HTTP 성공 여부만으로 모든 기능이 정상이라고 판단하면 안 된다.
         model_degraded = runtime_settings.inference_enabled and any(
-            not worker["model_ready"] for worker in state["workers"].values()
+            not worker["model_ready"]
+            or worker.get("state") in {"offline", "stopped", "error"}
+            or worker.get("event_delivery_error")
+            or worker.get("frame_stale")
+            for worker in state["workers"].values()
         )
         identity = state["identity"]
+        delivery = state.get("event_delivery", {})
         degraded = (
             model_degraded
             or not identity["ready"]
+            or not identity["model_ready"]
             or identity["stalled"]
             or identity["last_error"] is not None
+            or bool(delivery.get("last_error"))
+            or bool(delivery.get("rejected"))
         )
         return {"status": "degraded" if degraded else "ready", **state}
 

@@ -41,12 +41,14 @@ class RecoveryRepositoryMixin:
             return None
         now = _now()
 
+        # 마지막 Edge 파일이 닫힐 시간을 확보하되 이미 지난 시각에는 즉시 재시도하도록 한다.
         def recovery_ready_at(outage_end: str) -> str:
             settled = format_utc(
                 parse_utc(outage_end) + timedelta(seconds=settle_seconds)
             )
             return max(now, settled)
 
+        # 기존 구간을 확장할 때 revision을 올리고 완료·시도 초과 작업에도 새 범위의 재시도를 허용한다.
         def merge_bounds(
             connection: sqlite3.Connection,
             job: sqlite3.Row,
@@ -198,6 +200,7 @@ class RecoveryRepositoryMixin:
                 return None
             return _as_dict(merge_bounds(connection, job, end=occurred_at))
 
+    # 복구 종료 시각과 재시도 조건이 갖춰진 작업 하나를 다운로드 상태로 원자적으로 전환한다.
     def claim_due_recovery_job(self) -> dict[str, Any] | None:
         now = _now()
         with self.database.transaction() as connection:
@@ -254,6 +257,7 @@ class RecoveryRepositoryMixin:
             )
             return int(cursor.rowcount)
 
+    # 선택한 revision이 여전히 일치할 때만 진행·오류·요약을 반영하고 불일치는 None으로 알린다.
     def update_recovery_job(
         self,
         job_id: int,
@@ -317,6 +321,7 @@ class RecoveryRepositoryMixin:
             result["recovery_summary"] = json.loads(result.pop("recovery_summary_json"))
         return result
 
+    # 최신 생성 순으로 페이지를 구성하며 저장된 요약 JSON을 객체로 풀어 반환한다.
     def list_recovery_jobs(
         self, camera_id: str | None, limit: int, offset: int
     ) -> list[dict[str, Any]]:

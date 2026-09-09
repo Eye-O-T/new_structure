@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import Header, HTTPException
 
 
+# 읽을 수 있는 토큰 파일에서 중복을 제거하며 유효한 토큰이 없으면 시작을 거부한다.
 def load_tokens(*paths: Path) -> tuple[str, ...]:
     tokens: list[str] = []
     for path in dict.fromkeys(paths):
@@ -21,6 +22,7 @@ def load_tokens(*paths: Path) -> tuple[str, ...]:
     return tuple(tokens)
 
 
+# FastAPI 의존성으로 주입해 관리·복구 요청의 Bearer 토큰을 같은 규칙으로 검사한다.
 class BearerAuthenticator:
     def __init__(self, tokens: tuple[str, ...]):
         self.tokens = tokens

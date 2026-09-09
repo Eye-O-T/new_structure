@@ -1,269 +1,79 @@
 # AI CCTV
 
-Raspberry Pi(Edge)가 보낸 영상을 중앙 서버에서 녹화·감지하고 Android 앱으로 확인한다. 중앙 서버는 Docker 컨테이너 6개로 구성된다. 사람 감지·추적은 YOLO/ByteTrack을 사용한다. **여러 카메라의 동일 인물 연결과 추가 정보(metadata) 분석은 인터페이스만 준비된 미구현 영역**이다.
+AI CCTV는 Raspberry Pi 카메라, 중앙 서버, Android 앱을 연결하는 영상 모니터링 프로젝트입니다. 여러 카메라의 영상을 한곳에서 녹화하고 사람 감지 이벤트를 기록하여, 사용자가 휴대전화로 실시간 영상과 이벤트에 연결된 녹화를 확인할 수 있도록 만드는 것이 목적입니다.
 
-## 문서
+카메라는 영상을 보내고, 서버는 녹화·사람 감지를 처리하며, 앱은 영상과 이벤트를 보여줍니다. 현재 기능과 개발 중인 기능의 범위는 [시스템 구조 문서](docs/architecture.md)에서 확인할 수 있습니다.
 
-| 문서 | 용도 |
+## 설치하기
+
+**중앙 서버 → Raspberry Pi 카메라 → Android 앱** 순서로 설치합니다. 처음에는 세 장치를 같은 공유기의 내부 네트워크에 연결하세요.
+
+[GitHub Releases](https://github.com/Eye-O-T/new_structure/releases)에서 설치할 버전의 **Assets**를 열어 다음 파일을 확인하세요. 해당 파일이 아직 게시되지 않았다면 배포 담당자에게 요청하세요.
+
+| 설치할 장치 | 받을 파일 |
 |---|---|
-| [architecture.md](docs/architecture.md) | 전체 구성, 통신·영상·이벤트 흐름, 저장소와 현재 구현 범위 |
-| [SRS_interface_preprocessing.md](docs/SRS_interface_preprocessing.md) | Preprocessing 컨테이너 교체 규약: 영상·감지·추적·전역 인물 연결 |
-| [SRS_interface_analysis.md](docs/SRS_interface_analysis.md) | Analysis 컨테이너 교체 규약: 객체 입력·metadata·작업 처리 |
-| [openapi.yaml](docs/openapi.yaml) | 모바일 교체용 공개 API 명세와 인증·영상·알림 사용 규칙 |
+| Windows 서버 PC | `AI_CCTV_Server_Setup_<version>_x64.exe` |
+| Raspberry Pi | `ai-cctv-edge_<version>_arm64.deb`와 `.deb.sha256` |
+| Android 휴대전화 | `app-release.apk` |
 
-```text
-server/
-├── services/
-│   ├── data/             # SQLite·이벤트·작업·복구
-│   ├── external/         # 인증·공개 API·푸시
-│   ├── preprocessing/    # 감지·추적·인물 연결
-│   ├── analysis/         # metadata 분석
-│   ├── mediamtx/         # 영상 수신·녹화·재생
-│   └── nginx/            # HTTPS·중계
-├── config/               # 설정 예시
-├── secrets/              # 인증 설정 예시
-├── scripts/              # 초기화·진단·백업·이관·명세 생성
-├── compose.yml           # 운영
-├── compose.dev.yml       # 개발용 코드 연결
-├── compose.test.yml      # 독립 테스트 환경
-└── compose.push.yml      # Firebase 푸시 추가 설정
-edge/                     # Raspberry Pi
-mobile/                   # Flutter 앱
-configurator/             # Windows 서버 설치·설정 GUI·CLI
-lib/                      # Python 공통 패키지 ai_cctv_core
-tests/                    # 개발·검증용 코드
-├── automated/            # 공통·통합 자동 테스트
-├── runner/               # 테스트 이미지·pytest·Ruff 설정
-└── mock_edge/            # MP4 모의 카메라
-docs/                     # 위 네 문서
+`<version>`은 배포된 버전 번호입니다. `Source code.zip`은 소스 코드이며 설치 파일이 아닙니다. 설치 파일 사용자는 Python·Flutter·EXE 빌드 도구를 따로 준비할 필요가 없습니다.
+
+### Windows 서버 설치
+
+Windows x64 PC에 **Docker Desktop을 설치하고 Linux 컨테이너 모드로 실행**해 두세요. 사람 감지 모델 파일과 서버 접속 주소에 맞는 HTTPS 인증서·개인키도 필요합니다. 이 파일들은 설치 프로그램에 포함되지 않으므로 [필수 파일 안내](server/setup/install_helper/README.md#처음-설치)를 확인해 준비하세요.
+
+1. 받은 설치 EXE를 실행하고 안내에 따라 설치한 뒤 **AI CCTV 서버 설치 도우미**를 엽니다.
+2. **설치 준비 확인**에서 Docker·Compose·모델·인증서 검사 결과를 확인합니다. 누락된 프로그램이나 파일을 준비하고 **다시 검사**를 누른 뒤 **다음**으로 진행합니다.
+3. **기본 설정**에서 관리자 비밀번호를 12자 이상으로 입력하고, 카메라와 휴대전화가 접근할 서버 주소를 확인합니다. 기본 관리자 계정은 `admin`입니다.
+4. 저장 위치·포트·녹화 보관 기간은 기본값을 사용할 수 있습니다. 변경이 필요하면 **고급 설정 직접 지정**을 선택하고, 저장 위치는 **변경…**에서 지정합니다.
+5. **설치 내용 확인**에서 **설치 및 시작**을 누릅니다. 최초 실행에는 인터넷 연결이 필요하며, 서버 구성 요소를 내려받아 준비하는 동안 기다립니다.
+6. 관리 화면에서 서버 상태를 확인합니다. **서버 관리자 화면 열기**를 눌러 설치할 때 정한 관리자 계정으로 로그인하세요.
+
+휴대전화 접속 주소는 `https://cctv.example.com`처럼 실제 서버 주소를 사용하며, 인증서의 이름과 일치해야 합니다. 기본값과 문제 해결 방법은 [설치 상세 안내](docs/guide.md#windows-설치)를 참고하세요.
+
+### Raspberry Pi 카메라 설치
+
+카메라를 연결한 **Raspberry Pi OS Bookworm 64비트(ARM64)** 장치를 준비합니다. 받은 DEB와 체크섬 파일을 같은 폴더에 두고 Pi 터미널에서 그 폴더로 이동한 뒤 실행하세요. 아래 `0.3.0`은 받은 버전으로 바꿉니다. 각 명령이 성공했는지 확인한 뒤 다음 명령을 실행하세요.
+
+```bash
+sha256sum -c ai-cctv-edge_0.3.0_arm64.deb.sha256
+sudo apt update
+sudo apt install ./ai-cctv-edge_0.3.0_arm64.deb
+sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-key
 ```
 
-## 설치 선택
+1. 마지막 명령에서 **32자 이상의 장치 연결 키**를 두 번 입력하고, 연결이 끝날 때까지 Pi 터미널을 열어 둡니다. 여러 장치를 설치하면 `edge-001`과 `cam-001`을 장치마다 다르게 지정하세요.
+2. 서버 PC의 설치 도우미에서 **카메라 연결**을 열고 관리자 계정·비밀번호와 Pi에 입력한 장치 연결 키를 입력합니다.
+3. **Edge 찾기**를 눌러 장치를 선택하고 **카메라 이름**을 입력한 뒤 **선택한 Edge 연결**을 누릅니다.
+4. 연결이 완료되면 아래 순서로 Android 앱을 설치해 해당 카메라의 영상이 나오는지 확인합니다. 이후 Pi를 재부팅하면 저장된 설정으로 자동 실행됩니다.
 
-설치 EXE·Edge DEB·Android APK는 저장소에 포함하지 않는다. 배포 담당자에게 받은 파일을 사용하거나 [패키지 빌드](#패키지-빌드)와 [모바일 안내](mobile/README.md)에 따라 만든다. Windows 설치 파일이 있으면 다음 절을, 소스를 실행하면 [소스 배포](#소스-배포)를 따른다.
+카메라 인식 확인, 검색 실패 시 조치, 수동 연결 방법은 [카메라 설치 상세 안내](edge/README.md#설치와-연결)를 참고하세요.
 
-아래 명령은 별도 표시가 없으면 **저장소 루트의 PowerShell**에서 실행한다. Windows 설치본에서 수동 Compose 명령을 쓸 때는 설치 폴더(기본 `C:\Program Files\AI_CCTV`)에서 실행한다. 예시 주소·경로는 실제 값으로 바꾼다.
+### Android 앱 설치
 
-### Windows 설치
+1. 휴대전화에서 받은 `app-release.apk`를 열어 설치합니다. Android가 요청하면 해당 파일을 연 앱의 설치 권한을 허용합니다.
+2. AI CCTV 앱을 열고 서버 설치 때 확인한 **HTTPS 접속 주소**와 **관리자 계정·비밀번호**를 입력합니다.
+3. 로그인 후 카메라 목록에서 등록한 카메라를 선택합니다.
 
-Windows 10/11 x64와 Linux 컨테이너 모드로 실행 중인 Docker Desktop·Compose v2 이상이 필요하다. Configurator는 이 여섯 컨테이너의 설정·시작·중지를 돕는 프로그램이다.
+서버 주소에는 `/api/v1`을 붙이지 않습니다. 휴대전화의 `localhost`는 휴대전화 자신을 가리키므로 서버 주소로 사용할 수 없습니다. 휴대전화가 서버 인증서를 신뢰해야 연결됩니다. 자세한 내용은 [앱 설치와 로그인](mobile/README.md#앱-설치와-로그인)을 참고하세요.
 
-1. `AI_CCTV_Server_Setup_<version>_x64.exe` 설치 후 **AI CCTV Configurator**를 연다.
-2. **Downloaded AI model**에서 호환 로컬 모델을 선택한다. 모델은 설치 프로그램에 포함되지 않는다.
-3. **TLS certificate / TLS private key**에 신뢰 인증서와 암호화되지 않은 PEM 키를 선택한다.
-4. 저장 경로·관리자 계정·앱 접속 주소·서버의 수신 IP·감지 장치·녹화 정책을 입력한다. 실제 Edge·휴대폰 연결에는 **수신 IP**를 서버의 LAN IP로 지정한다. 기본 `127.0.0.1`은 PC 내부 접속용이며, **앱 접속 주소**는 인증서의 서버 이름과 맞춘다.
-5. **Validate and create configuration** → **Start services** → **Show service status**를 실행한다.
+## 사용하기
 
-설정 생성에는 관리자 권한이 필요하다. 기본 데이터 위치는 `C:\ProgramData\AI_CCTV`, 배포 env는 그 아래 `config\compose.env`다. 코드와 별도로 DB·영상·모델·인증 파일을 보존한다.
+설치가 끝나면 다음 화면에서 시스템을 사용합니다.
 
-GUI 대신 설치 후 새로 연 관리자 PowerShell에서 사용할 수 있다. 아래 `192.0.2.10`은 서버 LAN IP의 예시다. 비밀번호는 숨김 입력으로 받는다.
-
-```powershell
-AI_CCTV_CLI.exe preflight
-AI_CCTV_CLI.exe install --model 'D:\Models\person.pt' --tls-certificate 'D:\TLS\tls.crt' --tls-private-key 'D:\TLS\tls.key' --public-base-url 'https://cctv.example.com' --public-bind 192.0.2.10 --rtsp-bind 192.0.2.10
-AI_CCTV_CLI.exe status
-```
-
-### 소스 배포
-
-초기 설정 스크립트용 Python 3.11, Docker/Compose v2 이상, 개발 인증서용 OpenSSL을 준비한다. 아래는 **기본 경로를 쓰는 새 개발 배포**용이다. 운영 설정을 예제로 덮어쓰지 않는다.
-
-```powershell
-Copy-Item server/.env.example server/.env
-Copy-Item server/config/config.example.yaml server/config/config.yaml
-python server/scripts/init_runtime.py
-python server/scripts/generate_secrets.py --camera-id cam-001
-python server/scripts/generate_dev_cert.py
-```
-
-Linux에서는 `Copy-Item`을 `cp`, `python`을 Python 3.11의 `python3` 명령으로 바꾼다. `init_runtime.py`는 폴더만 만든다. 저장 위치를 바꾸면 각 초기화 스크립트의 `--help`로 출력 경로도 맞춘다.
-
-포트·호스트 경로는 `server/.env`, 카메라·감지·보관 정책은 `server/config/config.yaml`, 서비스 간 인증값은 생성된 `server/secrets/*.env`에서 관리한다. `.env`의 상대 경로는 `server/` 기준이다. 최초에 여러 카메라를 준비한다면 하나의 생성 명령에 `--camera-id`를 카메라마다 반복한다. 운영 중 추가 등록은 [Edge 연결](#edge-연결)을 따른다.
-
-감지 모델은 별도로 준비해 `MODELS_DIR/MODEL_FILE`(기본 `server/runtime/models/default.pt`)에 둔다. 기본 구현은 사람 클래스 번호가 `0`인 Ultralytics 호환 모델을 사용한다. 모델 없이 영상·녹화 연결부터 시험하려면 `config.yaml`의 `inference.enabled`를 `false`로 설정한다. 이때 자동 사람 감지·박스 표시는 작동하지 않는다.
-
-`server/.env`에서 다음을 확인한다.
-
-| 설정 | 확인 사항 |
+| 하고 싶은 일 | 사용 방법 |
 |---|---|
-| `PUBLIC_BASE_URL` | 앱 접속 주소. `https://서버주소[:포트]` 형식이며 `/api/v1` 제외 |
-| `PUBLIC_BIND_ADDRESS` | HTTPS 요청을 받을 서버 IP. 기본 `127.0.0.1`은 PC 내부 접속용 |
-| `RTSP_BIND_ADDRESS` | 원격 Edge가 접근할 중앙 신뢰 LAN IP |
-| `CONFIG_FILE`, `*_DIR` | 설정·DB·녹화·복구·스냅샷·모델·인증서 실제 경로 |
-| `*_SECRETS_FILE` | 생성한 역할별 env 5개, 서로 다른 경로 |
-| `AI_CCTV_UID/GID` | Linux 호스트 저장소 소유자와 일치 |
-| `RECORDING_SEGMENT_SECONDS` | 10~300초, 기본 60초 |
-| `COMPOSE_PROJECT_NAME` | 운영·업데이트 때 유지할 프로젝트 이름 |
+| 실시간 영상 보기 | 앱의 **실시간**에서 카메라를 선택합니다. 사람 감지가 동작하면 **사람 위치·ID 표시**로 감지 결과를 확인할 수 있습니다. |
+| 감지 기록과 녹화 보기 | 앱의 **히스토리**에서 날짜·카메라를 선택하고 이벤트를 엽니다. **이벤트 상세**에서 연결된 녹화를 재생합니다. |
+| 카메라 상태·화질 확인 | 앱의 카메라 화면에서 장치 상태를 확인합니다. 관리자 계정은 지원되는 HD/FHD 화질을 변경할 수 있습니다. |
+| 카메라 등록 정보 관리 | 설치 도우미의 **서버 관리자 화면 열기**, 또는 브라우저의 `https://서버주소/admin/`에서 로그인합니다. 카메라·Edge 등록 정보와 상태를 관리할 수 있습니다. |
+| 서버 시작·중지·재시작 | 서버 PC에서 설치 도우미를 다시 열고 **서버 시작 / 업데이트 적용**, **중지**, **재시작**을 사용합니다. 기존 설치는 설정을 불러와 관리 화면으로 열립니다. |
+| 이벤트 알림 받기 | Firebase가 설정된 배포본에서 Android 알림 권한을 허용하고 앱의 **설정 → 푸시 알림**을 켭니다. **알림 연결 상태**에서 결과를 확인합니다. |
 
-위 개발 인증서는 `localhost`용이다. PC 안에서 시험할 때는 `PUBLIC_BASE_URL=https://localhost`로 맞추고 시험 클라이언트에 해당 인증서를 신뢰하도록 설정한다. 인증서 생성만으로 신뢰가 등록되지는 않는다. 휴대폰에서 `localhost`는 휴대폰 자신을 뜻하므로 실제 서버 주소와 단말이 신뢰하는 인증서가 필요하다. 운영 인증서는 `CERTS_DIR/tls.crt`(전체 인증서 체인), 개인키는 `tls.key`에 둔다.
+처음 연결한 뒤 **실시간 영상 → 새 사람 감지 이벤트 → 연결 녹화 재생** 순서로 확인하세요. 설치 도우미를 닫아도 서버는 계속 동작합니다. PC를 재부팅했다면 Docker Desktop이 실행된 상태에서 도우미로 서버 상태를 확인하고, 필요하면 서버를 시작하세요. 이미 설정한 Pi에는 최초 연결 명령인 `pair`를 다시 실행하지 않습니다.
 
-외부 접속에는 서버 주소로 연결되는 DNS·방화벽·필요시 공유기 포트 전달 설정도 필요하며 Configurator가 자동으로 구성하지 않는다. 8554는 신뢰 LAN에서만 사용하고 내부 8000·8080·8888·9996·9997은 외부에 공개하지 않는다.
+푸시 알림은 별도의 Firebase 설정이 필요하며, 영상 확인에는 필요하지 않습니다. 알림 설정, 백업·복원, 업데이트, 문제 해결, 소스 실행·개발 및 동작 원리는 **[docs 문서 안내](docs/README.md)**를 참고하세요.
 
-```powershell
-python server/scripts/doctor.py
-docker compose --env-file server/.env -f server/compose.yml config --quiet
-docker compose --env-file server/.env -f server/compose.yml up -d --build --wait --remove-orphans
-python server/scripts/bootstrap_admin.py --username admin
-```
+## 라이선스
 
-`bootstrap_admin.py`는 관리자 비밀번호를 숨김 입력으로 받는 소스 배포용 도구다. Configurator 설치에서는 설정 생성 시 관리자를 준비한다. 중앙 기동 후 [Edge](#edge-연결)와 [모바일](#모바일과-푸시)을 연결한다.
-
-## Edge 연결
-
-Raspberry Pi 설치·Pairing·업데이트는 [Edge 안내](edge/README.md#설치와-연결)를 따른다. 실제 장비 없이 MP4로 시험하려면 [Mock Edge](tests/mock_edge/README.md)를 사용한다.
-
-자동 검색을 사용할 수 없다면 [토큰 내보내기·수동 등록](edge/README.md#수동-연결)을 따른다. 관리·복구 주소는 중앙 컨테이너에서도 접근할 수 있어야 한다.
-
-## 모바일과 푸시
-
-앱 설치·로그인은 [모바일 README](mobile/README.md), 대체 앱 개발은 [OpenAPI](docs/openapi.yaml)를 따른다. 영상 확인에는 Firebase가 필요하지 않다.
-
-푸시를 켜려면 같은 기존 Firebase 프로젝트의 두 파일을 준비한다.
-
-- Android: `mobile/android/app/google-services.json`. 등록 package name과 applicationId가 같아야 한다.
-- 서버: FCM 발송 권한의 서비스 계정 JSON. 저장소 밖에 보관하고 External이 읽게 한다. APK에는 넣지 않는다.
-
-실제 `compose.env` 또는 `.env`와 같은 폴더에 다음 내용으로 **`push.env`**를 만든다. [전체 예시](server/push.env.example)의 프로젝트 ID와 파일 경로는 실제 값으로 바꾼다.
-
-```dotenv
-PUSH_ENABLED=true
-FIREBASE_PROJECT_ID=your-existing-project-id
-FIREBASE_SERVICE_ACCOUNT_FILE='C:/ProgramData/AI_CCTV/secrets/firebase-service-account.json'
-```
-
-Configurator **Start services**로 적용한다. 수동 실행은 기본 env 다음에 push env를 지정한다.
-
-```powershell
-docker compose --env-file C:/path/to/compose.env --env-file C:/path/to/push.env `
-  -f server/compose.yml -f server/compose.push.yml up -d --build --wait --remove-orphans
-```
-
-이후 상태·로그·중지에도 같은 추가 구성을 사용한다. Android 알림 권한을 허용하고 실제 이벤트 → 알림 → 상세 → 녹화를 확인한다. 기본은 모든 이벤트 수신이다. 키가 없으면 일반 앱 기능은 유지하되 실제 푸시는 검증할 수 없다.
-
-## 운영과 백업
-
-아래 env는 실제 설치 경로로 바꾼다. FCM을 쓰면 위의 추가 env·Compose 파일도 포함한다.
-
-```powershell
-docker compose --env-file C:/path/to/compose.env -f server/compose.yml ps
-docker compose --env-file C:/path/to/compose.env -f server/compose.yml logs --tail 100
-```
-
-`healthy`와 Nginx `/healthz`만으로 전체 성공을 판단하지 않는다. 로그인·각 카메라 영상·새 이벤트·중앙/복구 녹화 재생을 확인한다. 블랙박스 `unconfigured`는 모델 미구현이며 [상태 의미](docs/architecture.md#상태-확인)를 참고한다.
-
-전체 백업은 Edge 로컬 백업을 확인하고 중앙 서비스를 정상 정지한 뒤 다음을 **같은 시점의 세트**로 복사한다.
-
-| 대상 | 포함 경로 |
-|---|---|
-| 설정·인증 | 실제 env, `CONFIG_FILE`, 서비스별 비밀 파일 5개, 사용 중인 push.env·Firebase 계정, Configurator 설치의 `release-manifest.json` |
-| DB·미디어 | `DATABASE_DIR`, `RECORDINGS_DIR`, **별도의 `RECOVERED_DIR`**, `SNAPSHOTS_DIR` |
-| 모델·TLS | `MODELS_DIR`, `CERTS_DIR` |
-| 복원 기준 | 코드·이미지 버전, 모델·파일 해시, 실제 경로와 파일 권한 |
-
-```powershell
-docker compose --env-file C:/path/to/compose.env -f server/compose.yml down
-# 실제 경로의 백업을 완료한다.
-docker compose --env-file C:/path/to/compose.env -f server/compose.yml up -d --wait
-```
-
-호스트의 복구 영상은 중앙 녹화와 별도 폴더다. 실행 중 SQLite 파일을 개별 복사하지 않는다. DB만 온라인 백업하는 `python server/scripts/backup_database.py`는 `server/.env` 배포용이며 결과는 `DATABASE_DIR/backups`다. 영상·설정은 포함하지 않는다.
-
-복원할 때 서비스를 중지하고 현재 자료를 별도 보존한다. 같은 백업 세트의 코드·이미지·DB·미디어·설정·키를 복원하고 무결성·권한·실제 재생을 확인한다. **자동 DB downgrade는 없다.**
-
-인증서 갱신은 새 `tls.crt`·`tls.key` 배치 → 동일 Compose 명령의 `exec -T nginx nginx -t` → `exec -T nginx nginx -s reload` 순서로 한다. 실제 단말 검증과 만료일을 확인한다.
-
-자동 복구가 놓친 구간은 Edge에 원본이 남아 있을 때 수동으로 가져온다. 아래 토큰은 [수동 연결](edge/README.md#수동-연결)에서 내보낸 해당 Edge의 보호 파일이며, 명령에는 값 대신 환경변수 이름을 전달한다. 기간은 UTC로 한 번에 최대 24시간을 지정한다.
-
-```powershell
-$env:EDGE_RECOVERY_TOKEN = (Get-Content -Raw -LiteralPath 'C:\secure\edge-001-control.token').Trim()
-try {
-  docker compose --env-file C:/path/to/compose.env -f server/compose.yml exec -T -e EDGE_RECOVERY_TOKEN data `
-    python -m app.workers.recovery --edge-url http://192.0.2.41:8002 --camera-id cam-001 `
-    --start 2026-09-07T00:00:00Z --end 2026-09-07T01:00:00Z
-} finally {
-  Remove-Item Env:EDGE_RECOVERY_TOKEN
-}
-```
-
-실제 배포의 추가 Compose 설정도 포함한다. 이 명령은 크기·해시를 검사해 중앙에 등록하며 Edge 원본을 삭제하지 않는다. 자세한 인자는 Data 내부의 `python -m app.workers.recovery --help`로 확인한다.
-
-## 업그레이드
-
-먼저 백업하고 기존 프로젝트 이름·데이터 경로를 유지한다. Windows 설치 프로그램은 코드를 교체하지만 운영 설정을 자동 이관하지 않는다. 이전 inference·identity 구성에서 전환할 때만 **전체 소스 저장소에서 Python 3.11로** 다음을 실행한다. 설치본에는 이관 스크립트에 필요한 Python 모듈 일부가 포함되지 않는다.
-
-```powershell
-python server/scripts/enable_object_processing.py --server-dir server --env-file C:/path/to/compose.env
-```
-
-Windows 설치를 이관하면 `--server-dir`를 실제 설치의 `server` 절대 경로로, `--env-file`을 운영 중인 `compose.env`로 바꾼다. 기존 토큰을 보존하며 오래된 단일 `secrets.env`는 수동 이전이 필요하다. 중간 실패는 해결 후 재실행한다. 설정 초기화로 이관을 대신하지 않는다.
-
-Configurator **Start services** 또는 `up -d --build --wait --remove-orphans`로 재생성한다. 단순 Restart는 새 환경·이미지를 반영하지 않는다. 같은 프로젝트의 구형 감지 컨테이너가 정리되고 6개만 실행되는지 확인한다. Data 시작 시 DB 마이그레이션이 적용되므로 실패 시 이전 이미지와 일관된 백업을 함께 복원한다.
-
-Windows 제거는 기본 운영 데이터를 보존한다. 사용자 지정 경로라면 먼저 `AI_CCTV_CLI.exe stop --env-file <실제 경로>`로 중지한다.
-
-## 개발과 검증
-
-아래 명령은 소스 저장소에서 실행한다. Windows 설치본은 운영용이며 개발 Compose·테스트 코드·문서 생성기는 포함하지 않는다. 서버 개발·테스트 도구는 컨테이너에 설치한다.
-
-| 위치 | 관리하는 환경 |
-|---|---|
-| `lib/pyproject.toml` | 공통 라이브러리; Python 서비스 이미지가 빌드할 때 설치 |
-| `server/services/*/requirements.txt` | 해당 서비스 실행 패키지 |
-| `server/services/*/requirements-dev.txt` | 해당 서비스의 개발·테스트 도구 추가 |
-| `tests/runner/` | 서버 공통·통합 테스트 이미지, pytest·Ruff 설정 |
-| `configurator/pyproject.toml`, `configurator/uv.lock` | Windows GUI·CLI 개발 및 빌드 |
-| `edge/pyproject.toml`, `mobile/pubspec.yaml` | 각 장치 프로그램의 독립 개발 환경 |
-
-### 서버 코드 개발
-
-[소스 배포](#소스-배포)로 **별도 개발 배포**를 먼저 준비한다. 개발용 env의 프로젝트 이름·저장소·포트는 운영 배포와 다르게 지정한다. `compose.dev.yml`은 지정한 env의 데이터를 사용하므로 운영 env에 적용하지 않는다. 아래는 개발 전용 `server/.env`를 가정한다.
-
-```powershell
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml up -d --build
-```
-
-PC의 코드를 컨테이너에 읽기 전용으로 연결한다. PC에서 편집하면 해당 Python 서비스가 자동으로 재시작한다. 의존성을 변경하면 이미지를 다시 빌드한다. 운영 이미지는 `production`, 개발 이미지는 `development` 단계이며 태그도 분리한다.
-
-서비스별 테스트는 해당 개발 컨테이너에서 실행한다. `data`를 `external`, `preprocessing`, `analysis`로 바꿔 사용할 수 있다.
-
-```powershell
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec data python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/data/tests -q
-```
-
-### 서버 자동 테스트
-
-설정 파일·Firebase·카메라 없이 다음 명령으로 공통·서비스별 테스트를 실행한다. 테스트용 DB·영상은 컨테이너의 임시 폴더에 만들며 운영 저장소를 연결하지 않는다. GUI·Edge 단독 테스트는 여기서 제외하고, Edge/Configurator와의 프로토콜 연동 검증은 포함한다.
-
-```powershell
-docker compose -f server/compose.test.yml build tests
-docker compose -f server/compose.test.yml run --rm tests
-docker compose -f server/compose.test.yml run --rm tests python -m ruff check --config tests/runner/ruff.toml --no-cache lib server tests configurator edge
-docker compose -f server/compose.test.yml run --rm tests python server/scripts/export_openapi.py --check
-```
-
-실제 Data·External 프로세스 간 HTTP 인증·이벤트·분석 작업 완료·로그아웃도 별도로 검증한다.
-
-```powershell
-docker compose -f server/compose.test.yml --profile integration up --build --abort-on-container-exit --exit-code-from integration integration
-docker compose -f server/compose.test.yml --profile integration down
-```
-
-`compose.test.yml`은 **단독 구성**이며 운영 Compose와 합치지 않는다. 외부 접속이 차단된 테스트 네트워크와 임시 저장소를 사용한다. 고정된 테스트 자격 증명은 이 내부 시험 전용이다. 이 검사는 Nginx·MediaMTX·실제 모델·단말 푸시까지 검증하지 않는다.
-
-OpenAPI 갱신 시에만 호스트의 문서 폴더를 쓰기 가능하게 연결한다. PowerShell 예시이며 Linux는 `${PWD}` 대신 `$(pwd)`, `--user`에는 호스트 UID:GID를 사용한다.
-
-```powershell
-docker compose -f server/compose.test.yml run --rm --user 0:0 -v "${PWD}/docs:/workspace/docs" tests python server/scripts/export_openapi.py
-```
-
-Windows GUI·CLI는 [Configurator README](configurator/README.md), Edge는 [Edge README](edge/README.md), 모바일은 [모바일 README](mobile/README.md), 모의 카메라는 [Mock Edge README](tests/mock_edge/README.md)를 따른다.
-
-실환경에서는 동시 영상·HD/FHD 변경·권한·녹화 복구·백업 복원·앱 푸시를 확인한다. 단위 테스트는 실제 카메라·영상·단말 검증을 대신하지 않는다. 기존 SQL 마이그레이션은 수정하지 않고 새 버전을 추가한다.
-
-### 패키지 빌드
-
-소스 저장소에서 [Windows 설치 파일](configurator/README.md#설치-파일-빌드) 또는 [Edge 패키지](edge/README.md#패키지-빌드)를 만든다. 결과와 체크섬은 각각 `dist/installer/`, `dist/edge/`에 생성된다. 배포 전 실제 장비에서 설치·업데이트·제거를 확인한다. Windows 실행 파일 서명은 별도 준비가 필요하다.
-
-## 배포 조건
-
-프로젝트 라이선스는 아직 확정하지 않았다. PyQt, Ultralytics·모델 가중치, MediaMTX, OpenCV·GStreamer·FFmpeg 등 포함 구성요소의 배포 조건을 확인한다. 실제 영상·비밀키·개인 설정을 커밋하지 않는다. 저장 영상 암호화는 제공하지 않으므로 장비·디스크·백업 접근 권한을 관리한다.
+이 프로젝트의 자체 소스 코드는 [MIT License](LICENSE)로 제공합니다. 사용하는 외부 라이브러리와 모델에는 각각의 라이선스가 적용됩니다.

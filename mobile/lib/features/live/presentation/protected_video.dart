@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'package:app/core/network/providers.dart';
 import 'object_overlay.dart';
 
+/// 인증 API에서 재생 주소를 받아 토큰을 포함한 실시간·녹화 플레이어를 구성한다.
 class ProtectedVideo extends ConsumerStatefulWidget {
   const ProtectedVideo({
     super.key,
@@ -14,7 +15,9 @@ class ProtectedVideo extends ConsumerStatefulWidget {
     this.live = false,
     this.cameraId,
   });
+  /// 재생 URL 자체가 아니라 URL 정보를 반환하는 인증 API 경로다.
   final String endpoint;
+  /// 실시간과 녹화 API가 서로 다른 응답 필드에 URL을 제공하므로 호출자가 지정한다.
   final String urlField;
   final bool live;
   final String? cameraId;
@@ -29,6 +32,7 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
   String? _token;
   String? _error;
   bool _loading = false;
+  // 플레이어 오류의 자동 복구는 한 번만 하며 수동 재연결이나 endpoint 변경 때 초기화한다.
   bool _retried = false;
   bool _showObjects = true;
   bool _foreground = true;
@@ -53,6 +57,7 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
     }
   }
 
+  /// 주기적으로 access 토큰을 확인하고 헤더가 바뀌었을 때만 플레이어를 재생성한다.
   Future<void> _renew() async {
     if (!mounted || _loading) return;
     try {
@@ -63,6 +68,8 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
     }
   }
 
+  /// 재생 주소와 토큰을 새로 받아 플레이어를 교체하며 동시에 두 초기화를 실행하지 않는다.
+  /// refresh는 플레이어 오류 복구 시 세션 갱신을 먼저 수행하도록 한다.
   Future<void> _load({bool refresh = false}) async {
     if (_loading) return;
     _loading = true;
@@ -84,12 +91,14 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
         httpHeaders: {'Authorization': 'Bearer $token'},
       );
       await next.initialize().timeout(const Duration(seconds: 25));
+      // 초기화 대기 중 화면이 닫혔다면 새 플레이어를 연결하지 않고 즉시 정리한다.
       if (!mounted) {
         await next.dispose();
         return;
       }
       if (position > Duration.zero) await next.seekTo(position);
       await next.play();
+      // 새 플레이어가 준비된 뒤 이전 리스너와 자원을 정리해 활성 플레이어를 교체한다.
       _token = token;
       _player = next;
       next.addListener(_playerChanged);
@@ -104,6 +113,7 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
     }
   }
 
+  /// 네이티브 플레이어의 오류를 감지해 토큰 갱신을 포함한 복구를 한 번 시도한다.
   void _playerChanged() {
     if (!mounted) return;
     if (_player?.value.hasError == true && !_loading && !_retried) {
@@ -213,6 +223,7 @@ class _ProtectedVideoState extends ConsumerState<ProtectedVideo>
     );
   }
 
+  /// 주기 갱신·앱 수명주기·플레이어 리스너를 해제하고 네이티브 재생 자원을 반환한다.
   @override
   void dispose() {
     _timer?.cancel();

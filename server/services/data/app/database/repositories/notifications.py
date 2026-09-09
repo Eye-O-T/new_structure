@@ -40,6 +40,7 @@ class PushRepositoryMixin:
             ))
         """
 
+    # 유효한 갱신 세션의 사용자·역할·로그인 계열에 단말을 묶어 저장한다.
     def put_mobile_device(self, values: dict[str, Any]) -> dict[str, Any]:
         now = format_utc(utc_now())
         with self.database.transaction() as connection:
@@ -108,6 +109,7 @@ class PushRepositoryMixin:
             "platform": values["platform"],
         }
 
+    # 요청 사용자가 소유한 등록만 제거하여 다른 계정의 단말 해제를 막는다.
     def delete_mobile_device(self, device_id: str, user_id: int) -> None:
         with self.database.transaction() as connection:
             connection.execute(
@@ -115,6 +117,7 @@ class PushRepositoryMixin:
                 (device_id, user_id),
             )
 
+    # 이벤트 저장 트랜잭션 안에서 수신 자격을 만족하는 단말에 한 시간 유효한 발송을 예약한다.
     def _enqueue_push(self, connection: sqlite3.Connection, event_id: int) -> None:
         now = utc_now()
         connection.execute(
@@ -131,6 +134,7 @@ class PushRepositoryMixin:
             },
         )
 
+    # 취소·만료·시도 초과 항목을 먼저 정리하고 전송할 한 건에 새 임대 ID를 부여한다.
     def claim_push(self) -> dict[str, Any] | None:
         # 발송 직전에 수신 자격을 재검사하고 2분 동안 처리 권한을 임대한다.
         # 실제 FCM 통신은 이 트랜잭션이 끝난 뒤 External에서 수행하여 DB 잠금을 오래 잡지 않는다.
@@ -188,6 +192,7 @@ class PushRepositoryMixin:
                 "attempt_count": row["attempt_count"] + 1,
             }
 
+    # FCM 결과를 저장하고 무효 단말은 제거하며 일시 실패만 제한된 횟수로 재예약한다.
     def complete_push(
         self, delivery_id: int, lease_id: str, outcome: str, error_code: str | None
     ) -> bool:

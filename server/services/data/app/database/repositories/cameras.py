@@ -24,6 +24,7 @@ class CamerasRepositoryMixin:
         with self.database.connection() as connection:
             return int(connection.execute("SELECT COUNT(*) FROM cameras").fetchone()[0])
 
+    # 활성 카메라 수 제한을 검사한 트랜잭션 안에서 카메라와 초기 실행 상태·프로필을 생성한다.
     def create_camera(self, values: dict[str, Any]) -> dict[str, Any]:
         now = _now()
         with self.database.transaction() as connection:
@@ -135,6 +136,7 @@ class CamerasRepositoryMixin:
             "reason_code": "CAMERA_HAS_HISTORY" if has_history else None,
         }
 
+    # 일반 사용자는 권한 테이블로 제한하고 관리자는 전체 카메라를 조회한다.
     def list_cameras(
         self,
         limit: int,
@@ -167,6 +169,7 @@ class CamerasRepositoryMixin:
             ).fetchall()
         return [_camera(row) or {} for row in rows]
 
+    # 부분 수정과 활성 수 제한을 적용하고 Edge 변경 시 더 이상 참조되지 않는 이전 장치를 정리한다.
     def update_camera(
         self, camera_id: str, values: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -287,6 +290,7 @@ class CamerasRepositoryMixin:
                 ).fetchone()
             )
 
+    # 장치 ID를 기준으로 제어·복구 주소와 인증값을 함께 등록하거나 교체한다.
     def put_edge_device(
         self,
         edge_device_id: str,
@@ -316,6 +320,7 @@ class CamerasRepositoryMixin:
             ).fetchone()
         return _as_dict(row) or {}
 
+    # 등록된 Edge 연결 정보가 있는 카메라만 제어 대상으로 해석한다.
     def get_camera_control_target(self, camera_id: str) -> dict[str, Any] | None:
         with self.database.connection() as connection:
             return _as_dict(
@@ -331,6 +336,7 @@ class CamerasRepositoryMixin:
                 ).fetchone()
             )
 
+    # 활성 카메라의 Edge 인증 정보와 마지막 이벤트 커서를 상태 수집 작업에 제공한다.
     def list_camera_control_targets(self) -> list[dict[str, Any]]:
         with self.database.connection() as connection:
             rows = connection.execute(
@@ -346,6 +352,7 @@ class CamerasRepositoryMixin:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    # 저장된 프로필과 Edge 연결 상태를 결합하되 관측되지 않은 연결은 offline으로 표시한다.
     def get_camera_video_profile(self, camera_id: str) -> dict[str, Any] | None:
         with self.database.connection() as connection:
             row = connection.execute(
@@ -363,6 +370,7 @@ class CamerasRepositoryMixin:
             ).fetchone()
         return _video_profile(row)
 
+    # 현재 프로필이 바뀌면 실행 상태의 프로필도 같은 트랜잭션에서 맞춘다.
     def update_camera_video_profile(
         self, camera_id: str, values: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -397,6 +405,7 @@ class CamerasRepositoryMixin:
                 )
         return self.get_camera_video_profile(camera_id)
 
+    # 부분 상태 보고에서 빠진 관측값은 유지하고 비교용 이전 상태를 결과에 함께 돌려준다.
     def update_camera_runtime_status(
         self, camera_id: str, values: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -464,6 +473,7 @@ class CamerasRepositoryMixin:
             edge_device_id = camera["edge_device_id"]
             if edge_device_id is not None:
 
+                # 명시한 None은 새 관측으로 반영하고 키가 없는 경우에만 이전 값을 재사용한다.
                 def edge_value(name: str, default: Any = None) -> Any:
                     if name in values:
                         return values[name]
@@ -538,6 +548,7 @@ class CamerasRepositoryMixin:
             )
         return result
 
+    # 카메라별 상태와 장치 공통 상태를 합치며 온라인 미관측 여부도 별도 필드로 보존한다.
     def get_camera_runtime_status(self, camera_id: str) -> dict[str, Any] | None:
         with self.database.connection() as connection:
             row = connection.execute(
@@ -563,6 +574,7 @@ class CamerasRepositoryMixin:
             ).fetchone()
         return _runtime_status(row)
 
+    # 이력 검사와 삭제를 같은 트랜잭션에서 수행해 사전 검사 뒤 새 이력이 생긴 경쟁도 막는다.
     def delete_camera(self, camera_id: str) -> bool:
         with self.database.transaction() as connection:
             camera = connection.execute(
@@ -602,6 +614,7 @@ class CamerasRepositoryMixin:
                     )
             return cursor.rowcount > 0
 
+    # 기존 카메라에만 송출 사용자명·해시를 저장하고 최초 생성 시각은 유지한다.
     def put_camera_publish_credential(
         self, camera_id: str, username: str, password_hash: str
     ) -> dict[str, Any] | None:

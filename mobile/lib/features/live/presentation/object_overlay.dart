@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/network/providers.dart';
 
+/// 재생 영역 위에서 카메라의 최신 감지 결과를 주기적으로 받아 표시한다.
 class ObjectOverlay extends ConsumerStatefulWidget {
   const ObjectOverlay({super.key, required this.cameraId});
   final String cameraId;
@@ -16,6 +17,7 @@ class _ObjectOverlayState extends ConsumerState<ObjectOverlay> {
   Timer? _timer;
   bool _fetching = false;
   Map<String, dynamic>? _frame;
+  // 기기 시계 보정과 무관한 경과 시간으로 마지막 성공 응답의 표시 수명을 잰다.
   final Stopwatch _age = Stopwatch();
 
   @override
@@ -37,6 +39,7 @@ class _ObjectOverlayState extends ConsumerState<ObjectOverlay> {
     if (oldWidget.cameraId != widget.cameraId) _frame = null;
   }
 
+  /// 한 번에 하나의 조회만 실행하고 현재 카메라에 유효한 최신 응답만 적용한다.
   Future<void> _poll() async {
     if (_fetching) return;
     _fetching = true;
@@ -61,6 +64,7 @@ class _ObjectOverlayState extends ConsumerState<ObjectOverlay> {
     }
   }
 
+  // 좌표 레이어가 영상의 터치 입력을 가로채지 않도록 포인터 처리를 통과시킨다.
   @override
   Widget build(BuildContext context) =>
       IgnorePointer(child: ObjectBoxes(frame: _frame));
@@ -73,6 +77,8 @@ class _ObjectOverlayState extends ConsumerState<ObjectOverlay> {
   }
 }
 
+/// 원본 프레임 픽셀의 감지 박스를 영상 영역 크기에 비례해 배치한다.
+/// 프레임 크기와 박스 경계가 유효한 객체만 그리며 API 조회는 담당하지 않는다.
 class ObjectBoxes extends StatelessWidget {
   const ObjectBoxes({super.key, required this.frame});
   final Map<String, dynamic>? frame;

@@ -14,6 +14,7 @@ from ..errors import ApiError, _not_found
 router = APIRouter()
 
 
+# 존재하는 카메라에 한해 관측을 전달하며 최신 시각 여부는 저장소가 판단한다.
 @router.put("/cameras/{camera_id}/objects")
 def put_objects(camera_id: str, payload: LiveObjects, repository: Repo):
     if repository.get_camera(camera_id) is None:
@@ -22,6 +23,7 @@ def put_objects(camera_id: str, payload: LiveObjects, repository: Repo):
     return {"accepted": True}
 
 
+# 없는 카메라의 404와 관측이 오래되어 빈 객체 목록이 된 상태를 구분한다.
 @router.get("/cameras/{camera_id}/objects")
 def get_objects(camera_id: str, repository: Repo):
     if repository.get_camera(camera_id) is None:
@@ -29,6 +31,7 @@ def get_objects(camera_id: str, repository: Repo):
     return repository.get_live_objects(camera_id)
 
 
+# 식별 충돌 등 결과 적용 불가를 409로 변환하는 두 처리 단계의 공통 완료 경계이다.
 def complete_object(stage, job_id, payload, repository):
     try:
         return {"accepted": repository.complete_object_job(stage, job_id, payload)}

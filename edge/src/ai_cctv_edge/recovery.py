@@ -19,6 +19,7 @@ from .state import default_state_root
 FILENAME = re.compile(r"^(\d{8}T\d{6}(?:\.\d+)?Z)_(\d{6})\.ts$")
 
 
+# 복구 요청의 시간대가 있는 ISO 시각을 UTC로 맞추고 시간대 없는 값은 거부한다.
 def _parse(value: str) -> datetime:
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     parsed = datetime.fromisoformat(normalized)
@@ -27,6 +28,7 @@ def _parse(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+# 캡처 시작 시각과 세그먼트 번호로 시작을 계산하며 구형 파일명은 수정 시각으로 추정한다.
 def _segment_start(path: Path, segment_seconds: int) -> datetime:
     match = FILENAME.fullmatch(path.name)
     if match:
@@ -36,6 +38,7 @@ def _segment_start(path: Path, segment_seconds: int) -> datetime:
     return datetime.fromtimestamp(path.stat().st_mtime - segment_seconds, UTC)
 
 
+# 영상 전체를 메모리에 올리지 않고 조각씩 읽어 전송 검증용 해시를 계산한다.
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -96,6 +99,7 @@ def _recoverable_segments(
     return tuple(item[2] for item in selected)
 
 
+# 카메라별 백업 루트와 인증을 고정한 복구 전용 HTTP 서비스를 만든다.
 def create_app(config_path: str | Path) -> FastAPI:
     config = EdgeConfig.load(config_path)
     authenticate = BearerAuthenticator(
@@ -108,6 +112,7 @@ def create_app(config_path: str | Path) -> FastAPI:
     def health_live():
         return {"status": "alive", "camera_id": config.camera_id}
 
+    # 요청 구간과 겹치는 완료 세그먼트의 상대 경로·크기·해시를 반환한다.
     @app.get("/v1/recovery/manifest", dependencies=[Depends(authenticate)])
     def manifest(start: str, end: str):
         try:
@@ -142,6 +147,7 @@ def create_app(config_path: str | Path) -> FastAPI:
                 )
         return {"camera_id": config.camera_id, "items": items}
 
+    # 목록 조회 이후에도 파일이 완료된 상태인지 다시 확인한 뒤 TS 영상을 전달한다.
     @app.get(
         "/v1/recovery/files/{relative_path:path}",
         dependencies=[Depends(authenticate)],

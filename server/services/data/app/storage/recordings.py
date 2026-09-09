@@ -14,6 +14,7 @@ from ..errors import ApiError
 from ..schemas import RecordingSegmentCreate
 from .paths import normalize_hook_segment_path, normalize_relative_path
 
+# 완료 파일의 이름·크기와 통지된 길이로 중앙 녹화 메타데이터 및 재전송 키를 만든다.
 def prepare_recording_hook(
     *,
     camera_id: str,
@@ -59,6 +60,7 @@ def prepare_recording_hook(
     }
 
 
+# ready 등록은 실제 파일과 크기를 확인하고 다른 상태는 요청 메타데이터를 사용한다.
 def prepare_segment(
     payload: RecordingSegmentCreate, settings: Settings
 ) -> dict[str, Any]:
@@ -155,6 +157,7 @@ def _prepare_orphaned_central_segment(
     }
 
 
+# DB 상태와 파일을 대조해 중단된 삭제를 마무리하고 안정화된 미등록 중앙 녹화를 복원한다.
 def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
     missing: list[str] = []
     restored: list[str] = []

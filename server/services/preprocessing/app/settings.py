@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -15,9 +16,13 @@ def _bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    normalized = raw.strip().lower()
+    if normalized not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+        raise ValueError(f"{name} must be a boolean")
+    return normalized in {"1", "true", "yes", "on"}
 
 
+# 영상 읽기·탐지·식별에 필요한 불변 실행 설정이며 탐지와 식별의 내부 토큰을 구분한다.
 @dataclass(frozen=True)
 class Settings:
     data_service_url: str
@@ -37,15 +42,21 @@ class Settings:
         "server.services.preprocessing.processors.detection.yolo:YoloTracker"
     )
     identity_plugin: str = (
-        "server.services.preprocessing.processors.identity:IdentityBlackBox"
+        "server.services.preprocessing.processors.identity:LocalAppearanceIdentity"
     )
     identity_token: str = ""
+    capture_timeout_seconds: float = 5.0
+    model_retry_seconds: float = 30.0
+    shutdown_timeout_seconds: float = 15.0
+    event_outbox_max_pending: int = 10000
+    event_outbox_max_bytes: int = 64 * 1024 * 1024
 
+    # 공통 설정의 추론 값을 기본으로 읽고 환경변수와 서비스별 기본값을 적용한다.
     @classmethod
     def from_env(cls) -> "Settings":
         config: AppConfig | None = None
         config_path = os.getenv("AI_CCTV_CONFIG_FILE")
-        if config_path and Path(config_path).is_file():
+        if config_path:
             config = load_config(config_path)
         inference = config.inference if config is not None else None
 
@@ -102,9 +113,18 @@ class Settings:
             ),
             identity_plugin=os.getenv(
                 "IDENTITY_PLUGIN",
-                "server.services.preprocessing.processors.identity:IdentityBlackBox",
+                "server.services.preprocessing.processors.identity:LocalAppearanceIdentity",
             ),
             identity_token=os.getenv("DATA_IDENTITY_TOKEN", ""),
+            capture_timeout_seconds=float(os.getenv("RTSP_TIMEOUT_SECONDS", "5")),
+            model_retry_seconds=float(os.getenv("MODEL_RETRY_SECONDS", "30")),
+            shutdown_timeout_seconds=float(
+                os.getenv("DETECTION_SHUTDOWN_SECONDS", "15")
+            ),
+            event_outbox_max_pending=int(
+                os.getenv("EVENT_OUTBOX_MAX_PENDING", "10000")
+            ),
+            event_outbox_max_bytes=int(os.getenv("EVENT_OUTBOX_MAX_BYTES", "67108864")),
         )
 
     def validate(self) -> None:
@@ -113,6 +133,19 @@ class Settings:
             raise ValueError(
                 "DATA_INFERENCE_TOKEN or legacy INTERNAL_SERVICE_TOKEN is required"
             )
+        if any(character.isspace() for character in self.internal_service_token):
+            raise ValueError("Data token must not contain whitespace")
+        data_url = urlsplit(self.data_service_url)
+        if (
+            data_url.scheme not in {"http", "https"}
+            or not data_url.hostname
+            or data_url.username is not None
+            or data_url.password is not None
+            or data_url.query
+            or data_url.fragment
+        ):
+            raise ValueError("DATA_SERVICE_URL must be a credential-free HTTP(S) URL")
+        data_url.port
         parsed = urlsplit(self.rtsp_base_url)
         if parsed.scheme not in {"rtsp", "rtsps"} or not parsed.hostname:
             raise ValueError("MEDIAMTX_RTSP_BASE_URL must be an RTSP(S) URL")
@@ -124,6 +157,9 @@ class Settings:
             raise ValueError(
                 "MEDIAMTX_RTSP_BASE_URL must not contain a query or fragment"
             )
+        parsed.port
+        if any(part in {".", ".."} for part in parsed.path.split("/")):
+            raise ValueError("MEDIAMTX_RTSP_BASE_URL contains an invalid path")
         if not self.media_read_username or any(
             character in self.media_read_username for character in "\x00\r\n"
         ):
@@ -136,20 +172,38 @@ class Settings:
             raise ValueError(
                 "INFERENCE_DEVICE must be auto, cpu, cuda, or cuda:<index>"
             )
-        if not 0 <= self.confidence <= 1:
+        if not math.isfinite(self.confidence) or not 0 <= self.confidence <= 1:
             raise ValueError("INFERENCE_CONFIDENCE must be in range 0..1")
-        if self.analysis_fps <= 0:
-            raise ValueError("ANALYSIS_FPS must be greater than zero")
-        if self.disappear_seconds <= 0:
-            raise ValueError("DISAPPEAR_SECONDS must be greater than zero")
+        for name, value, maximum in (
+            ("ANALYSIS_FPS", self.analysis_fps, 60),
+            ("DISAPPEAR_SECONDS", self.disappear_seconds, 3600),
+            ("CAMERA_REFRESH_SECONDS", self.refresh_seconds, 3600),
+            ("RTSP_TIMEOUT_SECONDS", self.capture_timeout_seconds, 30),
+            ("MODEL_RETRY_SECONDS", self.model_retry_seconds, 3600),
+            ("DETECTION_SHUTDOWN_SECONDS", self.shutdown_timeout_seconds, 60),
+        ):
+            if not math.isfinite(value) or not 0 < value <= maximum:
+                raise ValueError(f"{name} must be finite and in range 0..{maximum}")
+        if not 1 <= self.event_outbox_max_pending <= 100000:
+            raise ValueError("EVENT_OUTBOX_MAX_PENDING must be in range 1..100000")
+        if not 1024 <= self.event_outbox_max_bytes <= 1024 * 1024 * 1024:
+            raise ValueError("EVENT_OUTBOX_MAX_BYTES must be in range 1024..1073741824")
 
     def rtsp_source_url(self, stream_path: str) -> str:
         """인증 정보를 인코딩한 RTSP URL을 만든다. 반환값은 로그에 남기지 않는다."""
 
         parsed = urlsplit(self.rtsp_base_url)
-        normalized_path = stream_path.strip("/")
-        if not normalized_path:
-            raise ValueError("RTSP stream path must not be empty")
+        normalized_path = stream_path
+        if (
+            not normalized_path
+            or normalized_path.startswith("/")
+            or "\\" in normalized_path
+            or any(ord(character) < 0x20 for character in normalized_path)
+            or any(part in {"", ".", ".."} for part in normalized_path.split("/"))
+        ):
+            raise ValueError(
+                "RTSP stream path must be a relative path without traversal"
+            )
         # URL에서 의미를 가지는 특수 문자를 인코딩해 경로와 인증 정보가 섞이지 않게 한다.
         escaped_path = quote(normalized_path, safe="/-._~")
         base_path = parsed.path.rstrip("/")

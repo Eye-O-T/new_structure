@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:app/core/config/api_config.dart';
 import 'package:app/core/network/providers.dart';
 
+/// 서버와 계정 입력을 받아 공용 세션의 로그인을 시작하는 화면이다.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
   @override
@@ -25,6 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (previous != null) server.text = previous.toString();
   }
 
+  /// 중복 제출을 막고 비동기 로그인 결과를 화면이 남아 있을 때만 오류 상태로 반영한다.
   Future<void> submit() async {
     if (busy) return;
     setState(() {
@@ -45,6 +47,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         );
       }
     } finally {
+      // 성공한 로그인은 라우터가 이 화면을 제거할 수 있어 완료 시 mounted를 확인한다.
       if (mounted) setState(() => busy = false);
     }
   }
@@ -106,6 +109,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     ),
   );
 
+  /// 화면이 소유한 입력 컨트롤러를 함께 해제한다.
   @override
   void dispose() {
     server.dispose();

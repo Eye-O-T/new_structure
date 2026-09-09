@@ -16,6 +16,7 @@ from ..schemas import RetentionRequest
 from .paths import normalize_relative_path
 
 
+# dry_run에서는 후보만 보고하고 실제 실행에서는 삭제 진행 상태를 기록하며 순서대로 지운다.
 def retention_cleanup(
     repository: DataRepository,
     settings: Settings,
@@ -62,11 +63,13 @@ def retention_cleanup(
     }
 
 
+# 녹화·스냅샷·백업 폴더가 모두 존재하고 읽기·쓰기가 가능한지 확인한다.
 def storage_is_ready(settings: Settings) -> bool:
     roots = (settings.storage_root, settings.snapshot_root, settings.backup_root)
     return all(root.is_dir() and os.access(root, os.R_OK | os.W_OK) for root in roots)
 
 
+# 녹화 저장소가 속한 디스크의 여유 비율을 계산하여 경고 임계값과 비교한다.
 def storage_usage(settings: Settings) -> dict[str, Any]:
     usage = shutil.disk_usage(settings.storage_root)
     free_percent = round((usage.free / usage.total) * 100, 2) if usage.total else 0.0

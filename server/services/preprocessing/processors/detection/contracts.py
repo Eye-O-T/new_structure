@@ -10,6 +10,7 @@ from ai_cctv_core.contracts.objects import LiveObject
 from ai_cctv_core.identifiers import validate_camera_id
 
 
+# 하나의 추적 세션에서 관측한 BGR 영상과 시간·카메라 식별자를 플러그인에 전달한다.
 class DetectionFrame(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schema_version: Literal[1] = 1
@@ -20,6 +21,7 @@ class DetectionFrame(BaseModel):
     # 큰 영상 배열은 JSON 직렬화와 객체 출력에서 제외한다.
     image: Any = Field(exclude=True, repr=False)
 
+    # 카메라 ID·시간대와 OpenCV가 기대하는 영상 모양·uint8 자료형을 검사한다.
     @model_validator(mode="after")
     def valid_frame(self):
         validate_camera_id(self.camera_id)
@@ -37,6 +39,7 @@ class DetectionFrame(BaseModel):
         return self
 
 
+# 탐지 플러그인의 결과를 ID·좌표·신뢰도가 검증된 최대 100개 객체로 제한한다.
 class DetectionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal[1] = 1

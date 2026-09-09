@@ -51,6 +51,7 @@ from .validation import _public_media_url
 router = APIRouter()
 
 
+# 송출 해제 성공 여부와 관계없이 일회성 MediaMTX 제어 연결을 정리한다.
 async def _disconnect_camera_publisher(settings: Settings, camera_id: str) -> bool:
     client = MediaMtxClient(
         settings.media_control_url,
@@ -62,6 +63,7 @@ async def _disconnect_camera_publisher(settings: Settings, camera_id: str) -> bo
         await client.close()
 
 
+# 내부 RTSP·Edge 주소 및 인증값을 제거하고 실행 상태는 별도 상태 API에 맡긴다.
 def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
     result = dict(camera)
     for internal_field in (
@@ -80,6 +82,7 @@ def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+# 목록·페이지·단일 카메라 응답 모두 같은 비공개 필드 제거 절차를 적용한다.
 def _public_cameras(payload: Any) -> Any:
     if isinstance(payload, list):
         return [_public_camera(item) for item in payload if isinstance(item, dict)]
@@ -94,6 +97,7 @@ def _public_cameras(payload: Any) -> Any:
     raise DataServiceError("invalid camera response")
 
 
+# 카메라 입력은 호스트가 있는 RTSP(S) 주소만 허용하고 제어 문자를 거절한다.
 def _validate_source_url(value: str | None) -> None:
     if value is None:
         return
@@ -106,6 +110,7 @@ def _validate_source_url(value: str | None) -> None:
         raise HTTPException(status_code=400, detail="source_url is invalid")
 
 
+# Edge 접속 주소에서 사용자 정보·질의·프래그먼트·상위 경로를 차단한다.
 def _validate_edge_url(value: str | None, name: str) -> None:
     if value is None:
         return
@@ -124,6 +129,7 @@ def _validate_edge_url(value: str | None, name: str) -> None:
         )
 
 
+# 지원 프로필 목록보다 입력·인코더의 사용 가능 여부를 먼저 판정하여 정확한 실패 원인을 알린다.
 def _edge_capability_error(
     capabilities: dict[str, Any],
 ) -> EdgeControlError | None:
@@ -189,6 +195,7 @@ def _edge_capability_error(
     return None
 
 
+# 현재 사용자의 ID로 권한 필터를 적용하고 내부 필드를 제거한 페이지를 반환한다.
 @router.get("/api/v1/cameras", response_model=CameraPageResponse)
 async def list_cameras(
     limit: int = Query(default=50, ge=1, le=100),
@@ -205,6 +212,7 @@ async def list_cameras(
     )
 
 
+# 비활성 등록·송출 해시 저장·활성화를 같은 카메라 잠금 안에서 순서대로 수행한다.
 @router.post("/api/v1/cameras", status_code=201, response_model=CameraResponse)
 async def create_camera(
     request: Request,
@@ -261,6 +269,7 @@ async def create_camera(
         return result
 
 
+# 부분 설정을 검증하고 활성 상태 변경 시 오래된 실행 상태와 송출 연결도 정리한다.
 @router.patch("/api/v1/cameras/{camera_id}", response_model=CameraResponse)
 async def update_camera(
     request: Request,
@@ -304,6 +313,7 @@ async def update_camera(
         return _public_camera(updated)
 
 
+# 이력 사전 검사 후 신규 송출 차단·기존 연결 해제·DB 삭제 순서로 처리한다.
 @router.delete("/api/v1/cameras/{camera_id}", status_code=204)
 async def delete_camera(
     request: Request,
@@ -429,6 +439,7 @@ async def rotate_camera_publish_credentials(
         return result
 
 
+# 대상 카메라의 현재 권한을 확인한 결과에서 공개 필드만 반환한다.
 @router.get("/api/v1/cameras/{camera_id}", response_model=CameraResponse)
 async def get_camera(
     camera_id: str,
@@ -438,6 +449,7 @@ async def get_camera(
     return _public_camera(await _ensure_camera_access(data, principal, camera_id))
 
 
+# 권한이 있고 활성인 카메라에 대해 쿠키 인증이 필요한 HLS 재생 계약을 만든다.
 @router.get("/api/v1/cameras/{camera_id}/live", response_model=CameraLiveResponse)
 async def get_camera_live(
     camera_id: str,
@@ -464,6 +476,7 @@ async def get_camera_live(
     }
 
 
+# 권한 확인 후 사용자가 판단에 필요한 프로필·지원 목록·연결 상태만 노출한다.
 @router.get(
     "/api/v1/cameras/{camera_id}/video-profile",
     response_model=VideoProfileResponse,
@@ -488,6 +501,7 @@ async def get_camera_video_profile(
     }
 
 
+# 원하는 프로필을 먼저 기록하고 Edge 기능 확인·적용 응답 검증 뒤 실제 프로필을 확정한다.
 @router.patch(
     "/api/v1/cameras/{camera_id}/video-profile",
     response_model=VideoProfileResponse,
@@ -620,6 +634,7 @@ async def update_camera_video_profile(
     }
 
 
+# Data의 내부 비교용 상태는 제외하고 카메라 권한을 확인한 공개 상태 필드만 반환한다.
 @router.get(
     "/api/v1/cameras/{camera_id}/status",
     response_model=CameraStatusResponse,

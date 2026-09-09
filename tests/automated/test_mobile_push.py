@@ -1,3 +1,4 @@
+# 실제 Data 저장소를 사용해 푸시 권한·세션 연결·작업 임대와 외부 API 인증을 검증한다.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -22,9 +23,10 @@ from server.services.external.app.notifications.firebase import (
 )
 from server.services.external.app.workers.push_dispatcher import PushDispatcher
 from server.services.external.app.security.passwords import hash_password
-from configurator.compose_adapter import ComposeAdapter
+from server.setup.install_helper.compose_adapter import ComposeAdapter
 
 
+# 관리자·허용된 조회자·미허용 조회자를 같은 DB에 준비해 수신 권한 차이를 비교한다.
 @pytest.fixture
 def repository(tmp_path: Path):
     repo = DataRepository(Database(tmp_path / "db.sqlite"))
@@ -52,6 +54,7 @@ def repository(tmp_path: Path):
     return repo
 
 
+# 사용자의 refresh 세션에 기기를 연결하고 이벤트 필터·FCM 토큰을 시나리오별로 바꾼다.
 def register(repo, user=1, event_types=None, token=None):
     device = f"{user:032x}"
     repo.put_mobile_device(
@@ -68,6 +71,7 @@ def register(repo, user=1, event_types=None, token=None):
     return device
 
 
+# 현재 시각의 이벤트를 생성해 만료되지 않은 전송 작업이 준비되도록 한다.
 def event(repo, camera="cam-001", edge_id=None, event_type="person_appeared"):
     return repo.create_event(
         {
@@ -79,6 +83,7 @@ def event(repo, camera="cam-001", edge_id=None, event_type="person_appeared"):
     )
 
 
+# 권한과 수신 필터를 모두 만족한 기기에만 작업을 만들며 같은 Edge 이벤트는 중복 발송하지 않는다.
 def test_enqueue_acl_preferences_and_idempotence(repository):
     repo = repository
     register(repo, 1)
@@ -97,6 +102,7 @@ def test_enqueue_acl_preferences_and_idempotence(repository):
     assert not any(d["user_id"] == 3 for d in deliveries)
 
 
+# 이벤트 생성 후 권한·역할·세션·기기 상태가 바뀌면 발송 직전 다시 검사해야 한다.
 @pytest.mark.parametrize("revoke", ["acl", "inactive", "role", "session", "disabled"])
 def test_revalidate_before_send(repository, revoke):
     repo = repository
@@ -118,6 +124,7 @@ def test_revalidate_before_send(repository, revoke):
     assert repo.claim_push() is None
 
 
+# 정상 토큰 회전은 기기 연결을 이어가고 로그아웃은 연결과 이후 수신을 제거한다.
 def test_session_rotation_preserves_push_and_logout_removes_it(repository):
     repo = repository
     register(repo)
@@ -140,6 +147,7 @@ def test_session_rotation_preserves_push_and_logout_removes_it(repository):
         assert conn.execute("SELECT count(*) FROM mobile_devices").fetchone()[0] == 0
 
 
+# 재시작한 두 작업자 중 하나만 임대하고 만료 후 재임대한 작업은 이전 완료 응답을 거부한다.
 def test_restart_concurrent_claim_retry_and_stale_ack(repository):
     repo = repository
     register(repo)
@@ -161,6 +169,7 @@ def test_restart_concurrent_claim_retry_and_stale_ack(repository):
     assert repo.claim_push() is None
 
 
+# 전송 유효기간이 지났거나 FCM이 폐기한 토큰이면 후속 발송도 멈춰야 한다.
 def test_expired_delivery_and_invalid_token_cleanup(repository):
     repo = repository
     register(repo)
@@ -177,6 +186,7 @@ def test_expired_delivery_and_invalid_token_cleanup(repository):
     assert repo.claim_push() is None
 
 
+# 같은 단말 토큰을 다른 계정에 연결할 때 이전 계정의 대기 알림을 취소한다.
 def test_rebinding_token_cancels_previous_account_deliveries(repository):
     repo = repository
     token = "shared-device-token-" + "x" * 30
@@ -188,6 +198,7 @@ def test_rebinding_token_cancels_previous_account_deliveries(repository):
     assert repo.claim_push()["user_id"] == 2
 
 
+# 실제 배포 환경변수 없이 외부 API와 발송기의 필수 설정을 제공한다.
 def settings():
     return Settings(
         data_base_url="http://data/internal/v1",
@@ -199,7 +210,8 @@ def settings():
     )
 
 
-def test_configurator_push_overlay_is_opt_in_and_preserves_base(tmp_path):
+# push.env가 있을 때만 푸시 overlay를 추가하고 기존 compose 환경 파일은 계속 사용한다.
+def test_install_helper_push_overlay_is_opt_in_and_preserves_base(tmp_path):
     server = tmp_path / "server"
     server.mkdir()
     env = tmp_path / "configuration" / "compose.env"
@@ -216,6 +228,7 @@ def test_configurator_push_overlay_is_opt_in_and_preserves_base(tmp_path):
     assert command[-2:] == ["up", "-d"]
 
 
+# ASGI로 실제 인증 API와 Data API를 연결해 다른 계정의 refresh 토큰·기기 접근을 거부한다.
 @pytest.mark.asyncio
 async def test_public_registration_real_auth_and_data_api(tmp_path):
     data_app = create_data_app(
@@ -308,6 +321,7 @@ async def test_public_registration_real_auth_and_data_api(tmp_path):
         await data.close()
 
 
+# 발송기의 성공·일시 실패·무효 토큰 결과가 작업 완료 상태로 그대로 전달되어야 한다.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["sent", "retry", "invalid_token"])
 async def test_dispatcher_acknowledges_sender_outcome(outcome):
@@ -330,6 +344,7 @@ async def test_dispatcher_acknowledges_sender_outcome(outcome):
     assert data.result == outcome
 
 
+# Firebase 메시지 생성은 실제 SDK를 쓰고 전송만 대체해 개인정보 노출과 오류 변환을 검사한다.
 def test_real_firebase_message_and_unregistered_error_without_network(monkeypatch):
     from firebase_admin import messaging
 

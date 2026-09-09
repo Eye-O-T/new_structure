@@ -1,3 +1,4 @@
+# 감지 플러그인의 자료형 계약과 재식별 초기화 실패 시 감지 서비스의 독립 가동을 확인한다.
 from contextlib import asynccontextmanager
 import asyncio
 from dataclasses import replace
@@ -16,6 +17,7 @@ from server.services.preprocessing.processors.detection.contracts import (
 )
 
 
+# 프레임 형태·스키마 버전·신뢰도 범위를 검증하고 기본 어댑터 import가 모델을 읽지 않게 한다.
 def test_frame_and_result_contract_reject_incompatible_plugins():
     frame = DetectionFrame(
         camera_id="cam-001",
@@ -40,6 +42,7 @@ def test_frame_and_result_contract_reject_incompatible_plugins():
     assert callable(factory.process)
 
 
+# 재식별 초기화가 영원히 대기하거나 실패해도 감지는 시작되고 준비 상태는 degraded로 보고한다.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("identity_failure", [False, True], ids=["slow", "failing"])
 async def test_identity_startup_does_not_block_detection(

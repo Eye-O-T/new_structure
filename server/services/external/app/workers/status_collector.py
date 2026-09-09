@@ -25,6 +25,7 @@ def _utc_now() -> str:
     )
 
 
+# 잠금 팩터리를 주입하지 않은 실행에도 같은 async context manager 인터페이스를 제공한다.
 @asynccontextmanager
 async def _unlocked_camera():
     yield
@@ -53,6 +54,7 @@ class StatusCollector:
             timeout_seconds=self.settings.edge_status_timeout_seconds,
         )
 
+    # Data의 목록·페이지 응답을 수집 대상 객체 목록으로 통일한다.
     @staticmethod
     def _targets(payload: Any) -> list[dict[str, Any]]:
         items = payload.get("items", []) if isinstance(payload, dict) else payload
@@ -60,6 +62,7 @@ class StatusCollector:
             raise ValueError("Data Service returned invalid control targets")
         return [item for item in items if isinstance(item, dict)]
 
+    # 카메라 일치·온라인 불리언·프로필·자원 범위를 검사하고 불명확한 연결 상태는 unknown으로 둔다.
     @staticmethod
     def _status(camera_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         returned_camera = payload.get("camera_id")
@@ -115,6 +118,7 @@ class StatusCollector:
             "last_error_code": payload.get("last_error_code"),
         }
 
+    # 현재 프로필 관측은 반영하되 실제 기능 점검이 확인된 경우에만 지원 목록을 갱신한다.
     @staticmethod
     def _profile_observation(payload: dict[str, Any]) -> dict[str, Any]:
         current = payload.get("current_video_profile", payload.get("current_profile"))
@@ -143,6 +147,7 @@ class StatusCollector:
         observation["supported_profiles"] = list(dict.fromkeys(supported))
         return observation
 
+    # 저장된 이전 상태를 지문으로 삼아 같은 상태 변화의 재시도가 중복 이벤트를 만들지 않게 한다.
     async def _create_transition_event(
         self,
         camera_id: str,
@@ -181,6 +186,7 @@ class StatusCollector:
             }
         )
 
+    # 페이지를 순서대로 저장하고 커서·가져온 유형·커서 만료 여부를 상태 갱신 단계에 반환한다.
     async def _drain_events(
         self,
         edge: EdgeHttpClient,
@@ -262,6 +268,7 @@ class StatusCollector:
             cursor_expired,
         )
 
+    # 잔량이 낮아질수록 높은 경보로 분류하고 미관측값은 unknown으로 구분한다.
     @staticmethod
     def _battery_level(value: Any, settings: Settings) -> str:
         if not isinstance(value, (int, float)):
@@ -272,6 +279,7 @@ class StatusCollector:
             return "low"
         return "normal"
 
+    # 사용량이 높아질수록 높은 경보로 분류하고 미관측값은 unknown으로 구분한다.
     @staticmethod
     def _storage_level(value: Any, settings: Settings) -> str:
         if not isinstance(value, (int, float)):
@@ -282,6 +290,7 @@ class StatusCollector:
             return "warning"
         return "normal"
 
+    # 이전 관측과 현재 상태를 비교하되 이번 Edge 일지에 이미 있는 유형은 중앙에서 만들지 않는다.
     async def _synthesise_missing_transitions(
         self,
         camera_id: str,
@@ -392,11 +401,13 @@ class StatusCollector:
                     camera_id, event_type, occurred_at, stored, metadata
                 )
 
+    # 카메라 설정·삭제와 같은 잠금을 사용해 수집한 상태가 제어 변경과 엇갈리지 않게 한다.
     async def _collect_target(self, target: dict[str, Any]) -> tuple[bool, int]:
         camera_id = str(target["camera_id"])
         async with self._camera_lock_factory(camera_id):
             return await self._collect_target_locked(target)
 
+    # 일지와 누락 변화 저장이 끝난 뒤 상태 기준점을 갱신하고 Edge 오류 때는 관측값을 보존한다.
     async def _collect_target_locked(self, target: dict[str, Any]) -> tuple[bool, int]:
         camera_id = str(target["camera_id"])
         edge = self._edge_client_factory(target)
@@ -462,6 +473,7 @@ class StatusCollector:
         finally:
             await edge.close()
 
+    # 카메라를 병렬 수집하되 개별 실패를 격리하여 나머지 결과와 회차 통계를 반환한다.
     async def collect_once(self) -> dict[str, int]:
         targets = self._targets(await self.data.list_camera_control_targets())
         results = await asyncio.gather(
@@ -490,6 +502,7 @@ class StatusCollector:
             "events_imported": events,
         }
 
+    # 한 수집 회차의 실패가 다음 회차를 막지 않도록 기록한 뒤 설정 간격으로 반복한다.
     async def run(self) -> None:
         while True:
             try:

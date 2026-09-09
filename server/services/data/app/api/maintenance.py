@@ -48,6 +48,7 @@ def reconcile_storage(repository: Repo, settings: RuntimeSettings) -> dict[str, 
     return reconcile(repository, settings)
 
 
+# 후보 확인과 실제 삭제의 구분은 요청의 dry_run 값을 그대로 따른다.
 @router.post("/retention/cleanup")
 def clean_retention(
     payload: RetentionRequest,
@@ -57,6 +58,7 @@ def clean_retention(
     return retention_cleanup(repository, settings, payload)
 
 
+# 백업 루트 안의 새 경로만 허용하며 기존 백업 파일은 덮어쓰지 않는다.
 @router.post("/backup", status_code=status.HTTP_201_CREATED)
 def backup_database(
     payload: BackupRequest,

@@ -42,6 +42,7 @@ class Settings:
     initial_admin_password_hash: str | None = None
     config_path: Path | None = None
 
+    # 개별 환경 변수, 공통 설정 파일, 기본값 순으로 실행 설정을 구성한다.
     @classmethod
     def from_env(cls) -> "Settings":
         config_path = (
@@ -179,6 +180,7 @@ class Settings:
             return {scope: token or "" for scope, token in scoped_tokens.items()}
         return {scope: self.internal_token for scope in scoped_tokens}
 
+    # 서비스별 인증값의 완전성·서로 다른 값 여부와 운영 범위를 확인한 뒤 저장 폴더를 만든다.
     def prepare_directories(self) -> None:
         scoped_tokens = (
             self.data_external_token,

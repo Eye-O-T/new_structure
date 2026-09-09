@@ -15,6 +15,7 @@ class UsersRepositoryMixin:
         with self.database.connection() as connection:
             return int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
 
+    # 계정 생성과 생성된 행 조회를 같은 트랜잭션에서 처리한다.
     def create_user(self, values: dict[str, Any]) -> dict[str, Any]:
         now = _now()
         with self.database.transaction() as connection:
@@ -62,6 +63,7 @@ class UsersRepositoryMixin:
             ).fetchall()
         return [_user(row) or {} for row in rows]
 
+    # 수정 가능한 열만 SQL에 포함하며 미지정 필드는 기존 값을 유지한다.
     def update_user(
         self, user_id: int, values: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -90,6 +92,7 @@ class UsersRepositoryMixin:
             cursor = connection.execute("DELETE FROM users WHERE id = ?", (user_id,))
             return cursor.rowcount > 0
 
+    # 외부 카메라 ID를 내부 키로 바꾸고 이미 존재하는 권한 부여는 그대로 유지한다.
     def grant_camera(self, user_id: int, camera_id: str) -> dict[str, Any] | None:
         now = _now()
         with self.database.transaction() as connection:
@@ -108,6 +111,7 @@ class UsersRepositoryMixin:
             )
         return {"user_id": user_id, "camera_id": camera_id, "created_at": now}
 
+    # 해당 사용자·카메라 조합만 제거하고 실제 삭제 여부를 반환한다.
     def revoke_camera(self, user_id: int, camera_id: str) -> bool:
         with self.database.transaction() as connection:
             cursor = connection.execute(
@@ -120,6 +124,7 @@ class UsersRepositoryMixin:
             )
             return cursor.rowcount > 0
 
+    # 명시적으로 부여된 카메라 권한을 조회한다. 관리자 우회는 상위 조회에서 처리한다.
     def list_user_cameras(self, user_id: int) -> list[dict[str, Any]]:
         with self.database.connection() as connection:
             rows = connection.execute(
@@ -133,6 +138,7 @@ class UsersRepositoryMixin:
             ).fetchall()
         return [_camera(row) or {} for row in rows]
 
+    # 중복 ID는 입력 순서를 유지하며 제거하고 하나라도 없는 카메라면 기존 권한을 보존한다.
     def replace_camera_permissions(
         self, user_id: int, camera_ids: list[str]
     ) -> list[dict[str, Any]]:

@@ -54,6 +54,7 @@ class _MediaAuthResponse(Response):
         super().__init__(status_code=204)
         self._camera_lock = lock
 
+    # 성공 응답 전송이 끝날 때까지 잠금을 보유하고 전송 예외가 발생해도 해제한다.
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         try:
             await super().__call__(scope, receive, send)
@@ -61,6 +62,7 @@ class _MediaAuthResponse(Response):
             self._camera_lock.release()
 
 
+# 원래 영상 URI와 요청 선택자의 일치를 확인하고 해당 카메라·녹화·이벤트의 권한을 검사한다.
 @router.get(
     "/internal/auth/verify",
     operation_id="verify_internal_auth_get",
@@ -164,6 +166,7 @@ async def internal_auth_verify(
     return {"valid": True}
 
 
+# 내부 HLS·RTSP 읽기·카메라 송출의 인증 경로를 나누고 송출 상태 확인을 잠금으로 보호한다.
 @router.post("/internal/media-auth", status_code=204, include_in_schema=False)
 async def internal_media_auth(
     request: Request,

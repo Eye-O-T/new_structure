@@ -1,4 +1,4 @@
-# 자동 생성: python server/scripts/export_openapi.py (직접 수정하지 않음)
+# 자동 생성: python server/services/external/tools/export_openapi.py (직접 수정하지 않음)
 openapi: 3.1.0
 info:
   title: AI CCTV 공개 API — 모바일 교체 계약
@@ -2600,6 +2600,6 @@ servers:
 - url: /
   description: 배포된 중앙 HTTPS origin. /api/v1은 각 path에 포함된다.
 x-generation:
-  command: python server/scripts/export_openapi.py
-  check: python server/scripts/export_openapi.py --check
+  command: python server/services/external/tools/export_openapi.py
+  check: python server/services/external/tools/export_openapi.py --check
   source: server/services/external/app/main.py:create_app().openapi()

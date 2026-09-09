@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="1000" viewBox="0 0 1120 1000" role="img" aria-labelledby="title desc">
+<title id="title">03  사람 감지 · 이벤트 · 후속 분석</title>
+<desc id="desc">대표 이미지를 먼저 저장하고, Data가 감지 기록과 독립 작업을 함께 만든다.</desc>
+<defs>
+<marker id="a2563eb" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#2563eb"/></marker>
+<marker id="a0f766e" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#0f766e"/></marker>
+<marker id="a7c3aed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#7c3aed"/></marker>
+<marker id="ab45309" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#b45309"/></marker>
+<marker id="a475569" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#475569"/></marker>
+</defs>
+<rect width="1120" height="1000" fill="#ffffff"/>
+<text x="32" y="43" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">03  사람 감지 · 이벤트 · 후속 분석</text>
+<text x="32" y="76" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">대표 이미지를 먼저 저장하고, Data가 감지 기록과 독립 작업을 함께 만든다.</text>
+<rect x="30" y="125" width="310" height="115" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="185.0" y="163.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Preprocessing</text>
+<text x="185.0" y="192.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">RTSP 수신 → 사람 감지·추적</text>
+<text x="185.0" y="219.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">카메라 · 추적 세션 · 로컬 ID</text>
+<rect x="405" y="125" width="310" height="115" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="560.0" y="163.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">등장 · 사라짐 판단</text>
+<text x="560.0" y="192.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">등장: 대표 프레임 1장</text>
+<text x="560.0" y="219.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">사라짐: 감지 공백 기준 판정</text>
+<rect x="780" y="125" width="310" height="115" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="935.0" y="163.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">등장 이미지 저장</text>
+<text x="935.0" y="192.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">원본 · 사람 크롭 · 박스 JPEG</text>
+<text x="935.0" y="219.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">공유 /snapshots에 먼저 저장</text>
+<path d="M 340 182 L 405 182" fill="none" stroke="#7c3aed" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="405,182 394.0,187.0 394.0,177.0" fill="#7c3aed"/>
+<path d="M 715 182 L 780 182" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="780,182 769.0,187.0 769.0,177.0" fill="#0f766e"/>
+<rect x="724.0" y="147" width="46.0" height="23" rx="4" fill="#ffffff"/>
+<text x="747" y="165" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">등장</text>
+<rect x="30" y="340" width="290" height="110" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="175.0" y="375.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">최신 좌표</text>
+<text x="175.0" y="404.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">Data에 별도 갱신 → 앱 표시</text>
+<text x="175.0" y="431.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">3초가 지난 좌표는 표시 제외</text>
+<path d="M 185 240 L 185 340" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="185,340 180.0,329.0 190.0,329.0" fill="#2563eb"/>
+<rect x="127.0" y="273" width="116.0" height="23" rx="4" fill="#ffffff"/>
+<text x="185" y="291" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">이벤트와 독립</text>
+<rect x="390" y="330" width="350" height="140" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="565.0" y="367.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Data · 하나의 트랜잭션</text>
+<text x="565.0" y="396.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">이벤트 저장</text>
+<text x="565.0" y="423.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">등장 관측의 identity · analysis 작업</text>
+<text x="565.0" y="450.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">푸시 대기열 생성</text>
+<path d="M 935 240 L 935 305 L 690 305 L 690 330" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="690,330 685.0,319.0 695.0,319.0" fill="#2563eb"/>
+<rect x="759.0" y="275" width="198.0" height="23" rx="4" fill="#ffffff"/>
+<text x="858" y="293" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">파일 저장 후 등장 이벤트</text>
+<path d="M 560 240 L 560 330" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="560,330 555.0,319.0 565.0,319.0" fill="#2563eb"/>
+<rect x="475.0" y="268" width="170.0" height="23" rx="4" fill="#ffffff"/>
+<text x="560" y="286" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">사라짐 등은 이벤트만</text>
+<rect x="30" y="565" width="310" height="120" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="185.0" y="592.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">Preprocessing / identity</text>
+<text x="185.0" y="621.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">작업을 가져와 동일 인물 연결</text>
+<text x="185.0" y="648.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">외관 특징 반환 → Data에서 ID 연결</text>
+<text x="185.0" y="675.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">기본 CPU 특징 / 선택 ONNX</text>
+<rect x="405" y="565" width="310" height="120" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="560.0" y="592.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Analysis</text>
+<text x="560.0" y="621.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">작업을 가져와 부가 정보 분석</text>
+<text x="560.0" y="648.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">metadata 반환</text>
+<text x="560.0" y="675.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">상·하체 대표색 / 이미지 품질</text>
+<rect x="780" y="565" width="310" height="120" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="935.0" y="605.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">External</text>
+<text x="935.0" y="634.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">푸시 작업을 가져와 FCM 발송</text>
+<text x="935.0" y="661.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">Firebase 설정 시 사용</text>
+<path d="M 565 470 L 565 510 L 185 510 L 185 565" fill="none" stroke="#7c3aed" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="185,565 180.0,554.0 190.0,554.0" fill="#7c3aed"/>
+<path d="M 565 510 L 560 510 L 560 565" fill="none" stroke="#7c3aed" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="560,565 555.0,554.0 565.0,554.0" fill="#7c3aed"/>
+<path d="M 565 510 L 935 510 L 935 565" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="935,565 930.0,554.0 940.0,554.0" fill="#2563eb"/>
+<rect x="410" y="525" width="300" height="28" rx="4" fill="#ffffff"/>
+<text x="560" y="548" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">서로 기다리지 않고 독립 실행</text>
+<rect x="210" y="805" width="470" height="100" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="445.0" y="849.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Data에 각 단계 결과 병합</text>
+<text x="445.0" y="878.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">앱이 다시 조회하면 ID · 부가 정보 반영</text>
+<rect x="780" y="805" width="310" height="100" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="935.0" y="849.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Android 알림</text>
+<text x="935.0" y="878.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">알림 → 이벤트 상세 → 녹화</text>
+<path d="M 185 685 L 185 755 L 350 755 L 350 805" fill="none" stroke="#7c3aed" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="350,805 345.0,794.0 355.0,794.0" fill="#7c3aed"/>
+<path d="M 560 685 L 560 805" fill="none" stroke="#7c3aed" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="560,805 555.0,794.0 565.0,794.0" fill="#7c3aed"/>
+<rect x="461.5" y="734" width="197.0" height="23" rx="4" fill="#ffffff"/>
+<text x="560" y="752" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#7c3aed">현재 임대 ID로 완료 보고</text>
+<path d="M 935 685 L 935 805" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="935,805 930.0,794.0 940.0,794.0" fill="#2563eb"/>
+<rect x="878.5" y="734" width="113.0" height="23" rx="4" fill="#ffffff"/>
+<text x="935" y="752" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">Firebase 경유</text>
+<text x="32" y="947" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">점선 상자는 기본 CPU 구현을 제공하며 교체 가능하다. 외관 유사도와 대표색은 확정 신원·의복 분할 결과가 아니다.</text>
+<text x="32" y="974" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">작업은 5분 동안 임대하고 최대 5회 시도한다. 늦은 완료는 거부하며, 후속 결과 갱신은 추가 푸시를 만들지 않는다.</text>
+</svg>

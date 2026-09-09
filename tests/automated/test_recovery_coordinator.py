@@ -1,3 +1,4 @@
+# Edge 녹화 복구의 다운로드·검증·색인 순서와 재시도 시 기존 파일 보존을 확인한다.
 from __future__ import annotations
 
 import hashlib
@@ -23,6 +24,7 @@ START = datetime(2026, 8, 22, 8, 0, tzinfo=UTC)
 END = datetime(2026, 8, 22, 8, 1, tzinfo=UTC)
 
 
+# 복구 클라이언트가 검사하는 HTTP 헤더와 스트림 읽기를 메모리 바이트로 제공한다.
 class FakeResponse(io.BytesIO):
     def __init__(self, payload: bytes, *, content_type: str = "application/json"):
         super().__init__(payload)
@@ -43,6 +45,7 @@ class FakeResponse(io.BytesIO):
         return False
 
 
+# Edge manifest·파일과 Data 색인 API를 한 대역에 연결해 요청 순서와 재처리를 관찰한다.
 class FakeServices:
     def __init__(self, manifest: dict, files: dict[str, bytes]):
         self.manifest = manifest
@@ -70,6 +73,7 @@ class FakeServices:
         raise AssertionError(f"unexpected request: {request.full_url}")
 
 
+# 파일 크기·SHA-256이 포함된 manifest 항목을 만들고 잘못된 해시도 주입할 수 있게 한다.
 def _item(relative_path: str, content: bytes, *, checksum: str | None = None) -> dict:
     return {
         "camera_id": "cam-001",
@@ -81,6 +85,7 @@ def _item(relative_path: str, content: bytes, *, checksum: str | None = None) ->
     }
 
 
+# 실제 네트워크 대신 대역을 사용하면서 다운로드 결과는 독립 임시 저장소에 기록한다.
 def _coordinator(tmp_path: Path, services: FakeServices) -> RecoveryCoordinator:
     return RecoveryCoordinator(
         edge_base_url="http://edge.test:8002",
@@ -93,6 +98,7 @@ def _coordinator(tmp_path: Path, services: FakeServices) -> RecoveryCoordinator:
     )
 
 
+# 각 파일을 검증한 뒤 색인하고, 동일 복구를 반복하면 기존 파일과 멱등 색인을 재사용한다.
 def test_recovery_downloads_sequentially_verifies_and_indexes(tmp_path: Path) -> None:
     first_path = "2026/08/22/20260822T080000.000000Z_000000.ts"
     second_path = "2026/08/22/20260822T080000.000000Z_000001.ts"
@@ -151,6 +157,7 @@ def test_recovery_downloads_sequentially_verifies_and_indexes(tmp_path: Path) ->
     assert sum("/files/" in request.full_url for request in services.requests) == 2
 
 
+# 손상된 다운로드는 최종 파일이나 DB 색인이 되지 않고 임시 .part 파일도 정리한다.
 def test_checksum_failure_never_commits_or_indexes(tmp_path: Path) -> None:
     relative_path = "2026/08/22/20260822T080000.000000Z_000000.ts"
     content = b"tampered"
@@ -172,6 +179,7 @@ def test_checksum_failure_never_commits_or_indexes(tmp_path: Path) -> None:
     assert services.indexed == []
 
 
+# 이미 색인된 경로의 내용과 새 manifest가 다르면 기존 녹화를 덮어쓰지 않고 실패한다.
 def test_existing_recovery_path_is_immutable_on_manifest_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -199,6 +207,7 @@ def test_existing_recovery_path_is_immutable_on_manifest_mismatch(
     assert not any("/files/" in request.full_url for request in services.requests)
 
 
+# 상위 경로 이동·플랫폼 구분자 우회·디렉터리와 파일 날짜 불일치를 다운로드 전에 거부한다.
 @pytest.mark.parametrize(
     "relative_path",
     [
@@ -227,6 +236,7 @@ def test_manifest_path_traversal_and_invalid_date_paths_are_rejected(
     assert not (tmp_path / "outside.ts").exists()
 
 
+# 복구 토큰은 환경변수 또는 파일 중 한 출처만 사용해 모호한 설정을 막는다.
 def test_recovery_token_is_read_from_environment_or_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -242,6 +252,7 @@ def test_recovery_token_is_read_from_environment_or_file(
         read_recovery_token()
 
 
+# 복구 전용 토큰을 우선 사용하고 없는 경우에만 옛 공용 내부 토큰으로 호환한다.
 def test_data_recovery_token_precedes_legacy_internal_token(monkeypatch) -> None:
     monkeypatch.setenv("DATA_RECOVERY_TOKEN", "d" * 32)
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", INTERNAL_TOKEN)
@@ -251,6 +262,7 @@ def test_data_recovery_token_precedes_legacy_internal_token(monkeypatch) -> None
     assert read_internal_token() == INTERNAL_TOKEN
 
 
+# Linux 훅의 curl을 함수로 대체해 전송 없이 숫자 초 단위 값의 허용·거부를 확인한다.
 @pytest.mark.parametrize("duration", ["10", "60.125", "0.000001", "10s", "-1", "nan"])
 def test_recording_hook_accepts_mediamtx_numeric_seconds(duration):
     import os

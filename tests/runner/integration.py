@@ -9,7 +9,9 @@ import httpx
 from server.services.external.app.security.passwords import hash_password
 
 
+# 격리된 실행 서버에서 내부 이벤트 생성부터 분석 결과 공개 조회·로그아웃까지 왕복 검증한다.
 def verify(data_url: str, external_url: str) -> None:
+    # 매 실행의 사용자·카메라·추적 세션을 구분해 이전 검증 데이터와 충돌하지 않게 한다.
     suffix = uuid4().hex
     password = "integration-test-password-123"
     admin_token = "test-external-token-0000000000000000000000"
@@ -58,6 +60,7 @@ def verify(data_url: str, external_url: str) -> None:
         )
         event.raise_for_status()
         event_id = event.json()["id"]
+        # 같은 이벤트를 분석 전용 권한으로 임대·완료하여 서비스별 권한 경계를 함께 확인한다.
         data.headers["X-Internal-Token"] = analysis_token
         claimed = data.post("/object-jobs/analysis/claim")
         claimed.raise_for_status()
@@ -73,6 +76,7 @@ def verify(data_url: str, external_url: str) -> None:
         )
         completed.raise_for_status()
         assert completed.json() == {"accepted": True}
+        # 완료 요청 재전송이 동일 작업을 두 번 확정하지 않는지 실제 HTTP 응답으로 확인한다.
         duplicate = data.post(
             f"/object-jobs/analysis/{job['id']}/complete", json=completion
         )

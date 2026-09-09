@@ -1,3 +1,4 @@
+-- 계정과 카메라 기본 정보를 만들며 비밀번호는 해시만 저장한다.
 CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
@@ -22,6 +23,7 @@ CREATE TABLE cameras (
     updated_at TEXT NOT NULL
 );
 
+-- 사용자·카메라 조합의 중복 권한을 막고 대상 삭제 시 권한도 함께 제거한다.
 CREATE TABLE user_camera_permissions (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     camera_id INTEGER NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
@@ -29,6 +31,7 @@ CREATE TABLE user_camera_permissions (
     PRIMARY KEY (user_id, camera_id)
 );
 
+-- 녹화 이력이 참조하는 카메라는 삭제를 제한하며 경로와 멱등 키로 중복 등록을 막는다.
 CREATE TABLE recording_segments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     camera_id TEXT NOT NULL REFERENCES cameras(camera_id)
@@ -56,6 +59,7 @@ ON recording_segments(camera_id, start_time, end_time);
 CREATE INDEX idx_segments_status_end_time
 ON recording_segments(status, end_time);
 
+-- 이벤트의 대표 녹화 참조와 별도 다대다 연결을 함께 지원한다.
 CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     camera_id TEXT NOT NULL REFERENCES cameras(camera_id)
@@ -80,6 +84,7 @@ ON events(camera_id, occurred_at, event_type);
 CREATE INDEX idx_events_type_time
 ON events(event_type, occurred_at);
 
+-- 이벤트 전후 구간에 걸친 여러 녹화를 연결하고 같은 연결의 중복을 막는다.
 CREATE TABLE event_recording_segments (
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     recording_segment_id INTEGER NOT NULL REFERENCES recording_segments(id) ON DELETE CASCADE,
@@ -90,6 +95,7 @@ CREATE TABLE event_recording_segments (
 CREATE INDEX idx_event_segments_segment
 ON event_recording_segments(recording_segment_id, event_id);
 
+-- 갱신 토큰 원문 대신 해시와 로그인 계열·교체 이력을 저장한다.
 CREATE TABLE refresh_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -109,6 +115,7 @@ ON refresh_tokens(user_id, expires_at);
 CREATE INDEX idx_refresh_tokens_family
 ON refresh_tokens(family_id);
 
+-- 접근 토큰은 만료 전 로그아웃을 반영하기 위해 별도 폐기 목록에서 확인한다.
 CREATE TABLE revoked_tokens (
     jti TEXT PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,

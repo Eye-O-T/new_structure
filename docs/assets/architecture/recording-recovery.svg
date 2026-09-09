@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="830" viewBox="0 0 1120 830" role="img" aria-labelledby="title desc">
+<title id="title">04  중앙 연결 장애와 녹화 복구</title>
+<desc id="desc">Edge의 로컬 녹화와 중앙의 복구 작업은 별도로 동작한다.</desc>
+<defs>
+<marker id="a2563eb" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#2563eb"/></marker>
+<marker id="a0f766e" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#0f766e"/></marker>
+<marker id="a7c3aed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#7c3aed"/></marker>
+<marker id="ab45309" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#b45309"/></marker>
+<marker id="a475569" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#475569"/></marker>
+</defs>
+<rect width="1120" height="830" fill="#ffffff"/>
+<text x="32" y="43" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">04  중앙 연결 장애와 녹화 복구</text>
+<text x="32" y="76" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">Edge의 로컬 녹화와 중앙의 복구 작업은 별도로 동작한다.</text>
+<rect x="30" y="125" width="285" height="567" rx="18" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+<text x="50" y="156" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">Raspberry Pi · 로컬 백업</text>
+<rect x="50" y="190" width="245" height="125" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="172.5" y="233.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">평상시에도 계속 녹화</text>
+<text x="172.5" y="262.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">기본 10초 MPEG-TS</text>
+<text x="172.5" y="289.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">중앙 연결이 끊겨도 유지</text>
+<path d="M 172 315 L 172 405" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="172,405 167.0,394.0 177.0,394.0" fill="#0f766e"/>
+<rect x="50" y="405" width="245" height="185" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="172.5" y="464.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">남아 있는 원본 파일</text>
+<text x="172.5" y="493.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">기본 24시간 또는 20 GiB</text>
+<text x="172.5" y="520.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">보존 한도 초과 시 오래된</text>
+<text x="172.5" y="547.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">파일부터 정리</text>
+<rect x="380" y="155" width="310" height="115" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="535.0" y="193.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">중앙 연결 끊김 · 복구</text>
+<text x="535.0" y="222.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">Edge 상태와 이벤트를</text>
+<text x="535.0" y="249.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">External이 수집</text>
+<rect x="780" y="155" width="310" height="115" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="935.0" y="193.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Data · 장애 구간 기록</text>
+<text x="935.0" y="222.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">central_connection 이벤트</text>
+<text x="935.0" y="249.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">시작 · 종료 시각으로 구간 확정</text>
+<path d="M 690 212 L 780 212" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="780,212 769.0,217.0 769.0,207.0" fill="#2563eb"/>
+<rect x="704.0" y="178" width="62.0" height="23" rx="4" fill="#ffffff"/>
+<text x="735" y="196" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">이벤트</text>
+<rect x="780" y="355" width="310" height="115" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="935.0" y="393.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">복구 작업 예약</text>
+<text x="935.0" y="422.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">파일 확정을 잠시 기다린 뒤</text>
+<text x="935.0" y="449.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">작업자가 복구 구간을 처리</text>
+<path d="M 935 270 L 935 355" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="935,355 930.0,344.0 940.0,344.0" fill="#2563eb"/>
+<rect x="380" y="355" width="310" height="115" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="535.0" y="393.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Data → Edge</text>
+<text x="535.0" y="422.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">복구 API로 목록 · 파일 요청</text>
+<text x="535.0" y="449.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">장치 토큰으로 인증</text>
+<path d="M 780 412 L 690 412" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="690,412 701.0,407.0 701.0,417.0" fill="#2563eb"/>
+<path d="M 295 490 L 347 490 L 347 431 L 380 431" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="380,431 369.0,436.0 369.0,426.0" fill="#0f766e"/>
+<rect x="380" y="555" width="310" height="115" rx="12" fill="#fff7ed" stroke="#b45309" stroke-width="2"/>
+<text x="535.0" y="593.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">파일 검증</text>
+<text x="535.0" y="622.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">예상 크기 · SHA-256 비교</text>
+<text x="535.0" y="649.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">저장 경로와 파일 무결성 확인</text>
+<path d="M 535 470 L 535 555" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="535,555 530.0,544.0 540.0,544.0" fill="#0f766e"/>
+<rect x="780" y="555" width="310" height="115" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="935.0" y="593.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">중앙 복구 저장소 등록</text>
+<text x="935.0" y="622.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">일반 중앙 녹화와 별도 보관</text>
+<text x="935.0" y="649.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">앱에서 연결된 녹화 재생</text>
+<path d="M 690 612 L 780 612" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="780,612 769.0,617.0 769.0,607.0" fill="#0f766e"/>
+<rect x="693.0" y="578" width="84.0" height="23" rx="4" fill="#ffffff"/>
+<text x="735" y="596" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">검증 성공</text>
+<text x="32" y="738" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">실패한 복구는 재시도한다. Edge에 원본이 없으면 해당 영상은 복구할 수 없다.</text>
+<text x="32" y="765" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">복구는 녹화 파일을 가져오는 기능이다. 장애 구간의 사람 감지 이벤트를 자동으로 다시 만드는 기능은 없다.</text>
+<text x="32" y="792" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">감지기의 RTSP 오류 이벤트와 Edge의 central_connection 이벤트는 역할이 다르다.</text>
+</svg>

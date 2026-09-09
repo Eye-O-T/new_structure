@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'event_history_view_model.dart';
 
+/// 이벤트 ID별 조회 상태를 표시하고 연결 녹화의 인증된 재생 화면으로 이동한다.
 class EventDetailScreen extends ConsumerWidget {
   const EventDetailScreen({super.key, required this.eventId});
   final String eventId;
@@ -17,6 +18,7 @@ class EventDetailScreen extends ConsumerWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
+            // 알림으로 직접 진입한 경우 이전 화면이 없을 수 있어 히스토리로 돌아간다.
             if (context.canPop()) {
               context.pop();
             } else {

@@ -54,6 +54,7 @@ class VideoProfileRequest(BaseModel):
     profile: str
 
 
+# 장애 재현용 행동과 선택적인 배터리·디스크 측정값을 받는 모의 API 입력이다.
 class SimulationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -62,6 +63,7 @@ class SimulationRequest(BaseModel):
     storage_percent: float | None = Field(default=None, ge=0, le=100)
 
 
+# 송출 대상에 URL 전체나 모든 인터페이스 바인딩 주소를 사용하는 실수를 거부한다.
 def _validate_central_host(host: str) -> None:
     if (
         host in {"0.0.0.0", "::"}
@@ -71,6 +73,7 @@ def _validate_central_host(host: str) -> None:
         raise HTTPException(status_code=422, detail="invalid central RTSP host")
 
 
+# 복구 구간을 실제 Edge와 같은 시간대 포함 ISO 형식으로 읽어 UTC로 정규화한다.
 def _parse_timestamp(value: str) -> datetime:
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     parsed = datetime.fromisoformat(normalized)
@@ -79,6 +82,7 @@ def _parse_timestamp(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+# 캡처 시각과 파일 번호로 세그먼트 시작을 계산하고 다른 이름은 수정 시각으로 추정한다.
 def _segment_start(path: Path, segment_seconds: int) -> datetime:
     match = FILENAME.fullmatch(path.name)
     if match:
@@ -88,6 +92,7 @@ def _segment_start(path: Path, segment_seconds: int) -> datetime:
     return datetime.fromtimestamp(path.stat().st_mtime - segment_seconds, UTC)
 
 
+# 완료된 세그먼트를 나누어 읽어 중앙 복구 검증에 사용할 해시를 계산한다.
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -157,6 +162,7 @@ class MockEdgeService:
     def configured(self) -> bool:
         return self.marker_path.exists() and self.media.configured
 
+    # 완료 표식이 있는 저장 설정만 복원하고 CLI 장치 ID와 맞지 않으면 시작을 거부한다.
     def _load_configuration(self) -> None:
         if not self.marker_path.exists():
             return
@@ -269,6 +275,7 @@ class MockEdgeService:
             "rtsp_mode": "central_publish",
         }
 
+    # 발견 절차를 생략하는 CLI 입력도 동일한 최초 연결 검증과 저장 흐름에 태운다.
     def configure_direct(
         self,
         *,
@@ -291,6 +298,7 @@ class MockEdgeService:
         )
         self.complete_pairing(request)
 
+    # 실제 프로세스 상태와 주입한 모의 측정값을 Edge 관리 API 응답 형식으로 합친다.
     def status(self) -> dict[str, object]:
         try:
             storage = self._storage_override
@@ -326,6 +334,7 @@ class MockEdgeService:
             "capture_updated_at": utc_timestamp(),
         }
 
+    # 미디어 엔진의 프로필 변경 결과를 상태·설정·이벤트와 HTTP 응답에 반영한다.
     def apply_profile(self, requested: str) -> tuple[dict[str, object], int]:
         previous = self.current_profile
         if requested not in self.supported_profiles:
@@ -382,6 +391,7 @@ class MockEdgeService:
             200,
         )
 
+    # 기존 연결 설정을 읽을 수 있을 때만 선택 프로필을 갱신해 다음 실행에서도 사용한다.
     def _persist_profile(self, profile: str) -> None:
         try:
             payload = json.loads(self.config_path.read_text(encoding="utf-8"))
@@ -394,6 +404,7 @@ class MockEdgeService:
             mode=0o600,
         )
 
+    # 중앙 연결 행동은 송출 프로세스를 제어하며 다른 센서 행동은 상태값과 이벤트를 모의한다.
     def simulate(self, request: SimulationRequest) -> dict[str, object]:
         action = request.action
         if action not in SIMULATION_ACTIONS:
@@ -471,6 +482,7 @@ class MockEdgeService:
         return tuple(item[2] for item in candidates)
 
 
+# 같은 모의 장치의 관리·복구 API에 공통 연결 키 검사를 주입한다.
 def _auth_dependency(service: MockEdgeService):
     def authenticate(authorization: str | None = Header(default=None)) -> None:
         if not bearer_matches(authorization, service.pairing_key):
@@ -479,6 +491,7 @@ def _auth_dependency(service: MockEdgeService):
     return authenticate
 
 
+# 실제 Edge 관리 계약에 장애 주입용 /mock API를 더해 중앙 연동 시험에 사용한다.
 def create_control_app(service: MockEdgeService) -> FastAPI:
     authenticate = _auth_dependency(service)
     app = FastAPI(title="AI_CCTV Mock Edge Management", version="0.3.0")
@@ -546,6 +559,7 @@ def create_control_app(service: MockEdgeService) -> FastAPI:
     return app
 
 
+# 로컬 TS 백업을 실제 Edge와 같은 목록·다운로드 계약으로 제공한다.
 def create_recovery_app(service: MockEdgeService) -> FastAPI:
     authenticate = _auth_dependency(service)
     camera_root = (service.backup_root / service.camera_id).resolve()
@@ -555,6 +569,7 @@ def create_recovery_app(service: MockEdgeService) -> FastAPI:
     def health_live():
         return {"status": "alive", "camera_id": service.camera_id}
 
+    # 최대 24시간 구간과 겹치는 완료 파일의 경로·시각·크기·해시를 반환한다.
     @app.get("/v1/recovery/manifest", dependencies=[Depends(authenticate)])
     def manifest(start: str, end: str):
         try:
@@ -583,6 +598,7 @@ def create_recovery_app(service: MockEdgeService) -> FastAPI:
                 )
         return {"camera_id": service.camera_id, "items": items}
 
+    # 저장소 밖 경로와 기록 중인 파일을 거부한 뒤 복구용 TS 파일을 전달한다.
     @app.get(
         "/v1/recovery/files/{relative_path:path}",
         dependencies=[Depends(authenticate)],

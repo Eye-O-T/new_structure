@@ -1,3 +1,4 @@
+# 기존 DB의 인물 식별자 이전과 공개 응답의 로컬·통합 ID 구분을 확인한다.
 import json
 import shutil
 from pathlib import Path
@@ -6,6 +7,7 @@ from server.services.data.app.database.connection import Database
 from server.services.external.app.schemas import EventResponse
 
 
+# 005 이전 스키마에 혼합된 옛 ID를 넣고 이전·재시작 후 보존과 재실행 안전성을 검사한다.
 def test_existing_database_preserves_local_ids_without_inventing_global_ids(tmp_path):
     migrations = Path("server/services/data/app/database/migrations")
     old_migrations = tmp_path / "old_migrations"
@@ -43,6 +45,7 @@ def test_existing_database_preserves_local_ids_without_inventing_global_ids(tmp_
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
+# 서로 다른 카메라의 로컬 ID는 달라도 서버가 연결한 통합 ID는 공유할 수 있다.
 def test_public_events_keep_local_and_global_identifiers_separate():
     shared = dict(
         id=1, event_type="person_appeared", occurred_at="2026-09-06T00:00:00Z"

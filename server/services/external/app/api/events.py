@@ -32,6 +32,7 @@ from .validation import _validate_resource_id, _validated_time_range
 router = APIRouter()
 
 
+# 일반 사용자는 카메라를 지정하고 그 권한을 확인해야 하며 관리자만 전체 검색을 할 수 있다.
 @router.get("/api/v1/events", response_model=EventPageResponse)
 async def list_events(
     camera_id: str | None = Query(default=None),
@@ -64,6 +65,7 @@ async def list_events(
     )
 
 
+# 이벤트를 찾은 뒤 소속 카메라 권한을 검사하여 이벤트 ID만 아는 경우의 열람을 막는다.
 @router.get("/api/v1/events/{event_id}", response_model=EventResponse)
 async def get_event(
     event_id: str,

@@ -22,6 +22,7 @@ from ai_cctv_core.identifiers import validate_camera_id, validate_stream_path
 from ai_cctv_core.time import parse_utc
 
 
+# 알 수 없는 입력 필드를 거절하여 철자 오류나 의도하지 않은 필드 저장을 방지한다.
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -130,6 +131,7 @@ class UserUpdate(StrictModel):
 class CameraPermissionsReplace(StrictModel):
     camera_ids: list[str] = Field(max_length=256)
 
+    # 각 ID를 검증하고 최초 입력 순서대로 중복을 제거한다.
     @field_validator("camera_ids")
     @classmethod
     def validate_camera_ids(cls, values: list[str]) -> list[str]:
@@ -163,6 +165,7 @@ class CameraCreate(StrictModel):
     def validate_edge_url(cls, value: str | None) -> str | None:
         return _management_url(value)
 
+    # 새 Edge를 일부 정보만으로 등록하지 않도록 식별자·두 주소·토큰을 한 묶음으로 요구한다.
     @model_validator(mode="after")
     def validate_edge_metadata(self) -> "CameraCreate":
         supplied = (
@@ -204,6 +207,7 @@ class CameraUpdate(StrictModel):
         return _management_url(value)
 
 
+# 제어·복구 주소에 URL 내 인증값이나 질의·프래그먼트·상위 경로가 섞이지 않게 한다.
 def _management_url(value: str | None) -> str | None:
     if value is None:
         return None
@@ -270,6 +274,7 @@ class VideoProfileStatePatch(StrictModel):
             return None
         return list(dict.fromkeys(value))
 
+    # 명시한 필드가 없는 PATCH는 거절하며 필드 값이 None인 경우와 구분한다.
     @model_validator(mode="after")
     def require_change(self) -> "VideoProfileStatePatch":
         if not self.model_fields_set:
@@ -321,6 +326,7 @@ class RecordingSegmentCreate(StrictModel):
     def validate_time(cls, value: datetime) -> datetime:
         return _utc(value)
 
+    # 양수 시간 구간을 요구하고 전송한 길이는 타임스탬프 계산값에서 1초 이내만 허용한다.
     @model_validator(mode="after")
     def validate_interval(self) -> "RecordingSegmentCreate":
         if self.end_time <= self.start_time:
@@ -351,6 +357,7 @@ class EventCreate(StrictModel):
         validation_alias=AliasChoices("metadata", "metadata_json"),
     )
     edge_event_id: str | None = Field(default=None, min_length=1, max_length=256)
+    source_event_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
     @field_validator("camera_id")
     @classmethod
@@ -362,6 +369,7 @@ class EventCreate(StrictModel):
     def validate_time(cls, value: datetime) -> datetime:
         return _utc(value)
 
+    # 알려진 열거형 외의 확장 이벤트도 소문자 식별자 규칙을 만족하면 저장할 수 있다.
     @field_validator("event_type")
     @classmethod
     def validate_event_type(cls, value: EventType | str) -> EventType | str:
@@ -406,6 +414,7 @@ class RetentionRequest(StrictModel):
     def validate_time(cls, value: datetime | None) -> datetime | None:
         return None if value is None else _utc(value)
 
+    # 상대 보관 일수와 절대 기준 시각 중 정확히 하나를 요구하여 삭제 범위 해석을 고정한다.
     @model_validator(mode="after")
     def validate_cutoff(self) -> "RetentionRequest":
         if self.retention_days is None and self.before is None:

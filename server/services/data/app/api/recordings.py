@@ -27,6 +27,7 @@ from ..storage.recordings import prepare_recording_hook, prepare_segment
 router = APIRouter()
 
 
+# 파일 검증 후 등록하며 재전송에서도 이벤트 연결을 재시도하고 중복 여부를 응답에 표시한다.
 @router.post("/recording-segments", status_code=status.HTTP_201_CREATED)
 def create_recording_segment(
     payload: RecordingSegmentCreate,
@@ -43,6 +44,7 @@ def create_recording_segment(
     return segment
 
 
+# 순서가 올바른 UTC 구간으로 검색하고 일관된 페이지 형식으로 결과를 반환한다.
 @router.get("/recording-segments/search")
 def search_recording_segments(
     repository: Repo,
@@ -70,6 +72,7 @@ def get_recording_segment(segment_id: int, repository: Repo) -> dict[str, Any]:
     return segment
 
 
+# ready 상태와 실제 파일 존재를 확인한 뒤 범위 요청을 지원하는 파일 응답을 만든다.
 @router.get("/recording-segments/{segment_id}/content")
 def get_recording_segment_content(
     segment_id: int,
@@ -102,6 +105,7 @@ def get_recording_segment_content(
     )
 
 
+# MediaMTX 폼 통지를 실제 파일 메타데이터로 바꾸고 관련 이벤트에 연결한다.
 @router.post("/hooks/recording-complete", status_code=status.HTTP_201_CREATED)
 def recording_complete_hook(
     repository: Repo,

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .api import (
+    admin_ui,
     auth,
     cameras,
     events,
@@ -28,6 +29,7 @@ from .workers.push_dispatcher import PushDispatcher
 from .workers.status_collector import StatusCollector
 
 
+# Data 연결을 준비하고 상태 수집·선택적 푸시 작업을 시작하며 종료 시 작업과 연결을 정리한다.
 @asynccontextmanager
 async def _lifespan(application: FastAPI):
     collector_task: asyncio.Task[None] | None = None
@@ -76,6 +78,7 @@ async def _lifespan(application: FastAPI):
             await client.close()
 
 
+# 설정·Data 대역을 주입할 수 있는 앱을 구성하고 카메라별 작업에 공통 잠금 풀을 연결한다.
 def create_app(
     settings: Settings | None = None, data_client: DataClient | None = None
 ) -> FastAPI:
@@ -95,6 +98,7 @@ def create_app(
     application.state.camera_lifecycle_lock_factory = CameraLifecycleLocks()
     register_exception_handlers(application)
     for router in (
+        admin_ui.router,
         notifications.router,
         health.router,
         auth.router,

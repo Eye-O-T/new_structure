@@ -1,3 +1,4 @@
+# 추적 이벤트의 상태 전환과 전처리 설정·스냅샷·내부 호출 계약을 모델 실행 없이 확인한다.
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ MEDIA_READ_USERNAME = "inference-reader"
 MEDIA_READ_PASSWORD = "r" * 40
 
 
+# 같은 인물의 연속 감지는 등장 이벤트를 반복하지 않고 마지막 감지 후 제한 시간에 이탈한다.
 def test_track_state_emits_appearance_once_and_disappearance_after_timeout():
     state = TrackState(disappear_seconds=3.0)
     first = state.update([{"person_id": 7, "confidence": 0.9}], 10.0)
@@ -27,6 +29,7 @@ def test_track_state_emits_appearance_once_and_disappearance_after_timeout():
     ]
 
 
+# 한 인물의 감지가 계속되어도 다른 인물의 이탈 타이머는 독립적으로 진행한다.
 def test_track_state_handles_independent_people():
     state = TrackState(disappear_seconds=1.0)
     appeared = state.update(
@@ -41,6 +44,7 @@ def test_track_state_handles_independent_people():
     assert [event.person_id for event in gone] == ["a"]
 
 
+# 스냅샷 경로는 Data API의 최상위 필드로 보내고 전처리가 통합 인물 ID를 만들어내지 않는다.
 def test_event_sends_snapshot_as_top_level_data_field(tmp_path):
     class Client:
         def __init__(self):
@@ -81,6 +85,7 @@ def test_event_sends_snapshot_as_top_level_data_field(tmp_path):
     assert "track_id" not in client.payload
 
 
+# 중앙의 AI 입력 장애·복구는 Edge 카메라 입력 이벤트와 구분하고 반복 보고를 줄인다.
 def test_inference_stream_events_do_not_impersonate_edge_ingest(tmp_path):
     class Client:
         def __init__(self):
@@ -124,6 +129,7 @@ def test_inference_stream_events_do_not_impersonate_edge_ingest(tmp_path):
     assert client.statuses == [("cam-001", "offline")]
 
 
+# 환경변수의 추론 값이 없으면 공유 YAML을 읽고 내부 인증은 전용 토큰을 우선한다.
 def test_settings_load_inference_values_from_shared_config(tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     config.write_text(
@@ -166,6 +172,7 @@ inference:
     assert Settings.from_env().internal_service_token == "token"
 
 
+# 자격 증명과 스트림 경로의 특수문자를 각각 인코딩해 RTSP URL 구분자로 오해하지 않게 한다.
 def test_inference_rtsp_url_quotes_read_credentials_and_stream_path(tmp_path):
     settings = Settings(
         data_service_url="http://data",
@@ -191,6 +198,7 @@ def test_inference_rtsp_url_quotes_read_credentials_and_stream_path(tmp_path):
     )
 
 
+# 전용 읽기 계정·충분한 비밀번호·올바른 실행 장치가 없으면 시작 설정 검증에 실패한다.
 def test_inference_requires_dedicated_rtsp_read_credentials(tmp_path):
     common = {
         "data_service_url": "http://data",
@@ -225,6 +233,7 @@ def test_inference_requires_dedicated_rtsp_read_credentials(tmp_path):
         ).validate()
 
 
+# 내부 서비스 요청과 MediaMTX 훅이 외부 프록시 환경을 경유하지 않도록 설정을 확인한다.
 def test_internal_inference_and_media_calls_ignore_environment_proxies():
     client = DataClient("http://data", "token")
     try:

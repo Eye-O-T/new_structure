@@ -30,6 +30,7 @@ from ..schemas import (
 router = APIRouter()
 
 
+# 저장소의 활성 수 제한 예외를 호출자가 처리할 수 있는 카메라 충돌 응답으로 바꾼다.
 @router.post("/cameras", status_code=status.HTTP_201_CREATED)
 def create_camera(payload: CameraCreate, repository: Repo) -> dict[str, Any]:
     try:
@@ -42,6 +43,7 @@ def create_camera(payload: CameraCreate, repository: Repo) -> dict[str, Any]:
         ) from exc
 
 
+# 제어·복구에 필요한 장치 주소와 인증값을 내부 저장소에 함께 전달한다.
 @router.put("/edge-devices/{edge_device_id}")
 def put_edge_device(
     edge_device_id: str, payload: EdgeDevicePut, repository: Repo
@@ -67,6 +69,7 @@ def list_camera_control_targets(repository: Repo) -> dict[str, Any]:
     return {"items": repository.list_camera_control_targets()}
 
 
+# 추론 작업이 사용할 활성 카메라를 반환하며 사용자 지정 시 존재 여부와 권한 필터도 적용한다.
 @router.get("/cameras/enabled")
 def enabled_cameras(
     repository: Repo,
@@ -86,6 +89,7 @@ def get_camera_deletion_status(camera_id: str, repository: Repo) -> dict[str, An
     return status_result
 
 
+# 사용자 존재를 먼저 확인한 뒤 활성 여부·사용자 권한·페이지 조건을 저장소에 전달한다.
 @router.get("/cameras")
 def list_cameras(
     repository: Repo,
@@ -113,6 +117,7 @@ def get_camera(camera_id: str, repository: Repo) -> dict[str, Any]:
     return camera
 
 
+# 명시적으로 보낸 필드만 수정하고 활성 카메라 수 제한 위반은 409로 보고한다.
 @router.patch("/cameras/{camera_id}")
 def update_camera(
     camera_id: str, payload: CameraUpdate, repository: Repo
@@ -141,6 +146,7 @@ def update_camera_status(
     return camera
 
 
+# 카메라 미존재와 Edge 제어 정보 미설정을 각각 404와 기능 미확인 충돌로 구분한다.
 @router.get("/cameras/{camera_id}/control-target")
 def get_camera_control_target(camera_id: str, repository: Repo) -> dict[str, Any]:
     target = repository.get_camera_control_target(camera_id)
@@ -163,6 +169,7 @@ def get_camera_video_profile(camera_id: str, repository: Repo) -> dict[str, Any]
     return profile
 
 
+# 부분 프로필 보고를 전달하므로 생략된 설정이 기본값으로 덮이지 않게 한다.
 @router.patch("/cameras/{camera_id}/video-profile")
 def update_camera_video_profile(
     camera_id: str,
@@ -185,6 +192,7 @@ def get_camera_runtime_status(camera_id: str, repository: Repo) -> dict[str, Any
     return runtime
 
 
+# 관측 시각을 공통 UTC 형식으로 바꾸되 미전송 상태 필드는 보존한다.
 @router.put("/cameras/{camera_id}/runtime-status")
 def put_camera_runtime_status(
     camera_id: str,
@@ -200,6 +208,7 @@ def put_camera_runtime_status(
     return runtime
 
 
+# 녹화·이벤트·복구 이력이 있으면 삭제를 거절하고 비활성화를 안내한다.
 @router.delete("/cameras/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_camera(camera_id: str, repository: Repo) -> Response:
     try:
@@ -215,6 +224,7 @@ def delete_camera(camera_id: str, repository: Repo) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# 경로의 카메라 ID를 검증한 뒤 해시 형태의 송출 자격 증명만 저장한다.
 @router.put("/cameras/{camera_id}/publish-credential")
 def put_camera_publish_credential(
     camera_id: str,

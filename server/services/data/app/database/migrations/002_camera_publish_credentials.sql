@@ -1,3 +1,4 @@
+-- 카메라별 동적 송출 해시를 보관하며 카메라 삭제 시 인증값도 제거한다.
 CREATE TABLE camera_publish_credentials (
     camera_id TEXT PRIMARY KEY REFERENCES cameras(camera_id)
         ON UPDATE CASCADE ON DELETE CASCADE,

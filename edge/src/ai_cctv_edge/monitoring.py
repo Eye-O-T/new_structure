@@ -12,6 +12,7 @@ from typing import Callable, Protocol
 from .state import EventJournal
 
 
+# 측정 불가 항목을 None/unknown으로 표현하는 한 번의 전원 관측값이다.
 @dataclass(frozen=True)
 class PowerReading:
     battery_percent: int | None = None
@@ -36,6 +37,7 @@ class LinuxPowerSupplySensor:
         except OSError:
             return None
 
+    # 커널이 공개한 배터리와 외부 전원 정보를 합쳐 현재 전원 상태를 판단한다.
     def read(self) -> PowerReading:
         try:
             supplies = [item for item in self.root.iterdir() if item.is_dir()]
@@ -84,6 +86,7 @@ class ResourceSnapshot:
     storage_percent: float | None
 
 
+# Linux 누적 통계와 녹화 저장소 사용량에서 상태 화면용 백분율을 계산한다.
 class SystemMetricsCollector:
     def __init__(
         self,
@@ -95,6 +98,7 @@ class SystemMetricsCollector:
         self._previous_cpu: tuple[int, int] | None = None
         self._lock = threading.Lock()
 
+    # 첫 조회는 부팅 이후 누적값, 이후 조회는 직전 관측과의 차이로 CPU 사용률을 계산한다.
     def _cpu(self) -> float | None:
         try:
             fields = (
@@ -123,6 +127,7 @@ class SystemMetricsCollector:
             return None
         return round(max(0.0, min(100.0, 100 * (1 - delta_idle / delta_total))), 1)
 
+    # 회수 가능한 캐시를 반영한 MemAvailable을 우선 사용해 메모리 사용률을 구한다.
     def _memory(self) -> float | None:
         try:
             values = {}
@@ -139,6 +144,7 @@ class SystemMetricsCollector:
             return None
         return round(max(0.0, min(100.0, 100 * (total - available) / total)), 1)
 
+    # 녹화 폴더가 없으면 존재하는 상위 경로가 속한 디스크의 사용률을 구한다.
     def _storage(self) -> float | None:
         target = self.storage_path
         while not target.exists() and target != target.parent:
@@ -163,6 +169,7 @@ class PowerEventDetector:
         self._power_source: str | None = None
         self._battery_level = "normal"
 
+    # 이전 관측과 비교해 외부 전원 전환 및 배터리 경고 단계 진입 이벤트만 반환한다.
     def consume(self, reading: PowerReading) -> list[str]:
         events: list[str] = []
         previous_source = self._power_source
@@ -191,6 +198,7 @@ class PowerEventDetector:
         return events
 
 
+# 주기 관측과 요청 시 관측을 직렬화하고 최신 전원값과 이벤트 일지를 갱신한다.
 class PowerMonitor:
     def __init__(
         self,
@@ -214,6 +222,7 @@ class PowerMonitor:
         with self._lock:
             return self._latest
 
+    # 읽기·상태 비교·이벤트 기록을 잠금으로 묶어 동시에 같은 전환을 기록하지 않게 한다.
     def poll_once(self) -> PowerReading:
         with self._poll_lock:
             reading = self.sensor.read()
@@ -232,6 +241,7 @@ class PowerMonitor:
             self.poll_once()
             self._stop.wait(self.interval_seconds)
 
+    # 이미 실행 중인 감시 스레드가 있으면 추가 스레드를 만들지 않는다.
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             return
@@ -239,6 +249,7 @@ class PowerMonitor:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
+    # 관측 사이의 대기를 깨우고 제한 시간 동안 감시 스레드 종료를 기다린다.
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None:
@@ -258,11 +269,13 @@ class CameraInputWatchdog:
         self.last_frame_at = clock()
         self.status = "starting"
 
+    # 새 캡처의 무응답 기한을 시작하되 기존 장애 상태는 녹화 파일의 활동이 관측될 때까지 유지한다.
     def arm(self) -> None:
         self.last_frame_at = self.clock()
         if self.status != "offline":
             self.status = "starting"
 
+    # 프레임 활동 시각을 갱신하며 이전에 장애였던 경우에만 복구 이벤트를 만든다.
     def observe_frame(self) -> str | None:
         previous = self.status
         self.last_frame_at = self.clock()
@@ -277,6 +290,7 @@ class CameraInputWatchdog:
             return self.mark_lost()
         return None
 
+    # 반복된 무응답 판정이 중복 장애 이벤트를 만들지 않도록 상태 전환을 한 번만 수행한다.
     def mark_lost(self) -> str | None:
         if self.status == "offline":
             return None

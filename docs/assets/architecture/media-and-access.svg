@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="770" viewBox="0 0 1120 770" role="img" aria-labelledby="title desc">
+<title id="title">02  영상 저장과 재생 권한</title>
+<desc id="desc">영상 파일의 저장 흐름과 사용자의 재생 요청을 구분해서 읽는다.</desc>
+<defs>
+<marker id="a2563eb" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#2563eb"/></marker>
+<marker id="a0f766e" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#0f766e"/></marker>
+<marker id="a7c3aed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#7c3aed"/></marker>
+<marker id="ab45309" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#b45309"/></marker>
+<marker id="a475569" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#475569"/></marker>
+</defs>
+<rect width="1120" height="770" fill="#ffffff"/>
+<text x="32" y="43" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">02  영상 저장과 재생 권한</text>
+<text x="32" y="76" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">영상 파일의 저장 흐름과 사용자의 재생 요청을 구분해서 읽는다.</text>
+<text x="32" y="125" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">영상 저장</text>
+<rect x="30" y="155" width="220" height="100" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="140.0" y="199.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Edge</text>
+<text x="140.0" y="228.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">H.264 영상 송출</text>
+<rect x="310" y="155" width="220" height="100" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="420.0" y="199.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">MediaMTX</text>
+<text x="420.0" y="228.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">RTSP 수신 · 녹화</text>
+<rect x="590" y="155" width="220" height="100" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="700.0" y="199.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">중앙 녹화 파일</text>
+<text x="700.0" y="228.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">기본 60초 fMP4</text>
+<rect x="870" y="155" width="220" height="100" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="980.0" y="199.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Data</text>
+<text x="980.0" y="228.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">완료 Hook으로 정보 등록</text>
+<path d="M 250 205 L 310 205" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="310,205 299.0,210.0 299.0,200.0" fill="#0f766e"/>
+<rect x="254.5" y="172" width="51.0" height="23" rx="4" fill="#ffffff"/>
+<text x="280" y="190" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">RTSP</text>
+<path d="M 530 205 L 590 205" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="590,205 579.0,210.0 579.0,200.0" fill="#0f766e"/>
+<rect x="537.0" y="172" width="46.0" height="23" rx="4" fill="#ffffff"/>
+<text x="560" y="190" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">저장</text>
+<path d="M 810 205 L 870 205" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="870,205 859.0,210.0 859.0,200.0" fill="#2563eb"/>
+<rect x="817.0" y="172" width="46.0" height="23" rx="4" fill="#ffffff"/>
+<text x="840" y="190" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">등록</text>
+<text x="32" y="312" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">사용자의 요청</text>
+<rect x="30" y="345" width="220" height="110" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="140.0" y="394.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Android 앱</text>
+<text x="140.0" y="423.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">로그인 후 영상 요청</text>
+<rect x="310" y="345" width="220" height="110" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="420.0" y="394.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Nginx</text>
+<text x="420.0" y="423.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">HTTPS 요청 수신</text>
+<rect x="590" y="345" width="220" height="110" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="700.0" y="380.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">External</text>
+<text x="700.0" y="409.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">JWT · 카메라 권한 검사</text>
+<text x="700.0" y="436.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">필요한 정보는 Data 조회</text>
+<rect x="870" y="345" width="220" height="110" rx="12" fill="#fff7ed" stroke="#b45309" stroke-width="2"/>
+<text x="980.0" y="394.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">허용 또는 거부</text>
+<text x="980.0" y="423.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">권한 없는 영상은 차단</text>
+<path d="M 250 400 L 310 400" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="310,400 299.0,405.0 299.0,395.0" fill="#2563eb"/>
+<path d="M 530 400 L 590 400" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="590,400 579.0,405.0 579.0,395.0" fill="#2563eb"/>
+<rect x="537.0" y="364" width="46.0" height="23" rx="4" fill="#ffffff"/>
+<text x="560" y="382" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">검사</text>
+<path d="M 810 400 L 870 400" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="870,400 859.0,405.0 859.0,395.0" fill="#2563eb"/>
+<path d="M 980 455 L 980 505 L 560 505 L 560 542" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="560,542 555.0,531.0 565.0,531.0" fill="#2563eb"/>
+<rect x="673.0" y="477" width="154.0" height="23" rx="4" fill="#ffffff"/>
+<text x="750" y="495" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">허용된 요청만 재생</text>
+<rect x="30" y="552" width="510" height="104" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="285.0" y="584.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">실시간 HLS · 중앙 녹화</text>
+<text x="285.0" y="613.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">앱 ↔ Nginx ↔ MediaMTX</text>
+<text x="285.0" y="640.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">재생목록 · 영상 조각 요청에도 권한 검사</text>
+<rect x="580" y="552" width="510" height="104" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="835.0" y="584.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">복구된 녹화</text>
+<text x="835.0" y="613.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">앱 ↔ Nginx ↔ External ↔ Data</text>
+<text x="835.0" y="640.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">Data에 등록된 복구 파일을 재생</text>
+<path d="M 560 542 L 285 542 L 285 552" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="285,552 280.0,541.0 290.0,541.0" fill="#0f766e"/>
+<path d="M 560 542 L 835 542 L 835 552" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="835,552 830.0,541.0 840.0,541.0" fill="#0f766e"/>
+<text x="32" y="697" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">완료 Hook을 놓친 중앙 녹화는 Data의 파일 정합성 점검으로 보완한다.</text>
+<text x="32" y="724" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">그림은 요청의 논리 경로다. External → Data 요청은 내부 Nginx를 한 번 더 거친다.</text>
+</svg>

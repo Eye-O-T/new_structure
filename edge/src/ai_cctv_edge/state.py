@@ -26,21 +26,25 @@ def utc_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+# 재부팅 뒤에도 남아야 하는 프로필·이벤트·상태 파일의 기본 위치다.
 def default_state_root() -> Path:
     return Path(
         os.environ.get("AI_CCTV_EDGE_STATE_ROOT", "/var/lib/ai-cctv-edge/state")
     )
 
 
+# 현재 실행의 잠금과 임시 프로필 요청은 영구 설정과 별도 경로에 둔다.
 def default_runtime_root() -> Path:
     return Path(os.environ.get("AI_CCTV_EDGE_RUNTIME_ROOT", "/run/ai-cctv-edge"))
 
 
+# 캡처 프로세스가 쓴 상태 스냅샷을 제어 API에서 읽는 파일 저장소다.
 class RuntimeStatusStore:
     def __init__(self, root: Path | None = None):
         self.root = root or default_state_root()
         self.path = self.root / "status.json"
 
+    # 아직 시작하지 않았거나 읽을 수 없는 상태 파일은 빈 상태로 취급한다.
     def read(self) -> dict[str, Any]:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
@@ -48,6 +52,7 @@ class RuntimeStatusStore:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    # 독자가 일부만 기록된 JSON을 보지 않도록 파일 전체를 원자적으로 교체한다.
     def write(self, payload: dict[str, Any]) -> None:
         write_atomic(
             self.path,
@@ -63,6 +68,7 @@ class ProfileSelectionStore:
         self.root = root or default_state_root()
         self.path = self.root / "video-profile.json"
 
+    # 검증된 프로필과 세대를 복원하고 손상된 저장값은 기본 프로필로 대체한다.
     def read(self, default_profile: str) -> tuple[str, int]:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
@@ -80,6 +86,7 @@ class ProfileSelectionStore:
         ):
             return default_profile, 0
 
+    # 적용이 확정된 프로필과 세대를 다음 실행에서도 사용할 수 있게 저장한다.
     def write(self, profile: str, generation: int) -> None:
         if profile not in VIDEO_PROFILES:
             raise ValueError(f"unsupported video profile: {profile}")
@@ -108,6 +115,7 @@ class ProfileRequestStore:
         self.root = root or default_runtime_root()
         self.path = self.root / "video-profile-request.json"
 
+    # 실행 인스턴스 식별값과 단조 시각까지 검증해 사용할 수 있는 임시 요청만 반환한다.
     def read(self) -> dict[str, Any] | None:
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
@@ -141,6 +149,7 @@ class ProfileRequestStore:
         ):
             return None
 
+    # 요청 대상 PID·인스턴스·세대를 기록해 다른 실행으로 변경 요청이 넘어가지 않게 한다.
     def write(
         self,
         profile: str,
@@ -170,6 +179,7 @@ class ProfileRequestStore:
             mode=0o640,
         )
 
+    # 조건이 지정되면 같은 세대와 실행 인스턴스의 요청만 지워 후속 요청을 보존한다.
     def clear(
         self,
         *,
@@ -223,6 +233,7 @@ class EventJournal:
                 if fcntl is not None:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
+    # 이벤트 ID와 UTC 시각을 붙이고 잠금 안에서 추가·동기화·용량 정리를 마친다.
     def record(self, event_type: str, **details: Any) -> dict[str, Any]:
         payload = {
             "event_id": uuid.uuid4().hex,
@@ -269,6 +280,7 @@ class EventJournal:
     def read(self, limit: int = 100) -> list[dict[str, Any]]:
         return self.page(limit=limit)[0]
 
+    # 카메라별 이벤트를 커서 다음부터 읽고 정리되어 사라진 커서는 만료로 표시한다.
     def page(
         self,
         *,

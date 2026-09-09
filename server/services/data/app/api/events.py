@@ -24,6 +24,7 @@ from ..storage.paths import normalize_relative_path
 router = APIRouter()
 
 
+# 이벤트 전후 녹화 구간과 안전한 스냅샷 경로를 만들고 객체 분석의 초기 상태를 채운다.
 def _event_values(payload: EventCreate, settings: Settings) -> dict[str, Any]:
     values = payload.model_dump()
     values["occurred_at"] = format_utc(payload.occurred_at)
@@ -60,6 +61,7 @@ def _event_values(payload: EventCreate, settings: Settings) -> dict[str, Any]:
     return values
 
 
+# 카메라를 확인하고 이벤트를 저장한 뒤 연결 변화라면 복구 구간도 갱신한다.
 @router.post("/events", status_code=status.HTTP_201_CREATED)
 def create_event(
     payload: EventCreate, repository: Repo, settings: RuntimeSettings
@@ -83,6 +85,7 @@ def create_event(
     return event
 
 
+# 시간대가 있는 입력만 공통 UTC 문자열로 바꾸어 저장소 검색에 전달한다.
 @router.get("/events")
 def search_events(
     repository: Repo,

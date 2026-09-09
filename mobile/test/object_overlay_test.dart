@@ -1,3 +1,4 @@
+// 좌표 배율·영상 비율 변경·오래된 응답 처리와 화면 해제 후 폴링 중단을 확인한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:app/core/network/providers.dart';
 import 'package:app/features/live/presentation/object_overlay.dart';
 import 'api_client_test.dart' show MemoryStore, json, session;
 
+/// 100×100 원본의 알려진 박스를 사용해 화면으로 변환된 위치를 정확히 검증한다.
 Map<String, dynamic> frame() => {
   'camera_id': 'cam-001',
   'frame_width': 100,
@@ -22,6 +24,7 @@ Map<String, dynamic> frame() => {
   ],
 };
 
+/// 원본 프레임의 두 배 크기로 제한한 영상 영역을 테스트마다 동일하게 제공한다.
 Widget viewport(Widget child) => MaterialApp(
   home: Center(child: SizedBox(width: 200, height: 200, child: child)),
 );
@@ -74,11 +77,13 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('P:7 G:global-1'), findsOneWidget);
+    // 다음 폴링 응답을 stale로 바꿔 이전에 표시한 박스도 제거되는지 확인한다.
     stale = true;
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pump();
     expect(find.text('P:7 G:global-1'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
+    // 위젯 해제 후 가상 시간을 더 진행해 취소되지 않은 타이머 요청이 없는지 확인한다.
     final count = requests;
     await tester.pump(const Duration(seconds: 2));
     expect(requests, count);

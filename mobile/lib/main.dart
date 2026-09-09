@@ -9,8 +9,10 @@ import 'package:app/core/router/app_router.dart';
 import 'package:app/features/events/presentation/event_history_view_model.dart';
 import 'package:app/features/live/presentation/camera_screen.dart';
 
+/// 앱 전체가 공유하는 의존성을 만들고 세션 복원과 알림 초기화를 병렬로 시작한다.
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // 알림 콜백에서 라우터를 사용하므로 컨테이너를 먼저 만들고 관리자를 나중에 연결한다.
   late final NotificationController notifications;
   final container = ProviderContainer(
     overrides: [
@@ -19,6 +21,7 @@ void main() {
   );
   final api = container.read(apiClientProvider);
   final router = container.read(appRouterProvider);
+  // 앱 복귀나 계정 변경 때 서버에서 달라졌을 수 있는 조회 결과를 모두 무효화한다.
   void refresh() {
     container.invalidate(camerasProvider);
     container.invalidate(eventsProvider);
@@ -63,6 +66,7 @@ void main() {
   unawaited(notifications.start());
 }
 
+/// 공용 테마와 인증 상태를 따르는 라우터를 Flutter 앱에 연결한다.
 class MyApp extends ConsumerWidget {
   const MyApp({super.key});
   @override

@@ -39,6 +39,7 @@ def enforce_retention(
         else:
             retained.append((mtime, size, path))
 
+    # 기간 초과분을 먼저 지운 뒤에도 용량이 넘으면 남은 파일을 오래된 순서로 삭제한다.
     total = sum(size for _, size, _ in retained)
     for _, size, path in retained:
         if total <= max_bytes:
@@ -49,6 +50,7 @@ def enforce_retention(
         total -= size
         deleted.append(path)
 
+    # 영상 삭제로 비게 된 날짜 폴더만 정리하며 다른 파일이 남은 디렉터리는 유지한다.
     for directory in sorted(camera_root.rglob("*"), reverse=True):
         if directory.is_dir():
             try:

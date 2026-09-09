@@ -8,6 +8,7 @@ from pathlib import Path
 CAMERA_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
+# URL·파일명에 그대로 사용할 수 있는 소문자 식별자만 반환한다.
 def validate_camera_id(value: str) -> str:
     if not CAMERA_ID_PATTERN.fullmatch(value):
         raise ValueError("camera_id must match ^[a-z0-9][a-z0-9_-]{0,63}$")

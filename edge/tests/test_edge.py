@@ -1,3 +1,4 @@
+# 실제 카메라 없이 Edge 설정·복구·품질 전환·프로세스 감시와 배포 패키지 계약을 검증한다.
 import configparser
 import json
 import os
@@ -35,6 +36,7 @@ from ai_cctv_edge.runner import CameraInputLostError, EdgeRunner
 from ai_cctv_edge.state import EventJournal, ProfileSelectionStore, RuntimeStatusStore
 
 
+# 테스트별 임시 경로를 사용하는 HD 기본 설정을 만들고 송출 방식·지원 품질만 바꿀 수 있게 한다.
 def write_config(
     path: Path,
     camera_id: str = "cam-001",
@@ -87,6 +89,7 @@ battery_critical_percent = 10
     )
 
 
+# 카메라 ID가 송출·녹화 경로를 결정하고 MPEG-TS 분할 녹화와 입력 감시가 활성화돼야 한다.
 def test_edge_config_and_pipeline_use_camera_path_and_mpegts(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -101,6 +104,7 @@ def test_edge_config_and_pipeline_use_camera_path_and_mpegts(tmp_path):
     assert "timeout=5000" in command
 
 
+# 경로에 쓰기 부적합한 카메라 ID는 파이프라인 생성 전에 설정 읽기에서 거부한다.
 def test_edge_config_rejects_invalid_camera_id(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path, "Bad/Path")
@@ -108,6 +112,7 @@ def test_edge_config_rejects_invalid_camera_id(tmp_path):
         EdgeConfig.load(path)
 
 
+# 파일의 카메라 ID가 대상과 일치하는 자격 증명만 읽고 다른 카메라의 비밀번호는 거부한다.
 def test_edge_publish_credential_handoff_checks_camera_identity_and_mode(tmp_path):
     handoff = tmp_path / "cam-001-publish.json"
     handoff.write_text(
@@ -131,6 +136,7 @@ def test_edge_publish_credential_handoff_checks_camera_identity_and_mode(tmp_pat
         _publish_password_from_file(handoff, "cam-001")
 
 
+# 잘못된 전달 파일은 기존 실행 설정을 보존하고 새 비밀 파일·완료 표식을 남기지 않아야 한다.
 def test_setup_rejects_credentials_before_replacing_live_config(
     tmp_path, monkeypatch
 ):
@@ -162,6 +168,7 @@ def test_setup_rejects_credentials_before_replacing_live_config(
     assert not (state_root / "video-profile.json").exists()
 
 
+# 유효한 자격 증명으로 설정을 완성한 뒤에만 서비스 시작을 허용하는 표식을 생성한다.
 def test_setup_writes_configured_marker_only_after_valid_credentials(
     tmp_path, monkeypatch
 ):
@@ -187,6 +194,7 @@ def test_setup_writes_configured_marker_only_after_valid_credentials(
     assert EdgeConfig.load(config_path).camera_id == "cam-001"
 
 
+# 토큰 전달 파일은 비공개로 새로 생성하고 화면 출력이나 기존 파일 덮어쓰기를 허용하지 않는다.
 def test_export_auth_token_creates_private_one_time_handoff(tmp_path, capsys):
     config_path = tmp_path / "config.toml"
     write_config(config_path)
@@ -204,6 +212,7 @@ def test_export_auth_token_creates_private_one_time_handoff(tmp_path, capsys):
         export_auth_token(config_path, output)
 
 
+# 중앙 송출이 연결되지 않아도 캡처·백업 경로가 공유 메모리 소비자를 기다리지 않아야 한다.
 def test_central_publish_uses_shared_memory_so_backup_does_not_block(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path, mode="central_publish")
@@ -213,6 +222,7 @@ def test_central_publish_uses_shared_memory_so_backup_does_not_block(tmp_path):
     assert not any("rtsp://" in item for item in command)
 
 
+# 저장 용량 제한을 넘으면 일부 오래된 조각을 정리해 총량을 제한 아래로 내려야 한다.
 def test_retention_deletes_oldest_until_below_limit(tmp_path):
     first = tmp_path / "first.ts"
     second = tmp_path / "second.ts"
@@ -225,6 +235,7 @@ def test_retention_deletes_oldest_until_below_limit(tmp_path):
     assert sum(path.stat().st_size for path in tmp_path.glob("*.ts")) == 80
 
 
+# 용량 제한을 만족할 수 없더라도 기록 중일 수 있는 최신 조각은 삭제하지 않는다.
 def test_retention_never_unlinks_the_newest_active_segment(tmp_path):
     completed = tmp_path / "20260822T080000.000000Z_000000.ts"
     active = tmp_path / "20260822T080000.000000Z_000001.ts"
@@ -245,6 +256,7 @@ def test_retention_never_unlinks_the_newest_active_segment(tmp_path):
     assert active.read_bytes() == b"b" * 80
 
 
+# 인증한 클라이언트는 완료된 조각만 조회·다운로드하고 기록 중인 최신 파일은 거부받아야 한다.
 def test_recovery_manifest_and_file_require_token(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -292,6 +304,7 @@ def test_recovery_manifest_and_file_require_token(tmp_path):
     )
 
 
+# 캡처가 멈춘 뒤에는 최신 조각도 더 이상 쓰이지 않으므로 복구 목록에 포함한다.
 def test_recovery_exposes_final_segment_after_capture_stops(tmp_path, monkeypatch):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -330,6 +343,7 @@ def test_recovery_exposes_final_segment_after_capture_stops(tmp_path, monkeypatc
     ]
 
 
+# 상태 파일이 running이어도 실제 프로세스가 없으면 캡처의 추가 쓰기가 없다고 판단한다.
 def test_recovery_treats_a_dead_capture_pid_as_finalized(tmp_path, monkeypatch):
     state_root = tmp_path / "state"
     state_root.mkdir()
@@ -352,6 +366,7 @@ def test_recovery_treats_a_dead_capture_pid_as_finalized(tmp_path, monkeypatch):
     assert _capture_may_write("cam-001") is False
 
 
+# 파일 순번에 설정한 조각 길이를 곱해 복구 구간의 시작 시각을 계산해야 한다.
 def test_recovery_segment_timestamp_uses_configured_duration(tmp_path):
     segment = tmp_path / "20260822T080000.000000Z_000002.ts"
     segment.write_bytes(b"segment")
@@ -359,6 +374,7 @@ def test_recovery_segment_timestamp_uses_configured_duration(tmp_path):
     assert _segment_start(segment, 15).isoformat() == "2026-08-22T08:00:30+00:00"
 
 
+# 품질 이름이 없던 구형 설정도 해상도·비트레이트에서 기존 FHD 선택을 복원한다.
 def test_legacy_fhd_values_are_inferred_as_fhd(tmp_path):
     path = tmp_path / "legacy.toml"
     write_config(path)
@@ -372,6 +388,7 @@ def test_legacy_fhd_values_are_inferred_as_fhd(tmp_path):
     assert config.video.profile == "fhd"
 
 
+# 사전 품질 검사는 실제 적용할 FHD 해상도·프레임률·비트레이트로 실행돼야 한다.
 def test_profile_probe_uses_exact_fhd_bitrate(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -384,6 +401,7 @@ def test_profile_probe_uses_exact_fhd_bitrate(tmp_path):
     assert "bitrate=4000" in command
 
 
+# 다른 카메라의 고성능 모드가 섞여도 첫 카메라가 지원하는 모드로만 품질을 결정한다.
 def test_capability_probe_filters_profiles_by_primary_camera_modes(
     tmp_path, monkeypatch
 ):
@@ -421,6 +439,7 @@ def test_capability_probe_filters_profiles_by_primary_camera_modes(
     )
 
 
+# FHD 30fps를 정확히 지원하는 경계 모드도 HD·FHD 선택을 제공해야 한다.
 def test_capability_probe_accepts_nominal_fhd_30fps_mode(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -431,6 +450,7 @@ def test_capability_probe_accepts_nominal_fhd_30fps_mode(tmp_path):
     ) == ("hd", "fhd")
 
 
+# 하드웨어 탐색 없이 지원 품질·카메라·인코더 존재 여부를 고정해 제공한다.
 class FakeCapabilityProbe:
     def __init__(self, supported=("hd", "fhd"), camera=True, encoder=True):
         self.result = VideoCapabilities(supported, camera, encoder)
@@ -439,6 +459,7 @@ class FakeCapabilityProbe:
         return self.result
 
 
+# 적용 대기·성공·실패·commit을 분리해 실제 파이프라인 없이 품질 트랜잭션을 재현한다.
 class FakeProfileRuntime:
     def __init__(self, outcomes=None):
         self.current = "hd"
@@ -482,16 +503,19 @@ class FakeProfileRuntime:
         return outcome
 
 
+# 상태 API가 전원 정보를 직렬화하는지 확인할 고정 센서값을 제공한다.
 class FakePowerSensor:
     def read(self):
         return PowerReading(84, "external", False)
 
 
+# CPU·메모리·저장소 지표를 고정해 호스트의 실제 부하와 테스트 결과를 분리한다.
 class FakeMetrics:
     def sample(self):
         return ResourceSnapshot(12.5, 34.5, 56.5)
 
 
+# 인증 토큰과 하드웨어 대역을 주입한 관리 API를 만들며 선언·탐색 품질 차이도 재현한다.
 def _management_client(
     tmp_path,
     runtime,
@@ -517,6 +541,7 @@ def _management_client(
     return TestClient(app), token
 
 
+# 관리 인증부터 센서값·지원 품질 조회, 품질 적용과 성공 이벤트까지 전체 요청을 확인한다.
 def test_management_api_auth_status_capabilities_and_apply(tmp_path):
     runtime = FakeProfileRuntime()
     client, token = _management_client(tmp_path, runtime)
@@ -548,6 +573,7 @@ def test_management_api_auth_status_capabilities_and_apply(tmp_path):
     assert events["next_cursor"] == events["items"][-1]["event_id"]
 
 
+# 설정에 선언된 품질보다 실제 하드웨어 탐색 결과를 우선해 지원 목록을 응답한다.
 def test_management_status_reports_probed_not_declared_profiles(tmp_path):
     runtime = FakeProfileRuntime()
     client, token = _management_client(
@@ -567,6 +593,7 @@ def test_management_status_reports_probed_not_declared_profiles(tmp_path):
     assert status["supported_video_profiles"] == ["hd"]
 
 
+# 종료되거나 사라진 캡처의 과거 online 값을 현재 연결 상태처럼 노출하지 않아야 한다.
 def test_management_status_does_not_reuse_stopped_or_stale_capture_values(
     tmp_path, monkeypatch
 ):
@@ -606,6 +633,7 @@ def test_management_status_does_not_reuse_stopped_or_stale_capture_values(
     assert stale["central_connection_status"] == "unknown"
 
 
+# 지원하지 않는 품질은 활성화 요청을 만들기 전에 거부해야 한다.
 def test_profile_apply_rejects_unsupported_without_changing_pipeline(tmp_path):
     runtime = FakeProfileRuntime()
     client, token = _management_client(tmp_path, runtime, supported=("hd",))
@@ -619,6 +647,7 @@ def test_profile_apply_rejects_unsupported_without_changing_pipeline(tmp_path):
     assert runtime.activations == []
 
 
+# 새 품질 적용 실패 후 이전 품질을 다시 활성화하고 영구 선택값은 유지한다.
 def test_failed_profile_apply_rolls_back(tmp_path):
     runtime = FakeProfileRuntime(
         [
@@ -639,6 +668,7 @@ def test_failed_profile_apply_rolls_back(tmp_path):
     assert runtime.persisted == "hd"
 
 
+# activate는 임시 요청만 남기며 commit이 성공해야 저장된 품질과 세대를 교체한다.
 def test_local_runtime_persists_only_after_verified_commit(tmp_path, monkeypatch):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -664,6 +694,7 @@ def test_local_runtime_persists_only_after_verified_commit(tmp_path, monkeypatch
     assert runtime.request_store.read() is None
 
 
+# 이전 실행 인스턴스를 대상으로 남은 요청은 새 runner가 적용하지 않고 제거한다.
 def test_runner_ignores_request_for_stale_instance(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -682,6 +713,7 @@ def test_runner_ignores_request_for_stale_instance(tmp_path):
     assert runner.request_store.read() is None
 
 
+# 현재 PID와 인스턴스 ID가 일치하는 요청만 실행 품질과 세대에 반영한다.
 def test_runner_consumes_request_for_its_current_instance(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -704,6 +736,7 @@ def test_runner_consumes_request_for_its_current_instance(tmp_path):
     assert runner.profile_generation == 4
 
 
+# 관리 프로세스가 commit하지 못한 임시 품질은 제한 시간 뒤 저장된 선택으로 되돌린다.
 def test_runner_expires_uncommitted_profile_and_restores_persisted_selection(
     tmp_path,
 ):
@@ -736,6 +769,7 @@ def test_runner_expires_uncommitted_profile_and_restores_persisted_selection(
     assert runner.profile_generation == 3
 
 
+# 조각 파일의 실제 증가와 가상 시계로 입력 중단·복구 이벤트가 한 번씩 생기는지 확인한다.
 def test_runner_watchdog_uses_real_recording_activity_for_transitions(tmp_path):
     path = tmp_path / "config.toml"
     write_config(path)
@@ -771,6 +805,7 @@ def test_runner_watchdog_uses_real_recording_activity_for_transitions(tmp_path):
     ]
 
 
+# 중앙 송출 프로세스만 실패한 경우 캡처 객체를 유지한 채 송출 재시작을 예약한다.
 def test_runner_restarts_publisher_without_stopping_capture(tmp_path, monkeypatch):
     path = tmp_path / "config.toml"
     write_config(path, mode="central_publish")
@@ -800,6 +835,7 @@ def test_runner_restarts_publisher_without_stopping_capture(tmp_path, monkeypatc
     assert runner.capture is capture
 
 
+# 송출 프로세스 생성 실패는 캡처를 종료하지 않고 증가하는 지연으로 재시도한다.
 def test_publisher_spawn_failure_uses_backoff_without_stopping_capture(
     tmp_path, monkeypatch
 ):
@@ -828,6 +864,7 @@ def test_publisher_spawn_failure_uses_backoff_without_stopping_capture(
     assert runner.publisher_delay == 2.0
 
 
+# 임계값과 입력 타임아웃 경계를 넘을 때만 장애·복구 이벤트를 내고 반복 상태는 생략한다.
 def test_power_and_camera_watchdog_transition_events():
     detector = PowerEventDetector(low_percent=20, critical_percent=10)
     assert detector.consume(PowerReading(80, "external")) == []
@@ -846,6 +883,7 @@ def test_power_and_camera_watchdog_transition_events():
     assert watchdog.observe_frame() == "camera_input_restored"
 
 
+# 같은 Edge 저장소를 새 카메라에 재사용해도 이전 카메라의 이벤트가 섞이지 않아야 한다.
 def test_event_journal_isolated_when_edge_is_reprovisioned_for_new_camera(tmp_path):
     legacy = EventJournal("cam-old", tmp_path)
     old_event = legacy.record("central_connection_lost")
@@ -868,6 +906,7 @@ def test_event_journal_isolated_when_edge_is_reprovisioned_for_new_camera(tmp_pa
     ]
 
 
+# 캡처·제어·복구 서비스가 독립 진입점을 사용하고 패키지 갱신이 서비스 활성화를 강제하지 않아야 한다.
 def test_systemd_units_separate_capture_control_and_recovery_lifecycles():
     edge_root = Path(__file__).parents[1]
     units = {
@@ -903,6 +942,7 @@ def test_systemd_units_separate_capture_control_and_recovery_lifecycles():
     assert "systemctl enable" not in postinst
 
 
+# 패키지 버전·아키텍처·고정 의존성과 수동 자격 증명 전달 문서의 순서를 함께 검사한다.
 def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
     edge_root = Path(__file__).parents[1]
     with (edge_root / "pyproject.toml").open("rb") as handle:

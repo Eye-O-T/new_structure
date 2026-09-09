@@ -21,6 +21,7 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# 외부 접속용 포트와 내부 영상 수신 주소를 한 설정으로 검증한다.
 class ServerConfig(StrictModel):
     public_http_port: int = Field(default=80, ge=1, le=65535)
     public_https_port: int = Field(default=443, ge=1, le=65535)
@@ -28,12 +29,14 @@ class ServerConfig(StrictModel):
     rtsp_port: int = Field(default=8554, ge=1, le=65535)
     timezone: str = "Asia/Seoul"
 
+    # 바인딩 주소는 DNS 이름 대신 실제 인터페이스에 지정할 IP만 허용한다.
     @field_validator("rtsp_bind_address")
     @classmethod
     def bind_address_is_ip(cls, value: str) -> str:
         ip_address(value)
         return value
 
+    # 동일 호스트에서 HTTP·HTTPS·RTSP가 같은 포트를 점유하지 않게 한다.
     @model_validator(mode="after")
     def ports_must_be_distinct(self) -> "ServerConfig":
         ports = {self.public_http_port, self.public_https_port, self.rtsp_port}
@@ -42,6 +45,7 @@ class ServerConfig(StrictModel):
         return self
 
 
+# 중앙 녹화와 복구 영상의 저장 위치, 보존 기간 및 용량 경고 기준이다.
 class RecordingConfig(StrictModel):
     root: str = "./runtime/recordings"
     recovery_root: str = "./runtime/recovered"
@@ -64,6 +68,7 @@ class InferenceConfig(StrictModel):
     event_post_roll_seconds: int = Field(default=10, ge=0, le=300)
 
 
+# 최초 등록할 카메라와 Edge 관리·복구 주소 사이의 연결 정보를 담는다.
 class CameraBootstrap(StrictModel):
     camera_id: str
     name: str = Field(min_length=1, max_length=128)
@@ -79,6 +84,7 @@ class CameraBootstrap(StrictModel):
     def camera_id_is_valid(cls, value: str) -> str:
         return validate_camera_id(value)
 
+    # 서버가 호출할 기본 주소이므로 자격 증명·쿼리·상위 경로 이동을 거부한다.
     @field_validator("edge_management_url", "edge_recovery_url")
     @classmethod
     def edge_service_url_is_http(cls, value: str | None) -> str | None:
@@ -114,6 +120,7 @@ class AppConfig(StrictModel):
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
     cameras: list[CameraBootstrap] = Field(default_factory=list, max_length=4)
 
+    # 서로 다른 카메라가 같은 스트림과 저장 경로를 공유하지 않게 한다.
     @model_validator(mode="after")
     def camera_ids_must_be_unique(self) -> "AppConfig":
         ids = [camera.camera_id for camera in self.cameras]

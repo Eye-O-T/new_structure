@@ -1,3 +1,4 @@
+# 실제 SQLite와 임시 파일을 사용하는 Data API 통합 테스트: 인증·시간 경계·저장 일관성·복구를 검사한다.
 from __future__ import annotations
 
 import os
@@ -22,6 +23,7 @@ SCOPED_TOKENS = {
 }
 
 
+# 임시 DB·녹화 폴더와 실제 앱 수명 주기를 사용하여 저장 계층까지 함께 검증한다.
 @pytest.fixture
 def data_client(tmp_path: Path):
     settings = Settings(
@@ -37,6 +39,7 @@ def data_client(tmp_path: Path):
         yield client, settings
 
 
+# 공통 토큰 없이 서로 다른 네 서비스 토큰을 주입하여 실제 라우트별 권한을 검사한다.
 @pytest.fixture
 def scoped_data_client(tmp_path: Path):
     settings = Settings(
@@ -56,6 +59,7 @@ def scoped_data_client(tmp_path: Path):
         yield client
 
 
+# 서비스 토큰별 허용·금지 라우트와 잘못된 토큰의 미인증 응답을 검증한다.
 def test_scoped_internal_tokens_enforce_least_privilege(scoped_data_client):
     client = scoped_data_client
     headers = {
@@ -130,6 +134,7 @@ def test_scoped_internal_tokens_enforce_least_privilege(scoped_data_client):
     )
 
 
+# 서비스별 토큰이 일부만 설정되면 비어 있는 권한이 공통 토큰으로 열리지 않아야 한다.
 def test_partial_scoped_tokens_cannot_fall_back_to_legacy(tmp_path: Path) -> None:
     settings = Settings(
         database_path=tmp_path / "database" / "ai_cctv.db",
@@ -144,6 +149,7 @@ def test_partial_scoped_tokens_cannot_fall_back_to_legacy(tmp_path: Path) -> Non
         settings.prepare_directories()
 
 
+# 중앙 녹화 조각 길이는 설정한 지원 범위 안에서만 허용되어야 한다.
 @pytest.mark.parametrize("seconds", (9, 301))
 def test_data_settings_reject_segment_duration_outside_srs_range(
     tmp_path: Path, seconds: int
@@ -161,6 +167,7 @@ def test_data_settings_reject_segment_duration_outside_srs_range(
         settings.prepare_directories()
 
 
+# 서비스별 토큰을 사용하지 않는 기존 배포에서는 공통 토큰 호환성을 유지한다.
 def test_data_settings_preserve_legacy_runtime_token_fallback(monkeypatch) -> None:
     for name in (
         "DATA_EXTERNAL_TOKEN",
@@ -177,6 +184,7 @@ def test_data_settings_preserve_legacy_runtime_token_fallback(monkeypatch) -> No
     assert set(settings.data_api_tokens().values()) == {TOKEN}
 
 
+# 내부 API로 사용자를 생성해 각 시나리오가 실제 저장 검증을 거친 계정을 사용하게 한다.
 def _create_user(client: TestClient, username: str, role: str = "viewer") -> dict:
     response = client.post(
         f"{BASE}/users",
@@ -191,6 +199,7 @@ def _create_user(client: TestClient, username: str, role: str = "viewer") -> dic
     return response.json()
 
 
+# 카메라 생성 성공을 보장하는 공통 준비 함수이다.
 def _create_camera(client: TestClient, camera_id: str) -> dict:
     response = client.post(
         f"{BASE}/cameras",
@@ -205,6 +214,7 @@ def _create_camera(client: TestClient, camera_id: str) -> dict:
     return response.json()
 
 
+# 임시 저장소에 실제 파일을 만든 뒤 등록하여 파일 통계 검증도 함께 실행한다.
 def _create_segment(
     client: TestClient,
     settings: Settings,
@@ -235,6 +245,7 @@ def _create_segment(
     return response.json()
 
 
+# 실제 DB 초기화 결과의 인덱스·WAL·외래 키와 준비 상태 응답을 확인한다.
 def test_schema_indexes_pragmas_and_foreign_keys(data_client) -> None:
     client, settings = data_client
     assert client.get("/health/live").status_code == 200
@@ -272,6 +283,7 @@ def test_schema_indexes_pragmas_and_foreign_keys(data_client) -> None:
             )
 
 
+# 인증 없는 내부 요청은 공통 JSON 오류 구조의 401로 거절되어야 한다.
 def test_internal_routes_require_token_and_use_json_error_shape(data_client) -> None:
     client, _settings = data_client
     response = client.get(f"{BASE}/cameras")
@@ -279,6 +291,7 @@ def test_internal_routes_require_token_and_use_json_error_shape(data_client) -> 
     assert response.json()["error"]["code"] == "INVALID_INTERNAL_TOKEN"
 
 
+# 시간 경계가 맞닿기만 하는 녹화는 제외하고 겹친 결과의 페이지 순서를 유지한다.
 def test_overlap_boundaries_and_pagination(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -315,6 +328,7 @@ def test_overlap_boundaries_and_pagination(data_client) -> None:
     assert response.json()["limit"] == 1
 
 
+# 같은 파일의 재등록은 같은 ID를 반환하고 크기는 실제 파일 통계를 따라야 한다.
 def test_segment_idempotency_and_file_stat(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -340,6 +354,7 @@ def test_segment_idempotency_and_file_stat(data_client) -> None:
     assert second["idempotent_replay"] is True
 
 
+# 완료 훅의 반복 호출이 파일 기반 메타데이터와 단일 녹화 행으로 수렴하는지 확인한다.
 @pytest.mark.parametrize(
     "filename",
     [
@@ -376,6 +391,7 @@ def test_recording_complete_hook_derives_metadata_and_is_idempotent(
     assert second.json()["idempotent_replay"] is True
 
 
+# 파일 쓰기가 늦어져도 녹화 시작 시각과 소수 초는 파일명에서 읽어야 한다.
 @pytest.mark.parametrize(
     "fraction,expected_fraction",
     [("227398", "227"), ("2", "200"), ("227398999", "227")],
@@ -411,6 +427,7 @@ def test_recording_hook_uses_filename_start_instead_of_file_write_time(
     assert response.json()["duration_ms"] == 10_000
 
 
+# 대표 녹화와 전체 녹화 연결 및 로컬·전역 인물 ID가 함께 보존되는지 검사한다.
 def test_event_has_primary_and_many_to_many_segment_links(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -453,6 +470,7 @@ def test_event_has_primary_and_many_to_many_segment_links(data_client) -> None:
     assert event["metadata"] == {"label": "사람"}
 
 
+# 이벤트를 먼저 저장해도 나중에 등록된 녹화가 전후 버퍼 구간으로 연결되어야 한다.
 def test_later_segment_is_linked_to_event_pre_and_post_roll_window(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -480,6 +498,7 @@ def test_later_segment_is_linked_to_event_pre_and_post_roll_window(data_client) 
     assert stored["recording_segment_id"] == segment["id"]
 
 
+# 일반 사용자는 배정 카메라만 보고 관리자는 전체 카메라를 볼 수 있어야 한다.
 def test_camera_acl_filters_viewer_but_not_admin(data_client) -> None:
     client, _settings = data_client
     viewer = _create_user(client, "viewer")
@@ -505,6 +524,7 @@ def test_camera_acl_filters_viewer_but_not_admin(data_client) -> None:
     }
 
 
+# 송출 해시를 내부에서 조회할 수 있고 카메라 삭제와 함께 자격 증명도 제거되어야 한다.
 def test_camera_publish_credential_is_internal_and_cascades(data_client) -> None:
     client, _settings = data_client
     _create_camera(client, "cam-001")
@@ -530,6 +550,7 @@ def test_camera_publish_credential_is_internal_and_cascades(data_client) -> None
     )
 
 
+# 운영체제별 절대 경로와 상위 경로 우회 모두 저장 루트 검증에서 거절되어야 한다.
 @pytest.mark.parametrize(
     "bad_path", ["../escape.mp4", "/absolute.mp4", "C:\\escape.mp4"]
 )
@@ -555,6 +576,7 @@ def test_path_traversal_and_absolute_paths_are_rejected(
     assert response.json()["error"]["code"] == "INVALID_STORAGE_PATH"
 
 
+# DB에는 있지만 파일이 없는 항목과 파일만 존재하는 항목을 서로 다르게 보고한다.
 def test_reconcile_marks_missing_and_reports_orphan(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -580,6 +602,7 @@ def test_reconcile_marks_missing_and_reports_orphan(data_client) -> None:
     assert stored["status"] == "missing"
 
 
+# 완료 훅을 놓친 정상 중앙 녹화 파일을 대조 작업이 다시 등록할 수 있어야 한다.
 def test_reconcile_indexes_completed_mediamtx_segment_after_hook_failure(
     data_client,
 ) -> None:
@@ -617,6 +640,7 @@ def test_reconcile_indexes_completed_mediamtx_segment_after_hook_failure(
     assert replay.json()["indexed_orphans"] == []
 
 
+# 삭제 후보 조회·실제 파일 삭제·DB 백업이 각각 의도한 결과를 남기는지 확인한다.
 def test_backup_and_retention_cleanup(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -653,6 +677,7 @@ def test_backup_and_retention_cleanup(data_client) -> None:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
+# deleting 상태로 중단된 파일은 다음 대조 작업에서 삭제 완료 상태로 수렴한다.
 @pytest.mark.parametrize("file_exists", [True, False])
 def test_reconcile_completes_interrupted_retention_delete(
     data_client, file_exists: bool
@@ -684,6 +709,7 @@ def test_reconcile_completes_interrupted_retention_delete(
     assert stored["status"] == "deleted"
 
 
+# 새 갱신 토큰 발급 뒤 이전 토큰의 폐기·교체 이력이 남고 접근 폐기도 조회되어야 한다.
 def test_refresh_rotation_and_revoked_token_state(data_client) -> None:
     client, _settings = data_client
     user = _create_user(client, "token-user")
@@ -741,6 +767,7 @@ def test_refresh_rotation_and_revoked_token_state(data_client) -> None:
     assert missing.status_code == 404
 
 
+# 시간대 없는 시각은 서버 로컬 시간으로 추정하지 않고 검증 오류로 거절한다.
 def test_naive_timestamps_are_rejected(data_client) -> None:
     client, _settings = data_client
     _create_camera(client, "cam-001")
@@ -757,6 +784,7 @@ def test_naive_timestamps_are_rejected(data_client) -> None:
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+# 초기화가 반복되어도 첫 관리자와 설정 파일의 카메라가 중복 생성되지 않아야 한다.
 def test_first_start_bootstraps_admin_and_cameras_idempotently(tmp_path) -> None:
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -785,6 +813,7 @@ cameras:
             assert [camera["camera_id"] for camera in cameras] == ["cam-001"]
 
 
+# 장치 인증값과 공개 카메라 정보 및 요청·현재 프로필·실행 관측값의 경계를 검증한다.
 def test_edge_metadata_profiles_and_runtime_state_are_separate(data_client) -> None:
     client, _settings = data_client
     token = "e" * 32
@@ -879,6 +908,7 @@ def test_edge_metadata_profiles_and_runtime_state_are_separate(data_client) -> N
     )
 
 
+# 인증값이나 해석이 모호한 경로를 포함하는 Edge URL을 등록할 수 없어야 한다.
 def test_edge_service_urls_reject_ambiguous_or_credentialed_paths(data_client) -> None:
     client, _settings = data_client
     common = {
@@ -902,6 +932,7 @@ def test_edge_service_urls_reject_ambiguous_or_credentialed_paths(data_client) -
         assert response.status_code == 422
 
 
+# 중복 Edge 이벤트와 복구 작업의 상태 전이·재시작 후 재대기 처리를 함께 확인한다.
 def test_edge_event_idempotency_recovery_lifecycle_and_crash_requeue(
     data_client,
 ) -> None:
@@ -974,6 +1005,7 @@ def test_edge_event_idempotency_recovery_lifecycle_and_crash_requeue(
     assert requeued["next_retry_at"] is not None
 
 
+# 순서가 뒤바뀐 보고는 복구 구간을 확장하고 이전 revision의 완료 보고를 무효화해야 한다.
 def test_recovery_merges_out_of_order_reporter_boundaries(data_client) -> None:
     client, _settings = data_client
     _create_camera(client, "cam-001")
@@ -1062,6 +1094,7 @@ def test_recovery_merges_out_of_order_reporter_boundaries(data_client) -> None:
     ) == base + timedelta(minutes=5)
 
 
+# 복구 보고 이후 안정화 시간이 지나야 작업을 할당하고 종료 경계가 늘면 대기도 갱신한다.
 def test_recovery_waits_for_final_edge_segment_to_settle(data_client) -> None:
     client, _settings = data_client
     _create_camera(client, "cam-001")
@@ -1112,6 +1145,7 @@ def test_recovery_waits_for_final_edge_segment_to_settle(data_client) -> None:
     assert repository.claim_due_recovery_job() is None
 
 
+# 구형 추론 연결 이벤트는 이력만 남기고 Edge 중앙 송출의 복구 구간을 만들거나 닫지 않는다.
 def test_legacy_network_events_are_stored_without_recovery_side_effects(
     data_client,
 ) -> None:
@@ -1181,6 +1215,7 @@ def test_legacy_network_events_are_stored_without_recovery_side_effects(
     }
 
 
+# 복구 영상의 일부 바이트 요청에 206·Content-Range·MPEG-TS 형식이 올바르게 반환되어야 한다.
 def test_recording_content_supports_mpegts_range_requests(data_client) -> None:
     client, settings = data_client
     _create_camera(client, "cam-001")
@@ -1232,6 +1267,7 @@ def test_recording_content_supports_mpegts_range_requests(data_client) -> None:
     assert matching_validator.content == content[1:6]
 
 
+# 활성 수·이력 보존·권한 교체 제약의 실패가 기존 DB 상태를 부분 변경하지 않아야 한다.
 def test_camera_limit_history_delete_and_permission_replace_are_transactional(
     data_client,
 ) -> None:

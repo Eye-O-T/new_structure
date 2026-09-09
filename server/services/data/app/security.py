@@ -38,6 +38,7 @@ _ROUTE_SCOPES: dict[tuple[str, str], frozenset[str]] = {
 }
 
 
+# 실제 라우트 템플릿과 HTTP 메서드로 권한을 결정하고 미인증과 권한 부족을 구분한다.
 def require_internal_token(
     request: Request,
     x_internal_token: Annotated[str | None, Header()] = None,

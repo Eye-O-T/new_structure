@@ -1,3 +1,4 @@
+// Firebase 연결 설정이 없는 환경에서도 앱 초기화가 로그인 화면까지 진행되는지 확인한다.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:app/main.dart' as app;
 

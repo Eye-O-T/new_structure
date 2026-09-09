@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:app/features/events/presentation/event_history_view_model.dart';
 
+/// 접근 가능한 카메라의 로딩·오류·빈 목록 상태와 개별 화면 진입을 제공한다.
 class LiveScreen extends ConsumerWidget {
   const LiveScreen({super.key});
   @override
@@ -37,6 +38,7 @@ class LiveScreen extends ConsumerWidget {
         data: (rows) => rows.isEmpty
             ? const Center(child: Text('접근 가능한 카메라가 없습니다.'))
             : RefreshIndicator(
+                // 목록 무효화만으로 끝내지 않고 새 응답까지 기다려 새로고침 완료를 표시한다.
                 onRefresh: () async {
                   ref.invalidate(camerasProvider);
                   await ref.read(camerasProvider.future);

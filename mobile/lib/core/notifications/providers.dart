@@ -2,6 +2,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'notification_controller.dart';
 
+/// 앱 시작점의 override가 필수이며 누락 시 중복 관리자 생성 대신 명시적으로 실패한다.
 final notificationControllerProvider = Provider<NotificationController>((ref) {
   throw StateError(
     'Notification controller must be provided by the application',

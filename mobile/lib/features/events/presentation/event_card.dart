@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../domain/event.dart';
 
+/// 한 이벤트의 카메라·현지 시각 요약과 상세 화면 진입을 제공한다.
 class EventCard extends StatelessWidget {
   const EventCard({super.key, required this.event});
   final Event event;

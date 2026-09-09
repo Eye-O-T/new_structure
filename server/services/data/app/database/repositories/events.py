@@ -12,6 +12,7 @@ from .base import _event, _now
 class EventsRepositoryMixin:
     database: Database
 
+    # Edge 이벤트 재전송을 식별하고 녹화 연결·푸시·객체 작업을 한 번에 저장한다.
     def create_event(self, values: dict[str, Any]) -> dict[str, Any]:
         now = _now()
         explicit_ids = {int(value) for value in values.get("recording_segment_ids", [])}
@@ -19,6 +20,15 @@ class EventsRepositoryMixin:
             explicit_ids.add(int(values["recording_segment_id"]))
         with self.database.transaction() as connection:
             edge_event_id = values.get("edge_event_id")
+            source_event_id = values.get("source_event_id")
+            if source_event_id is not None:
+                existing = connection.execute(
+                    "SELECT id FROM events WHERE camera_id=? AND source_event_id=?",
+                    (values["camera_id"], source_event_id),
+                ).fetchone()
+                if existing is not None:
+                    # 응답이 유실된 전처리 이벤트 재전송은 푸시와 객체 작업도 재생성하지 않는다.
+                    return self.get_event(int(existing["id"])) or {}
             if edge_event_id is not None:
                 existing = connection.execute(
                     """
@@ -75,8 +85,8 @@ class EventsRepositoryMixin:
                 INSERT INTO events(
                     camera_id, event_type, occurred_at, person_id, global_person_id,
                     confidence, recording_segment_id, snapshot_path,
-                    metadata_json, edge_event_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    metadata_json, edge_event_id, source_event_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["camera_id"],
@@ -89,6 +99,7 @@ class EventsRepositoryMixin:
                     values.get("snapshot_path"),
                     json.dumps(values.get("metadata", {}), ensure_ascii=False),
                     edge_event_id,
+                    source_event_id,
                     now,
                 ),
             )
@@ -110,6 +121,7 @@ class EventsRepositoryMixin:
             raise RuntimeError("event disappeared after creation")
         return result
 
+    # 단일 대표 녹화와 함께 다대다 연결의 전체 녹화 ID를 돌려준다.
     def get_event(self, event_id: int) -> dict[str, Any] | None:
         with self.database.connection() as connection:
             row = connection.execute(
@@ -130,6 +142,7 @@ class EventsRepositoryMixin:
         ]
         return result
 
+    # 시작은 포함하고 종료는 제외하는 시간 조건으로 검색하여 시간·ID 순 페이지를 만든다.
     def search_events(
         self,
         *,

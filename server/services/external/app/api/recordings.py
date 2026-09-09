@@ -43,6 +43,7 @@ from .validation import _public_media_url, _validate_resource_id, _validated_tim
 router = APIRouter()
 
 
+# DB의 재생 길이를 유지하면서 파일명에 기록된 정밀 시작 시각으로 MediaMTX 주소를 구성한다.
 def _playback_url(settings: Settings, segment: dict[str, Any]) -> str:
     camera_id = str(segment.get("camera_id", ""))
     if not CAMERA_ID_PATTERN.fullmatch(camera_id):
@@ -72,6 +73,7 @@ def _playback_url(settings: Settings, segment: dict[str, Any]) -> str:
     return f"{settings.public_base_url}{path}" if settings.public_base_url else path
 
 
+# 카메라 권한과 시간대·구간 순서를 확인한 뒤 녹화 검색을 Data에 위임한다.
 @router.get("/api/v1/recordings", response_model=RecordingPageResponse)
 async def list_recordings(
     camera_id: str = Query(),
@@ -94,6 +96,7 @@ async def list_recordings(
     )
 
 
+# 녹화 ID로 자료를 조회한 후 그 녹화가 속한 카메라의 열람 권한까지 검사한다.
 @router.get("/api/v1/recordings/{segment_id}", response_model=RecordingResponse)
 async def get_recording(
     segment_id: str,
@@ -108,6 +111,7 @@ async def get_recording(
     return recording
 
 
+# 복구 MPEG-TS는 인증된 content API로, 중앙 MP4는 MediaMTX 재생 주소로 안내한다.
 @router.get(
     "/api/v1/recordings/{segment_id}/playback",
     response_model=RecordingPlaybackResponse,
@@ -132,6 +136,7 @@ async def get_recording_playback(
     }
 
 
+# 카메라 권한을 확인한 뒤 Range·If-Range를 전달하고 필요한 응답 헤더만 중계한다.
 @router.get(
     "/api/v1/recordings/{segment_id}/content",
     response_class=StreamingResponse,
@@ -181,6 +186,7 @@ async def get_recording_content(
         }
     }
 
+    # 하위 응답을 청크로 전달하며 재생 중단이나 예외에도 Data 스트림을 닫는다.
     async def chunks() -> AsyncIterator[bytes]:
         try:
             if upstream.is_stream_consumed:
@@ -199,6 +205,7 @@ async def get_recording_content(
     )
 
 
+# 관리자만 복구 진행 목록을 조회하게 하며 카메라 필터를 지정하면 ID 형식을 검사한다.
 @router.get("/api/v1/recovery-jobs", response_model=RecoveryJobPageResponse)
 async def list_recovery_jobs(
     camera_id: str | None = Query(default=None),

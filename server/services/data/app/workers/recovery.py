@@ -78,6 +78,7 @@ def _default_open(request: Request, *, timeout: float):
     return _HTTP_OPENER.open(request, timeout=timeout)
 
 
+# 인증·질의·상대 상위 경로가 섞이지 않은 HTTP(S) 서비스 기준 주소만 허용한다.
 def _validated_base_url(value: str, label: str) -> str:
     try:
         parsed = urlsplit(value)
@@ -95,6 +96,7 @@ def _validated_base_url(value: str, label: str) -> str:
     return value.rstrip("/")
 
 
+# 환경 변수와 파일 중 하나만 허용하며 비밀 원문을 오류 메시지에 포함하지 않는다.
 def _read_secret(
     value_environment: str,
     file_environment: str,
@@ -133,6 +135,7 @@ def read_recovery_token() -> str:
     )
 
 
+# 복구 전용 토큰 설정을 우선하고 없는 경우에만 구형 공통 토큰을 사용한다.
 def read_internal_token() -> str:
     if os.getenv("DATA_RECOVERY_TOKEN") or os.getenv("DATA_RECOVERY_TOKEN_FILE"):
         return _read_secret(
@@ -157,6 +160,7 @@ def _positive_integer_environment(name: str, default: int) -> int:
     return value
 
 
+# Edge 녹화 파일 규칙과 실제 달력 날짜·파일명 날짜의 일치를 함께 검사한다.
 def _manifest_relative_path(raw_path: Any) -> str:
     if not isinstance(raw_path, str):
         raise RecoveryError("Edge manifest contains an invalid relative path")
@@ -177,6 +181,7 @@ def _manifest_relative_path(raw_path: Any) -> str:
     return PurePosixPath(raw_path).as_posix()
 
 
+# 카메라·시간 겹침·경로·크기·해시 계약을 통과한 목록만 다운로드 대상으로 변환한다.
 def _parse_manifest(
     payload: Any,
     *,
@@ -237,6 +242,7 @@ def _parse_manifest(
     return items
 
 
+# 대용량 영상을 한 번에 메모리에 올리지 않고 청크 단위로 내용 지문을 계산한다.
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -245,6 +251,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+# 카메라·시간·경로·크기·해시가 같은 복구 요청에 항상 같은 등록 키를 생성한다.
 def _idempotency_key(item: ManifestItem, central_relative_path: str) -> str:
     identity = "\x00".join(
         (
@@ -259,6 +266,7 @@ def _idempotency_key(item: ManifestItem, central_relative_path: str) -> str:
     return "edge-recovery:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
+# 신뢰하지 않는 Edge 목록을 검증한 뒤 파일 준비와 Data 등록을 순서대로 실행한다.
 class RecoveryCoordinator:
     def __init__(
         self,
@@ -297,6 +305,7 @@ class RecoveryCoordinator:
         self._open_request = open_request or _default_open
         self._progress_callback = progress_callback
 
+    # 응답 크기를 제한하고 네트워크·JSON 오류를 인증 정보 없는 복구 오류로 바꾼다.
     def _read_json(self, request: Request, service: str) -> Any:
         try:
             with self._open_request(
@@ -318,6 +327,7 @@ class RecoveryCoordinator:
         except (UnicodeError, json.JSONDecodeError) as exc:
             raise RecoveryError(f"{service} returned invalid JSON") from exc
 
+    # UTC 구간을 명시한 목록을 요청하고 반환 항목의 카메라와 파일 계약을 재검증한다.
     def _manifest(
         self,
         requested_start: datetime,
@@ -345,6 +355,7 @@ class RecoveryCoordinator:
             max_segment_bytes=self.max_segment_bytes,
         )
 
+    # 중앙 녹화와 충돌하지 않도록 recovered/카메라 경로 아래에 파일을 배치한다.
     def _destination(self, item: ManifestItem) -> tuple[str, Path]:
         central_relative = (
             PurePosixPath("recovered")
@@ -357,6 +368,7 @@ class RecoveryCoordinator:
             raise RecoveryError("recovery path escapes the recordings root") from exc
         return central_relative, destination
 
+    # 임시 파일로 내려받아 크기·해시를 확인한 뒤 원자적으로 최종 경로에 배치한다.
     def _download(self, item: ManifestItem, destination: Path) -> None:
         # 내려받는 중인 파일은 .part로 분리해 불완전한 영상이 재생 목록에 나타나지 않게 한다.
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -437,6 +449,7 @@ class RecoveryCoordinator:
         finally:
             temporary.unlink(missing_ok=True)
 
+    # 검증된 복구 파일을 MPEG-TS 녹화로 등록하고 재실행에도 같은 멱등 키를 보낸다.
     def _index(self, item: ManifestItem, central_relative_path: str) -> Any:
         payload = {
             "camera_id": item.camera_id,
@@ -466,6 +479,7 @@ class RecoveryCoordinator:
         )
         return self._read_json(request, "Data indexing")
 
+    # 24시간 이하의 구간을 복구하며 일치하는 기존 파일은 재사용하고 내용 충돌은 거부한다.
     def recover(self, start: str | datetime, end: str | datetime) -> RecoverySummary:
         try:
             requested_start = parse_utc(start)
@@ -522,6 +536,7 @@ class RecoveryCoordinator:
         )
 
 
+# 한 번의 수동 복구에 필요한 Edge·Data 주소와 명시적 UTC 구간을 입력받는다.
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ai-cctv-edge-recover",
@@ -549,6 +564,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# 수동 복구의 요약을 JSON으로 출력하고 예상 실패는 비밀을 제외한 메시지와 종료 코드로 알린다.
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -586,6 +602,7 @@ def main(argv: list[str] | None = None) -> int:
 LOGGER = logging.getLogger("ai_cctv.data")
 
 
+# 장애 구간을 24시간씩 나누어 처리하고 원래 revision에 대해서만 완료 또는 지수 재시도를 기록한다.
 def execute_recovery(
     job: dict[str, Any], repository: DataRepository, settings: Settings
 ) -> None:
@@ -661,6 +678,7 @@ def execute_recovery(
     )
 
 
+# DB에서 작업을 하나씩 가져와 블로킹 복구를 스레드로 실행하고 예기치 않은 실패도 재예약한다.
 async def recover_outages(repository: DataRepository, settings: Settings) -> None:
     # 복구 결과는 자체 내부 API로 등록한다. 시작 직후에는 HTTP 서버가 열릴 시간을 준다.
     await asyncio.sleep(settings.recovery_poll_interval_seconds)

@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="810" viewBox="0 0 1120 810" role="img" aria-labelledby="title desc">
+<title id="title">01  시스템 배치와 책임</title>
+<desc id="desc">중앙 서버의 여섯 컨테이너와 서버 밖에서 실행되는 프로그램</desc>
+<defs>
+<marker id="a2563eb" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#2563eb"/></marker>
+<marker id="a0f766e" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#0f766e"/></marker>
+<marker id="a7c3aed" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#7c3aed"/></marker>
+<marker id="ab45309" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#b45309"/></marker>
+<marker id="a475569" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8 Z" fill="#475569"/></marker>
+</defs>
+<rect width="1120" height="810" fill="#ffffff"/>
+<text x="32" y="43" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="27" font-weight="700" text-anchor="start" fill="#172b4d">01  시스템 배치와 책임</text>
+<text x="32" y="76" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">중앙 서버의 여섯 컨테이너와 서버 밖에서 실행되는 프로그램</text>
+<rect x="270" y="105" width="605" height="575" rx="18" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+<text x="290" y="136" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="start" fill="#172b4d">중앙 서버 PC · Docker Compose</text>
+<rect x="30" y="164" width="205" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="132.5" y="200.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Android 앱</text>
+<text x="132.5" y="229.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">영상 · 이벤트 조회</text>
+<rect x="30" y="289" width="205" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="132.5" y="325.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">관리자 브라우저</text>
+<text x="132.5" y="354.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">장치 등록 · 상태 확인</text>
+<rect x="30" y="425" width="205" height="100" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="132.5" y="455.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Raspberry Pi</text>
+<text x="132.5" y="484.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">카메라 송출</text>
+<text x="132.5" y="511.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">로컬 영상 백업</text>
+<rect x="30" y="570" width="205" height="85" rx="12" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+<text x="132.5" y="606.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">설치 도우미</text>
+<text x="132.5" y="635.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">최초 설정 · 서버 제어</text>
+<rect x="300" y="165" width="220" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="410.0" y="201.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Nginx</text>
+<text x="410.0" y="230.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">HTTPS · 내부 중계</text>
+<rect x="625" y="165" width="220" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="735.0" y="201.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">External</text>
+<text x="735.0" y="230.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">인증 · 공개 API · 푸시</text>
+<rect x="300" y="360" width="220" height="90" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
+<text x="410.0" y="399.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">MediaMTX</text>
+<text x="410.0" y="428.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">수신 · 녹화 · 재생</text>
+<rect x="625" y="360" width="220" height="90" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+<text x="735.0" y="399.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Data</text>
+<text x="735.0" y="428.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">DB · 작업 · 영상 복구</text>
+<rect x="300" y="555" width="220" height="95" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="410.0" y="583.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">Preprocessing</text>
+<text x="410.0" y="612.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">감지 · 추적</text>
+<text x="410.0" y="639.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">인물 연결: 교체 대상</text>
+<rect x="625" y="555" width="220" height="95" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+<text x="735.0" y="583.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Analysis</text>
+<text x="735.0" y="612.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">부가 정보 분석</text>
+<text x="735.0" y="639.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">알고리즘: 교체 대상</text>
+<rect x="920" y="165" width="170" height="85" rx="12" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+<text x="1005.0" y="201.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Firebase</text>
+<text x="1005.0" y="230.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">선택적 푸시 전달</text>
+<rect x="920" y="360" width="170" height="90" rx="12" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+<text x="1005.0" y="399.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">SQLite</text>
+<text x="1005.0" y="428.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">Data만 직접 접근</text>
+<path d="M 235 206 L 300 206" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="300,206 289.0,211.0 289.0,201.0" fill="#2563eb"/>
+<rect x="236.0" y="175" width="62.0" height="23" rx="4" fill="#ffffff"/>
+<text x="267" y="193" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">HTTPS</text>
+<path d="M 235 331 L 252 331 L 252 231 L 300 231" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="300,231 289.0,236.0 289.0,226.0" fill="#2563eb"/>
+<path d="M 520 206 L 625 206" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="625,206 614.0,211.0 614.0,201.0" fill="#2563eb"/>
+<rect x="529.0" y="175" width="86.0" height="23" rx="4" fill="#ffffff"/>
+<text x="572" y="193" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">API · 인증</text>
+<path d="M 845 206 L 920 206" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="920,206 909.0,211.0 909.0,201.0" fill="#2563eb"/>
+<rect x="857.5" y="175" width="47.0" height="23" rx="4" fill="#ffffff"/>
+<text x="881" y="193" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">FCM</text>
+<path d="M 235 475 L 264 475 L 264 405 L 300 405" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="300,405 289.0,410.0 289.0,400.0" fill="#0f766e"/>
+<rect x="243.5" y="375" width="51.0" height="23" rx="4" fill="#ffffff"/>
+<text x="269" y="393" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">RTSP</text>
+<path d="M 410 450 L 410 555" fill="none" stroke="#0f766e" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="410,555 405.0,544.0 415.0,544.0" fill="#0f766e"/>
+<rect x="368.0" y="482" width="84.0" height="23" rx="4" fill="#ffffff"/>
+<text x="410" y="500" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#0f766e">영상 읽기</text>
+<path d="M 735 250 L 735 360" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="735,360 730.0,349.0 740.0,349.0" fill="#2563eb"/>
+<rect x="696.5" y="281" width="77.0" height="23" rx="4" fill="#ffffff"/>
+<text x="735" y="299" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">Data API</text>
+<path d="M 845 405 L 920 405" fill="none" stroke="#2563eb" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="920,405 909.0,410.0 909.0,400.0" fill="#2563eb"/>
+<rect x="865.0" y="373" width="34.0" height="23" rx="4" fill="#ffffff"/>
+<text x="882" y="391" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">DB</text>
+<path d="M 520 600 L 565 600 L 565 405 L 625 405" fill="none" stroke="#7c3aed" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="625,405 614.0,410.0 614.0,400.0" fill="#7c3aed"/>
+<rect x="508.0" y="492" width="110.0" height="23" rx="4" fill="#ffffff"/>
+<text x="563" y="510" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#7c3aed">이벤트 · 작업</text>
+<path d="M 735 555 L 735 450" fill="none" stroke="#7c3aed" stroke-width="2.3" stroke-linejoin="round"/>
+<polygon points="735,450 740.0,461.0 730.0,461.0" fill="#7c3aed"/>
+<rect x="688.0" y="483" width="94.0" height="23" rx="4" fill="#ffffff"/>
+<text x="735" y="501" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#7c3aed">작업 · 결과</text>
+<path d="M 235 612 L 270 612" fill="none" stroke="#475569" stroke-width="2.3" stroke-linejoin="round" stroke-dasharray="6 5"/>
+<polygon points="270,612 259.0,617.0 259.0,607.0" fill="#475569"/>
+<rect x="270" y="700" width="820" height="66" rx="12" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+<text x="680.0" y="740.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">호스트 파일: DB · 중앙/복구 영상 · 스냅샷 · 모델 · 인증서</text>
+<text x="32" y="792" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">화살표는 주요 논리 흐름이다. 내부 Data API는 Nginx를 경유하며, 파일은 각 서비스에 필요한 권한으로 마운트한다.</text>
+</svg>

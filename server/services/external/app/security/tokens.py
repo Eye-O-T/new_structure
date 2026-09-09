@@ -39,6 +39,7 @@ class IssuedToken:
     claims: TokenClaims
 
 
+# 용도·역할·고유 jti·수신 대상이 명시된 HS256 토큰과 저장에 필요한 claims를 함께 만든다.
 def issue_token(
     settings: Settings,
     *,
@@ -74,6 +75,7 @@ def issue_token(
     )
 
 
+# 서명과 필수 claims를 검증하고 호출자가 요구한 access 또는 refresh 용도만 허용한다.
 def decode_token(
     token: str,
     settings: Settings,
@@ -115,6 +117,7 @@ def decode_token(
         raise TokenValidationError("token claims invalid") from exc
 
 
+# JWT의 초 단위 만료 시각을 Data에 저장할 UTC 문자열로 변환한다.
 def utc_iso_from_epoch(epoch: int) -> str:
     return (
         datetime.fromtimestamp(epoch, tz=timezone.utc)

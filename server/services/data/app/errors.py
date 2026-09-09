@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 
+# HTTP 상태와 기계 판독 코드·세부 정보를 함께 전달하는 내부 API 예외이다.
 class ApiError(Exception):
     def __init__(
         self,
@@ -28,6 +29,7 @@ class ApiError(Exception):
         self.details = details or {}
 
 
+# details가 없을 때도 객체를 유지하여 오류 응답의 구조가 변하지 않게 한다.
 def error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
     return {
         "error": {
@@ -38,6 +40,7 @@ def error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
     }
 
 
+# 예상 오류와 내부 오류를 공통 JSON 형식으로 변환하는 처리기를 앱에 등록한다.
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:
@@ -75,6 +78,7 @@ def install_error_handlers(app: FastAPI) -> None:
             headers=exc.headers,
         )
 
+    # SQL 원문·제약 이름을 공개하지 않고 중복 또는 참조 충돌을 409로 전달한다.
     @app.exception_handler(sqlite3.IntegrityError)
     async def handle_integrity_error(
         _request: Request, _exc: sqlite3.IntegrityError
@@ -94,6 +98,7 @@ def install_error_handlers(app: FastAPI) -> None:
             content=error_body("VALIDATION_ERROR", str(exc)),
         )
 
+    # 예외 내용은 서버 로그에 남기고 응답에는 일반화된 오류만 제공한다.
     @app.exception_handler(Exception)
     async def handle_unexpected_error(
         _request: Request, exc: Exception

@@ -11,6 +11,7 @@ from .base import _as_dict, _now
 class SessionsRepositoryMixin:
     database: Database
 
+    # 갱신 시 이전 토큰의 만료·폐기·소유자를 확인하고 새 토큰과 교체 이력을 함께 기록한다.
     def issue_refresh_token(self, values: dict[str, Any]) -> dict[str, Any]:
         # 새 토큰 저장과 이전 토큰 폐기를 함께 확정하여 같은 갱신 토큰의 동시 재사용을 막는다.
         now = _now()
@@ -65,6 +66,7 @@ class SessionsRepositoryMixin:
                 ).fetchone()
             )
 
+    # 로그인 계열에 연결된 단말 등록을 정리한 뒤 지정된 갱신 토큰을 제거한다.
     def delete_refresh_token(self, jti: str) -> bool:
         # 같은 로그인 계열(family)의 단말 등록도 지워 로그아웃 후 알림 예약이 계속 생기지 않게 한다.
         with self.database.transaction() as connection:
@@ -78,6 +80,7 @@ class SessionsRepositoryMixin:
             )
             return cursor.rowcount > 0
 
+    # 같은 jti의 재폐기 요청은 새 행 대신 폐기 정보와 만료 시각을 갱신한다.
     def put_revoked_token(self, jti: str, values: dict[str, Any]) -> dict[str, Any]:
         now = _now()
         with self.database.transaction() as connection:

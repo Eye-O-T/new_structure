@@ -1,111 +1,88 @@
-# 시스템 구조
+# 시스템 구조와 주요 처리 흐름
 
-Raspberry Pi가 영상을 보내면 중앙 서버가 녹화·감지하고, Android 앱이 HTTPS로 조회한다. 중앙은 [Compose](../server/compose.yml)의 **6개 컨테이너**로 실행한다.
+AI CCTV는 카메라 영상을 중앙에서 녹화·감지하고 Android 앱으로 조회하는 시스템이다. 아래 그림은 **현재 코드의 구성과 처리 순서**를 설명한다. 그림의 화살표는 주요 흐름을 요약하며, 정확한 HTTP 경유지·포트·저장 경로는 [상세 설정 부록](guide.md#상세-설정-부록)을 참고한다. 그림을 클릭하면 원본 SVG를 확대할 수 있으며 Mermaid 확장은 필요하지 않다.
 
-## 구성과 개발 위치
+## 시스템 구조
 
-| 구성 | 역할 | 코드 |
-|---|---|---|
-| MediaMTX | 영상 수신(RTSP), 실시간 재생(HLS), 녹화·재생 | `server/services/mediamtx/` |
-| Preprocessing | 사람 감지·카메라별 추적·박스, 전역 인물 연결 | `server/services/preprocessing/` |
-| Analysis | 객체에 metadata 추가 | `server/services/analysis/` |
-| Data | SQLite, 이벤트·작업·파일 정보, 복구·보관 기간 관리 | `server/services/data/` |
-| External | 로그인·권한, 공개 API, Edge 상태 수집, FCM 발송 | `server/services/external/` |
-| Nginx | HTTPS 진입점, 영상 권한 확인, 내부 HTTP 중계 | `server/services/nginx/` |
+![중앙 서버의 Nginx, External, MediaMTX, Data, Preprocessing, Analysis와 외부 Edge·앱·설치 도우미의 관계](assets/architecture/system-overview.svg)
 
-Edge(`edge/`), Android 앱(`mobile/`), 설치 GUI/CLI(`configurator/`)는 별도 프로그램이다. `lib/ai_cctv_core/`에는 공유 설정·입출력 계약·객체 작업 실행기가 있다. `server/scripts/`에는 초기 설정 생성·진단·백업·이관 도구가 있다.
+중앙 서버는 한 PC에서 [여섯 컨테이너](../server/compose.yml)를 실행한다. Edge·앱·설치 도우미는 서버 밖에서 실행되는 별도 프로그램이다. Nginx는 외부 접속과 내부 HTTP 중계를 담당하고, Data만 중앙 업무 SQLite를 직접 연다. 다른 서비스는 Data API로 업무 데이터를 읽고 쓴다. Preprocessing의 전송 전 이벤트 대기열은 별도 로컬 SQLite 파일이다.
 
-감지는 YOLO/ByteTrack 기본 구현을 사용하며 모델 파일을 별도로 준비해야 한다. **전역 인물 연결과 metadata 분석은 입출력만 갖춘 블랙박스**로, 실제 알고리즘 대신 `unconfigured`를 반환한다. 다른 코드를 유지하며 교체할 수 있는 범위는 [Preprocessing](SRS_interface_preprocessing.md), [Analysis](SRS_interface_analysis.md), [모바일](openapi.yaml) 규약에 정리했다.
+DB·영상·모델·설정은 호스트에 남으므로 컨테이너를 교체해도 같은 저장소를 이어서 사용한다. 별도 DB 서버나 메시지 브로커 없이 구성 요소를 줄인 구조이며, Data·Nginx 또는 서버 PC의 장애가 여러 기능에 영향을 줄 수 있다. 다중 호스트 분산·고가용성 구성은 제공하지 않는다.
 
-## 통신
+## 영상 저장과 조회
 
-```mermaid
-flowchart LR
-    Edge -->|RTSP 영상| MediaMTX
-    MediaMTX -->|RTSP| Preprocessing
-    Preprocessing -->|이벤트·객체| Data
-    Data <-->|인물 연결 작업·결과| Preprocessing
-    Data <-->|분석 작업·결과| Analysis
-    External <-->|상태·제어 HTTP| Edge
-    Data -->|복구 파일 HTTP 요청| Edge
-    External <-->|조회·저장 HTTP| Data
-    App[Android] -->|HTTPS| Nginx
-    Nginx --> External
-    Nginx -->|HLS·재생| MediaMTX
-    External -->|알림 발송| FCM[Firebase 외부 서비스]
-    FCM -->|푸시| App
-```
+![Edge 영상의 중앙 녹화와 파일 등록, 앱 요청의 권한 검사, 중앙 영상과 복구 영상의 재생 경로](assets/architecture/media-and-access.svg)
 
-그림은 기능 흐름이다. 실제 주소와 경유지는 다음과 같다.
+MediaMTX는 Edge에서 받은 영상을 녹화하고 실시간 HLS를 제공한다. 녹화 조각이 완성되면 완료 Hook으로 Data에 파일 정보를 등록하고, 놓친 등록은 파일 정합성 점검으로 보완한다. **영상 저장·재생과 AI 감지는 분리되어 있어**, 감지 모델에 오류가 나더라도 영상 기능은 독립적으로 동작할 수 있다.
 
-| 호출 | 실제 경로·인증 |
-|---|---|
-| 외부 앱 → API·영상 | Nginx 443, JWT·카메라 접근 권한 검사 |
-| Edge → MediaMTX | RTSP 8554/TCP, 카메라별 게시 계정 |
-| Preprocessing → MediaMTX | `rtsp://mediamtx:8554`, 전용 읽기 계정 |
-| External·처리기·녹화 Hook → Data | `http://nginx:8080/internal/data/v1` → Data 8000, `X-Internal-Token` |
-| External → MediaMTX 제어 | Nginx 8080의 `/internal/media` → MediaMTX 9997 |
-| MediaMTX → 게시·읽기 인증 | External 8000에 직접 HTTP 요청 |
-| External → Edge 상태·제어 | 기본 HTTP 8003, Edge Bearer 토큰 |
-| Data → Edge 복구 파일 | 기본 HTTP 8002, Edge Bearer 토큰 |
-| Data 내부 복구 작업 → Segment 등록 | 자기 컨테이너의 `127.0.0.1:8000/internal/v1` |
+External은 사용자 인증과 카메라 접근 권한을 검사한다. Nginx의 HLS·중앙 녹화 경로는 재생목록과 영상 조각을 요청할 때도 권한 검사를 거친다. 복구 녹화는 External의 공개 API를 통해 Data가 제공한다. 관리자 웹은 장치·상태 관리에 사용하고, 영상·이벤트 조회는 앱에서 수행한다.
 
-여섯 컨테이너는 하나의 Docker bridge 네트워크를 공유한다. 네트워크 이름 `internal`은 외부 통신 차단 설정이 아니며 External의 Firebase 접속도 이 네트워크를 사용한다. 내부 HTTP·RTSP는 암호화하지 않고 Nginx 경유를 네트워크가 강제하지는 않는다. 서버 호스트에는 80/443과 RTSP 8554만 연결하며 기본값은 해당 PC에서만 접속 가능한 `127.0.0.1`이다. Edge의 HTTP 8002/8003과 장치 검색용 Pairing UDP 37020은 신뢰 LAN에서 사용한다.
+## 사람 감지와 이벤트 처리
 
-Data 토큰은 External·감지·인물 연결·Analysis·Media·Recovery의 6개 역할로 분리한다. `data.env`는 검증용 전체 토큰, `preprocessing.env`는 감지·인물 연결 두 토큰, `analysis.env`·`external.env`·`media.env`는 각 역할 토큰을 받는다. RTSP 읽기 계정은 External과 Preprocessing이 공유하며 사용자 JWT·카메라 게시 계정과 별개다. 실제 파일 생성은 [설치 안내](../README.md#소스-배포)를 따른다.
+![사람 감지에서 이미지 선저장, 이벤트와 작업의 트랜잭션, 인물 연결·부가 분석·푸시의 독립 처리까지](assets/architecture/event-processing.svg)
 
-## 데이터와 영상
+**등장마다 대표 관측을 만들고, 최신 좌표는 별도로 갱신한다.** 사람을 추적하는 기준은 `(camera_id, tracking_session_id, person_id)`다. 재접속·추적기 초기화 시 새 세션을 사용하여 다른 사람의 기록이 같은 로컬 ID로 합쳐지는 것을 막는다. 영상 단절을 사람이 사라진 것으로 추정하지 않는다.
 
-- SQLite는 **Data만** 직접 연다. 다른 서비스는 내부 API를 사용한다.
-- MediaMTX가 기본 60초 중앙 녹화를 만들고 완료 Hook으로 Data에 등록한다. Hook 유실은 파일 정합성 점검으로 보완한다.
-- 중앙 fMP4 재생은 Nginx → MediaMTX, 복구 MPEG-TS 재생은 공개 `/api/v1/recordings/{id}/content`의 Nginx → External → 내부 Nginx → Data 경로를 사용한다.
-- Edge는 평소에도 기본 10초 MPEG-TS를 로컬에 저장하며 중앙 연결 장애 중에도 기록을 유지한다. Data는 연결 복구 이벤트를 받아 파일 크기·SHA-256을 검증한 뒤 별도 복구 저장소에 등록한다.
-- 감지 이벤트가 Data에 도착하면 이벤트·객체 작업·해당 푸시 대기열을 같은 DB 트랜잭션에 저장한다. 감지기에는 Data 수신 전 이벤트를 보존하는 디스크 송신 대기열이 없다.
-- 시각은 UTC로 저장한다. 녹화 검색은 요청 구간과 겹치는 Segment를 반환한다.
-- 운영 카메라 정보는 Data DB가 기준이다. `config.yaml`의 카메라 목록은 초기 등록·복구 입력이다.
-- DB·영상·모델·설정은 호스트에 저장하여 컨테이너 재생성과 분리한다. 마운트 권한은 Compose, 보존·복원 절차는 [운영과 백업](../README.md#운영과-백업)을 따른다.
+등장 이미지의 쓰기를 끝낸 뒤 이벤트를 `/snapshots/.event-outbox.sqlite3`에 영속 기록하고 Data로 전송한다. 같은 `source_event_id`를 유지해 재시도하면 Data가 `(camera_id, source_event_id)`로 중복을 제거한다. Data는 이벤트·관측에 따른 두 분석 작업·푸시 대기열을 같은 DB 트랜잭션에 저장한다. 이미지 파일 자체가 이 트랜잭션에 포함되는 것은 아니다.
 
-MediaMTX는 1.9.0 기준으로 고정한다. 모델 장애 중에도 HLS와 녹화는 계속 동작한다. 객체 작업은 Preprocessing·Analysis가 Data의 HTTP API를 주기적으로 호출해 가져가고 결과를 보고한다. 푸시 작업도 External이 Data에서 가져가며 별도 메시지 브로커는 없다. 인물 연결·분석의 완료 순서는 보장되지 않고, 후속 metadata 갱신은 새 이벤트나 추가 푸시를 만들지 않는다.
+송신 큐는 기본 10,000건·JSON 합 64 MiB로 제한한다. 포화나 저장 실패 때는 카메라별 현재 이벤트 한 건을 유지하고 추가 추론·이미지 생성을 멈추어 저장을 재시도한다. 종료까지 저장하지 못한 항목은 상태와 오류 로그로 드러내며 재시작 후 복원을 보장하지 않는다. HTTP 영구 거부 항목은 큐에 격리 보관한다. 큐 상한은 이미지 파일 총용량이나 SQLite 페이지·WAL 크기 상한이 아니다.
 
-| 호스트 저장소 | 컨테이너의 접근 |
-|---|---|
-| `DATABASE_DIR` | Data만 읽기·쓰기 |
-| `RECORDINGS_DIR` | MediaMTX·Data 읽기·쓰기 |
-| `RECOVERED_DIR` | Data만 읽기·쓰기, 내부에서는 `/recordings/recovered` |
-| `SNAPSHOTS_DIR` | Preprocessing·Data 읽기·쓰기, Analysis 읽기 전용 |
-| `MODELS_DIR` | Preprocessing·Analysis 읽기 전용 |
-| `CONFIG_FILE` | Data·External·Preprocessing 읽기 전용 |
-| `CERTS_DIR` | Nginx 읽기 전용 |
+identity·analysis 처리기는 Data에서 작업을 가져오고 현재 임대 ID로 결과를 보고한다. 작업 임대는 5분, 시도는 최대 5회이며, 만료 작업은 다시 처리될 수 있다. Data는 오래된 임대의 완료를 거부하고 각 단계의 결과만 병합한다. 두 분석의 완료 순서는 정해져 있지 않으며 결과 갱신이 새 이벤트나 추가 푸시를 만들지는 않는다.
+
+두 플러그인의 초기화·추론은 각각 별도 `spawn` 프로세스에서 실행한다. 기본 초기화 30초·호출 120초 제한을 넘으면 자식을 종료·재생성하며 초기화 실패는 30초 후 재시도한다. 완료 응답 유실 때는 같은 프로세스가 보관한 결과를 재전송해 재추론을 피한다. 서비스 전체가 중단되면 임대 만료 뒤 같은 작업을 다시 처리할 수 있다.
+
+감지·추적은 준비한 Ultralytics 호환 사람 모델을 사용하는 YOLO/ByteTrack이다. RTSP 열기·읽기 제한과 재접속, 감지 모델 재준비를 통해 복구하며 추적 재시작 때 세션을 갱신한다. 네이티브 감지 호출 자체가 교착한 경우 스레드를 강제 종료하지 못하므로 종료 대기 기한 후 경고한다.
+
+기본 `LocalAppearanceIdentity`는 CPU로 공간별 HSV·밝기·질감 특징을 추출한다. 선택한 `/models` ONNX를 사용할 수도 있으며 파일 해시·전처리 버전이 다른 특징은 다른 공간으로 분리한다. Data의 비공개 영속 gallery는 같은 공간·차원의 특징만 비교한다. 기존 추적 연결을 우선하고, 새 추적은 cosine 0.97 이상·다음 후보와 차이 0.05 이상일 때만 기존 ID로 연결한다. 같은 카메라의 다른 추적이 ±30초 안에 있으면 후보에서 제외한다. 모호하거나 낮은 점수는 새 ID를 만든다. 표본은 관측 시각 기준 1,800초·최대 5,000개로 제한하고 추적 연결은 재시작 후에도 유지한다.
+
+기본 `LocalAppearanceAnalyzer`는 별도 모델 없이 상·하의 후보 영역의 대표색·RGB·픽셀 비율과 영상 품질을 측정한다. 양옆 배경색과 중앙 색 분포를 비교해 배경의 영향을 줄이지만 의복 분할·행동·민감 속성을 판정하지 않는다. 외관 기반 인물 연결과 영역 색 추정에는 의복·조명·가림에 따른 오류가 가능하며 cosine과 색상 `confidence`는 정답 확률이 아니다. 이전 블랙박스를 명시적으로 선택한 경우의 `unconfigured` 호환은 유지한다.
+
+## 중앙 연결 장애와 녹화 복구
+
+![Edge 로컬 녹화 유지, 중앙 연결 장애 구간 기록, Data의 원본 요청·무결성 검사·복구 녹화 등록](assets/architecture/recording-recovery.svg)
+
+Edge는 중앙으로 송출하는 동안에도 로컬 영상을 저장한다. External이 수집한 `central_connection_lost`·`central_connection_restored` 이벤트를 Data가 장애 구간으로 묶고 복구 작업을 예약한다. Data는 해당 Edge의 복구 API에서 파일을 받아 크기·SHA-256을 확인한 뒤 **중앙 녹화와 별도인 복구 저장소**에 등록한다.
+
+로컬 보존 한도를 지나 원본이 삭제되었거나 카메라 입력 자체가 없었다면 그 영상은 복구할 수 없다. 복구는 녹화 파일을 가져오는 기능이며, 장애 구간의 사람 감지 이벤트를 다시 생성하는 기능은 없다. 자동 복구가 놓친 구간은 [운영 안내](guide.md#운영과-백업)의 수동 복구 절차로 확인한다.
+
+## 최초 설치와 재실행
+
+![저장된 설치의 유무에 따라 최초 설정과 기존 서버 관리로 나뉘고 서버 실행 후 카메라·앱을 연결하는 흐름](assets/architecture/installation-lifecycle.svg)
+
+최초 설치는 필수 프로그램·모델·인증서를 확인하고 관리자·저장소·서비스 인증값을 준비한다. 다시 실행할 때는 기존 설정을 읽어 관리 화면으로 연결하며, 인증값과 DB를 초기화하지 않는다. 불완전한 기존 설치는 문제를 안내하고 덮어쓰지 않는다.
+
+최초 카메라 연결은 도우미가 Edge를 검색한 뒤 중앙에 등록하고 게시 자격 증명을 장치에 전달하는 과정이다. 이후 장치 정보·화질은 관리자 웹에서 관리한다. 서버 시작·중지·재시작은 서버 PC의 도우미에서 수행한다. **업데이트 적용은 새 버전의 코드나 설치 파일을 먼저 배치한 뒤 실행**하며, 단순 재시작은 현재 컨테이너를 다시 실행한다.
 
 ## 상태 확인
 
-| 검사 | 의미와 한계 |
+그림의 각 단계가 정상인지 확인할 때는 프로세스 상태와 실제 기능을 함께 본다.
+
+| 상태·검사 | 판단할 수 있는 범위 |
 |---|---|
-| Nginx `/healthz` | Nginx 자체 응답; 전체 서비스 점검이 아님 |
-| MediaMTX Control API | 제어 API 응답; 각 카메라의 녹화·재생은 별도 확인 |
+| Nginx `/healthz`, Python `/health/live` | 각각 Nginx 응답·프로세스 생존. 영상·모델 성공까지 확인하지 않음 |
 | Data `/health/ready` | DB·저장소 준비 상태 |
-| External `/health/ready` | Nginx 경유 Data 연결; FCM 단말 도착을 보장하지 않음 |
-| Preprocessing `/health/ready` | Data 연결 실패는 503, 모델·인물 연결 오류는 200 `degraded`일 수 있음 |
-| Analysis `/health/ready` | 작업기 미준비·시간 초과는 503, 최근 처리 오류는 200 `degraded`일 수 있음 |
+| External `/health/ready` | 내부 Nginx를 경유한 Data 연결. 실제 단말 푸시 수신은 별도 확인 |
+| Preprocessing `/health/ready` | Data 연결 실패는 503. 감지·인물 연결 미준비, offline·stopped·오래된 프레임, 이벤트 보존·송신 오류는 HTTP 200 `degraded`로 확인 |
+| Analysis `/health/ready` | 작업기 미준비·시간 초과는 503. 최근 처리 오류는 HTTP 200이면서 `degraded`일 수 있음 |
+| `unconfigured` | 명시한 블랙박스·미연결 교체 플러그인의 상태. 현재 기본 CPU 구현의 정상 결과는 `complete` |
+| `backend`, `model_ready`, 큐 상태 | 선택 플러그인 실행 경로와 이벤트 보존·전송 상태. 인식 정확도나 무제한 무손실을 보증하지 않음 |
+| 실제 기능 확인 | 로그인 → 카메라 영상 → 새 감지 이벤트 → 연결 녹화 재생 → 설정한 경우 푸시 도착 |
 
-`unconfigured`는 아직 알고리즘을 넣지 않았다는 뜻이다. Python 서비스의 `/health/live`는 프로세스 생존 확인이다. Compose의 `healthy` 표시와 실제 영상·모델 성공은 구분한다. 자동 복구 작업은 관리자 `GET /api/v1/recovery-jobs`에서 확인한다.
+Python 상태 경로는 컨테이너 내부 주소다. 운영자는 `/admin/` 또는 관리자 API `GET /api/v1/system/status`로 상태를 확인하고, 호스트의 설치 도우미·`doctor`·Compose 로그로 원인을 좁힌다. 자동 복구 작업은 관리자 API `GET /api/v1/recovery-jobs`에서 확인한다.
 
-## 현재 범위
+카메라의 `frame_age_seconds`와 `frame_stale`은 처리 스레드가 멈춘 상황도 관찰한다. 마지막 수신 뒤 `max(30초, RTSP_TIMEOUT_SECONDS×2)` 이상 지나면 오래된 프레임으로 본다. 첫 프레임 전에는 카메라 작업자 생성 시점부터 같은 유예시간을 적용한다. 이벤트 보존 실패와 종료 미보존 건수는 각각 `event_persistence_failures`, `event_shutdown_losses`로 확인한다.
 
-| 항목 | 범위 |
+## 현재 범위와 설정값
+
+| 항목 | 현재 의미 |
 |---|---|
-| 카메라 | 최대 4개 활성, 기본 HD 1280×720/30fps·2Mbps; 지원 장치만 FHD 1920×1080/30fps·4Mbps |
-| 영상 | 실시간 HLS, 중앙 녹화·복구 MPEG-TS 재생 |
-| 객체 | 카메라별 사람 추적, 박스·크롭, 전역 ID·metadata 확장 계약 |
-| 모바일 | Android 우선, iOS 제품화 미완료; 박스는 최신 좌표 표시이며 HLS 프레임과 정확히 동기화되지 않음 |
-| 알림 | 선택적 FCM, 모든 이벤트 기본 수신; Firebase 파일·단말 연결 필요 |
+| 카메라 수 | 활성 카메라 최대 4개라는 소프트웨어 제한 |
+| 영상 프로필 | 기본 HD 1280×720·30fps·2Mbps, 지원 장치에서 FHD 1920×1080·30fps·4Mbps |
+| AI 처리 주기 | 기본 감지 설정은 5fps, 최신 박스 발행은 최대 초당 2회. HLS 프레임과 정확히 동기화되지 않음 |
+| 분석 기능 | YOLO/ByteTrack, 기본 외관 특징과 Data gallery 연결, 상·하의 후보 영역 색·품질 측정. 선택 로컬 ONNX Re-ID 지원 |
+| 앱·알림 | Android 우선, iOS 제품화 미완료. FCM은 별도 설정이 필요한 선택 기능 |
 
-[개발·검증](../README.md#개발과-검증)에서 자동 테스트와 실제 장비 확인을 구분한다.
+위 수치는 설정값과 상한이며 **4채널 동시 처리 성능의 실측 결과가 아니다.** 자동 테스트와 실제 카메라·모델·단말 검증은 [개발과 검증](guide.md#개발과-검증)을 따른다. 설치·운영 명령은 [상세 안내](guide.md), API와 각 구성 요소의 개발 자료는 [문서 색인](README.md)에서 찾을 수 있다.
 
-## 개발 환경
-
-운영은 `server/compose.yml`의 6개 서비스다. 개발 시 `compose.dev.yml`을 추가하여 각 Python 서비스의 개발 이미지와 코드 마운트를 사용한다. 별도의 개발 env·저장소를 준비한다.
-
-`compose.test.yml`은 운영 설정을 상속하지 않는 독립 구성이다. 기본 테스트 컨테이너에서 공통·서비스별 자동 검증을 실행하고, integration 프로필은 임시 Data·External과 HTTP 검증기를 실행한다. 테스트 네트워크는 외부 접속을 막고 운영 저장소를 마운트하지 않는다.
-
-공통 패키지는 `lib/`, Windows GUI·CLI와 Edge의 개발 환경은 각각 `configurator/`, `edge/`에서 관리한다. 실행 명령은 [개발·검증](../README.md#개발과-검증)을 따른다.
+현재 검증은 합성 JPEG의 실제 색·특징 계산, 모의 영상·HTTP·ONNX 네트워크, Data의 저장·중복 제거·gallery 계약과 장애 복구에 대한 자동 검사다. 실제 YOLO/ONNX 가중치·Docker 기동·RTSP 카메라로 인식 정확도·처리량·실기동을 검증하지 않았다. [Preprocessing](../server/services/preprocessing/README.md#실행과-검증)과 [Analysis](../server/services/analysis/README.md#실행과-검증)의 재현 명령을 실행한 뒤 각 인수 문서의 실제 크롭·카메라 절차를 별도로 수행한다.

@@ -15,6 +15,7 @@ from . import (
 )
 
 
+# 하위 라우터 전체에 내부 토큰 의존성을 적용하여 개별 등록 누락으로 인증이 빠지지 않게 한다.
 def build_internal_router() -> APIRouter:
     router = APIRouter(
         prefix="/internal/v1", dependencies=[Depends(require_internal_token)]

@@ -1,0 +1,93 @@
+<!doctype html>
+<!-- 관리 화면의 정적 구조이다. 자료 조회와 변경 권한은 호출하는 공개 API에서 확인한다. -->
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI CCTV 서버 관리</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <!-- CSP의 동일 출처 제한을 따르며 DOM 구성이 끝난 뒤 화면 제어를 연결한다. -->
+  <script src="/admin/admin.js" defer></script>
+</head>
+<body>
+  <header><div><h1>AI CCTV 서버 관리</h1><p>Edge 연결과 카메라 운영 설정</p></div><button id="logout" type="button" hidden>로그아웃</button></header>
+  <main>
+    <!-- 비동기 작업 결과를 보조 기술에서도 안내할 수 있는 공통 상태 영역이다. -->
+    <p id="message" role="status" aria-live="polite"></p>
+    <section id="login-panel" class="panel narrow">
+      <h2>관리자 로그인</h2>
+      <p>설치할 때 만든 관리자 계정으로 로그인하세요. 새로고침하거나 탭을 닫으면 다시 로그인해야 합니다.</p>
+      <form id="login-form">
+        <label>아이디<input name="username" autocomplete="username" maxlength="128" required></label>
+        <label>비밀번호<input name="password" type="password" autocomplete="current-password" maxlength="1024" required></label>
+        <button type="submit">로그인</button>
+      </form>
+    </section>
+    <!-- 관리자 인증과 시스템 상태 확인을 마친 뒤 JavaScript가 운영 영역을 표시한다. -->
+    <div id="workspace" hidden>
+      <!-- 서버에서 재조회할 수 없는 일회성 송출 비밀번호의 다운로드·저장 확인 흐름이다. -->
+      <section id="handoff" class="panel handoff" hidden aria-labelledby="handoff-title">
+        <h2 id="handoff-title">Edge 게시 계정 전달</h2>
+        <p id="handoff-camera"></p>
+        <p>파일을 다운로드하여 접근이 제한된 폴더에 보관하고, 해당 Edge의 <code>--publish-credentials-file</code> 설정에 전달하세요. 재발급했다면 새 파일을 적용하고 Edge를 재시작해야 영상 송출이 다시 연결됩니다.</p>
+        <p>서버에서는 비밀번호를 다시 조회할 수 없습니다. 다운로드가 완료되지 않았다면 아래 버튼으로 다시 저장하세요.</p>
+        <div class="actions"><button id="download-credential" type="button">게시 계정 JSON 다운로드</button><button id="finish-handoff" type="button" class="secondary" disabled>파일 저장 확인 · 닫기</button></div>
+      </section>
+      <section class="panel">
+        <div class="section-heading"><h2>서버 상태</h2><button id="refresh-system" class="secondary" type="button">상태 새로고침</button></div>
+        <p>External API와 Data 연결 상태입니다. 전체 컨테이너 시작·중지와 기동 진단은 서버 PC의 설치 도우미 또는 Docker에서 수행합니다.</p>
+        <p id="system-status">조회 중…</p>
+      </section>
+      <section class="panel">
+        <div class="section-heading"><h2>카메라</h2><button id="refresh-cameras" class="secondary" type="button">목록 새로고침</button></div>
+        <div class="table-scroll"><table><thead><tr><th>카메라 ID</th><th>이름</th><th>사용 설정</th><th>관리</th></tr></thead><tbody id="camera-rows"></tbody></table></div>
+        <div class="actions"><button id="previous-page" type="button" class="secondary" disabled>이전</button><span id="page-label"></span><button id="next-page" type="button" class="secondary" disabled>다음</button></div>
+      </section>
+      <!-- 선택 카메라의 관측 상태와 수정 입력을 분리해 기존 비밀값을 화면에 다시 채우지 않는다. -->
+      <section id="camera-detail" class="panel" hidden>
+        <h2 id="camera-title"></h2>
+        <button id="refresh-camera" type="button" class="secondary">장치 상태 · 지원 화질 새로고침</button>
+        <dl id="camera-status" class="status-grid"></dl>
+        <form id="profile-form" class="actions">
+          <label>영상 화질<select name="profile" id="profile" required></select></label>
+          <button id="apply-profile" type="submit" disabled>화질 적용</button>
+        </form>
+        <p id="profile-status"></p>
+        <h3>등록 정보 수정</h3>
+        <p>입력한 항목만 변경합니다. 주소는 서버에서 해당 Edge로 접속할 수 있는 주소를 사용하세요. 기존 주소와 인증 토큰은 공개 API에서 조회하지 않습니다.</p>
+        <form id="update-form">
+          <div class="form-grid">
+            <label>카메라 이름<input name="name" maxlength="128"></label>
+            <label>사용 설정<select name="enabled"><option value="">변경하지 않음</option value="true">사용</option><option value="false">중지</option></select></label>
+            <label>Edge 장치 ID<input name="edge_device_id" maxlength="256"></label>
+            <label>Edge 관리 주소<input name="edge_management_url" type="url" placeholder="http://192.168.0.41:8003" maxlength="2048"></label>
+            <label>Edge 복구 주소<input name="edge_recovery_url" type="url" placeholder="http://192.168.0.41:8002" maxlength="2048"></label>
+            <label>새 Edge 인증 토큰<input name="edge_auth_token" type="password" minlength="32" maxlength="4096" autocomplete="off"></label>
+          </div>
+          <button type="submit">입력한 등록 정보 저장</button>
+        </form>
+        <h3>게시 계정 재발급</h3>
+        <p>기존 RTSP 게시 비밀번호가 폐기되고 현재 영상 송출이 끊깁니다. 새 파일을 해당 Edge에 전달할 준비가 되었을 때 실행하세요.</p>
+        <button id="rotate-credential" type="button" class="danger">게시 계정 재발급</button>
+      </section>
+      <section class="panel">
+        <h2>Edge · 카메라 수동 등록</h2>
+        <p>Edge를 먼저 설치하고, 장치 ID와 관리·복구 주소, Edge에서 내보낸 인증 토큰을 준비하세요. 등록 후 게시 계정 파일을 Edge에 전달해야 영상이 연결됩니다.</p>
+        <!-- 신규 Edge 연결 정보는 한 묶음으로 입력받고 등록 결과의 송출 계정을 별도로 전달한다. -->
+        <form id="register-form">
+          <div class="form-grid">
+            <label>카메라 ID (영문 소문자·숫자·_·-)<input name="camera_id" required maxlength="64" pattern="[a-z0-9][a-z0-9_\-]{0,63}" placeholder="cam-001"></label>
+            <label>카메라 이름<input name="name" required maxlength="256" placeholder="정문"></label>
+            <label>Edge 장치 ID<input name="edge_device_id" required maxlength="256" placeholder="edge-001"></label>
+            <label>Edge 관리 주소<input name="edge_management_url" required type="url" maxlength="2048" placeholder="http://192.168.0.41:8003"></label>
+            <label>Edge 복구 주소<input name="edge_recovery_url" required type="url" maxlength="2048" placeholder="http://192.168.0.41:8002"></label>
+            <label>Edge 인증 토큰<input name="edge_auth_token" required type="password" minlength="32" maxlength="4096" autocomplete="off"></label>
+          </div>
+          <button id="register-camera" type="submit">등록하고 게시 계정 받기</button>
+        </form>
+      </section>
+    </div>
+    <noscript>이 관리 화면을 사용하려면 브라우저에서 JavaScript를 활성화하세요.</noscript>
+  </main>
+</body>
+</html>

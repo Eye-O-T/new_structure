@@ -1,0 +1,328 @@
+# 최초 Edge 등록을 위해 중앙 HTTPS 관리자 API를 호출하는 클라이언트다.
+# JWT는 요청 인증용이고 일회성 RTSP 계정은 Edge 전달용이므로 저장·표시 경로를 구분한다.
+
+from __future__ import annotations
+
+import json
+import os
+import secrets
+import socket
+from collections.abc import Callable, Mapping
+from ipaddress import ip_address
+from pathlib import Path
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+
+from server.setup.private_files import restrict_private_file
+
+
+# Edge 적용·복구를 기다리는 서버의 제한 시간(75초)보다 길게 대기한다.
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 90.0
+_SENSITIVE_PARTS = ("password", "token", "secret", "credential", "authorization")
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """선택한 서버 외의 주소로 인증 정보가 전달되는 리다이렉트를 막는다."""
+
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+# localhost 또는 IP 자체의 루프백 여부만 판정해 HTTP 허용 범위를 로컬로 한정한다.
+def _is_loopback(hostname: str) -> bool:
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+# 관리·복구 주소에 자격 증명이나 쿼리 토큰을 섞지 못하게 입력 단계에서 거부한다.
+def _validate_edge_url(value: str, name: str) -> None:
+    parsed = urlsplit(value.strip())
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(f"{name} must be a credential-free HTTP(S) URL")
+    if any(part == ".." for part in parsed.path.split("/")):
+        raise ValueError(f"{name} contains an invalid path")
+
+
+class ServerApiError(RuntimeError):
+    """사용자에게 표시할 관리자 API 오류."""
+
+    def __init__(
+        self,
+        status_code: int | None,
+        code: str,
+        message: str,
+        details: Any = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        self.details = details
+
+
+# 중첩된 응답에서도 비밀번호·토큰을 제거해 GUI와 콘솔에 노출되지 않게 한다.
+def redact_for_display(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if any(part in normalized for part in _SENSITIVE_PARTS):
+                redacted[str(key)] = "[redacted]"
+            else:
+                redacted[str(key)] = redact_for_display(item)
+        return redacted
+    if isinstance(value, list):
+        return [redact_for_display(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_for_display(item) for item in value)
+    return value
+
+
+# 중앙이 비밀번호를 한 번만 돌려주므로 요청 전에 파일 저장 가능 여부를 확인한다.
+def prepare_private_output(path: Path) -> Path:
+    target = path.expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and not target.is_file():
+        raise ValueError("publish credentials output must be a file path")
+    probe = target.with_name(f".{target.name}.{secrets.token_hex(8)}.probe")
+    try:
+        with probe.open("x", encoding="utf-8"):
+            pass
+        restrict_private_file(probe)
+    finally:
+        probe.unlink(missing_ok=True)
+    return target
+
+
+# 응답의 카메라를 대조하고 필요한 게시 계정만 보호 파일로 저장한다.
+def write_publish_credentials(
+    response: Mapping[str, Any], camera_id: str, path: Path
+) -> Path:
+    credentials = response.get("publish_credentials")
+    response_camera_id = response.get("camera_id")
+    if response_camera_id != camera_id or not isinstance(credentials, Mapping):
+        raise ServerApiError(
+            None,
+            "INVALID_SERVER_RESPONSE",
+            "Server response did not contain publish credentials",
+        )
+    username = credentials.get("username")
+    password = credentials.get("password")
+    if not isinstance(username, str) or not username:
+        raise ServerApiError(
+            None, "INVALID_SERVER_RESPONSE", "Publish username is missing"
+        )
+    if not isinstance(password, str) or not password:
+        raise ServerApiError(
+            None, "INVALID_SERVER_RESPONSE", "Publish password is missing"
+        )
+
+    target = prepare_private_output(path)
+    temporary = target.with_name(f".{target.name}.{secrets.token_hex(8)}.tmp")
+    payload = {
+        "camera_id": camera_id,
+        "username": username,
+        "password": password,
+    }
+    try:
+        with temporary.open("x", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        restrict_private_file(temporary)
+        os.replace(temporary, target)
+        restrict_private_file(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
+# 서버의 표준 오류와 FastAPI 검증 오류를 공통 예외로 묶는다. 표시 시 민감값 처리는 별도다.
+def _error_from_payload(status_code: int, payload: Any) -> ServerApiError:
+    code = f"HTTP_{status_code}"
+    message = f"Server request failed with HTTP {status_code}"
+    details: Any = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            code = str(error.get("code") or code)
+            message = str(error.get("message") or message)
+            details = error.get("details")
+        else:
+            reason_code = payload.get("reason_code")
+            if reason_code:
+                code = str(reason_code)
+            detail = payload.get("detail", payload.get("message"))
+            if isinstance(detail, str):
+                message = detail
+            elif isinstance(detail, list):
+                messages = [
+                    str(item.get("msg", item)) if isinstance(item, dict) else str(item)
+                    for item in detail
+                ]
+                message = "; ".join(messages) or message
+                details = detail
+            elif detail is not None:
+                details = detail
+    return ServerApiError(status_code, code, message, details)
+
+
+class ServerApiClient:
+    """관리자 API의 JSON 요청·응답과 로그인을 처리한다."""
+
+    # 서버 origin과 제한 시간을 검증하고 환경 프록시를 거치지 않는 요청 경로를 준비한다.
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        opener: Callable[..., Any] | None = None,
+    ) -> None:
+        parsed = urlsplit(base_url.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("server URL must be an absolute HTTP(S) URL")
+        if parsed.scheme != "https" and not _is_loopback(parsed.hostname):
+            raise ValueError("server URL must use HTTPS except on the local loopback")
+        if parsed.username or parsed.password:
+            raise ValueError("server URL must not contain credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("server URL must not contain a query or fragment")
+        if parsed.path not in {"", "/"}:
+            raise ValueError("server URL must not contain a path")
+        if timeout <= 0:
+            raise ValueError("timeout must be greater than zero")
+        self.base_url = base_url.strip().rstrip("/")
+        self.timeout = timeout
+        self._opener = (
+            opener or build_opener(ProxyHandler({}), _NoRedirectHandler()).open
+        )
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+
+    # 인증 토큰은 클라이언트 내부에 보관하고 호출자에게는 비밀값을 가린 로그인 결과만 반환한다.
+    def login(self, username: str, password: str) -> dict[str, Any]:
+        if not username.strip() or not password:
+            raise ValueError("administrator username and password are required")
+        response = self._request(
+            "POST",
+            "/api/v1/auth/login",
+            {"username": username, "password": password},
+            authenticated=False,
+        )
+        access_token = response.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise ServerApiError(
+                None,
+                "INVALID_AUTH_RESPONSE",
+                "Login response did not contain an access token",
+            )
+        self._access_token = access_token
+        refresh_token = response.get("refresh_token")
+        self._refresh_token = (
+            refresh_token if isinstance(refresh_token, str) and refresh_token else None
+        )
+        return redact_for_display(response)
+
+    # 관리·복구 주소를 구분해 등록하고 일회성 게시 계정이 든 응답은 저장·인계 코드로 넘긴다.
+    def register_edge(
+        self,
+        *,
+        camera_id: str,
+        name: str,
+        edge_device_id: str,
+        edge_management_url: str,
+        edge_recovery_url: str,
+        edge_auth_token: str,
+    ) -> dict[str, Any]:
+        if not all((camera_id.strip(), name.strip(), edge_device_id.strip())):
+            raise ValueError("camera ID, name and Edge device ID are required")
+        _validate_edge_url(edge_management_url, "Edge management URL")
+        _validate_edge_url(edge_recovery_url, "Edge recovery URL")
+        if len(edge_auth_token) < 32:
+            raise ValueError("Edge auth token must contain at least 32 characters")
+        return self._request(
+            "POST",
+            "/api/v1/cameras",
+            {
+                "camera_id": camera_id,
+                "name": name,
+                "edge_device_id": edge_device_id,
+                "edge_management_url": edge_management_url,
+                "edge_recovery_url": edge_recovery_url,
+                "edge_auth_token": edge_auth_token,
+                "enabled": True,
+            },
+        )
+
+    # JWT는 Authorization 헤더에 싣고 HTTP·연결·JSON 형식 오류를 공통 API 예외로 변환한다.
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        authenticated: bool = True,
+    ) -> dict[str, Any]:
+        headers = {"Accept": "application/json"}
+        data = None
+        if payload is not None:
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json; charset=utf-8"
+        if authenticated:
+            if self._access_token is None:
+                raise ServerApiError(
+                    None, "AUTH_REQUIRED", "Log in before calling the management API"
+                )
+            headers["Authorization"] = f"Bearer {self._access_token}"
+        request = Request(
+            f"{self.base_url}{path}", data=data, headers=headers, method=method
+        )
+        try:
+            with self._opener(request, timeout=self.timeout) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            raw = exc.read()
+            try:
+                body = json.loads(raw.decode("utf-8")) if raw else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                body = None
+            raise _error_from_payload(exc.code, body) from None
+        except (URLError, TimeoutError, socket.timeout, OSError) as exc:
+            reason = getattr(exc, "reason", exc)
+            raise ServerApiError(
+                None,
+                "SERVER_UNREACHABLE",
+                f"Cannot reach the server: {reason}",
+            ) from None
+
+        if not raw:
+            return {}
+        try:
+            decoded = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ServerApiError(
+                None,
+                "INVALID_SERVER_RESPONSE",
+                "Server returned a non-JSON response",
+            ) from None
+        if not isinstance(decoded, dict):
+            raise ServerApiError(
+                None,
+                "INVALID_SERVER_RESPONSE",
+                "Server returned an unexpected JSON value",
+            )
+        return decoded

@@ -47,6 +47,7 @@ from .representations import _public_user
 router = APIRouter()
 
 
+# 인증 실패 응답에 Bearer challenge를 넣어 클라이언트가 재인증 필요를 판단하게 한다.
 def _auth_error(detail: str = "Invalid credentials") -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -55,6 +56,7 @@ def _auth_error(detail: str = "Invalid credentials") -> HTTPException:
     )
 
 
+# Data 응답의 현재 ID와 이전 user_id 표현을 수용하되 식별자가 없으면 응답 오류로 처리한다.
 def _user_id(user: dict[str, Any]) -> str:
     value = user.get("id", user.get("user_id"))
     if value is None:
@@ -62,6 +64,7 @@ def _user_id(user: dict[str, Any]) -> str:
     return str(value)
 
 
+# Data가 돌려준 역할도 다시 검사하여 알려지지 않은 역할로 토큰을 발급하지 않는다.
 def _user_role(user: dict[str, Any]) -> str:
     role = user.get("role")
     if role not in {"admin", "viewer"}:
@@ -73,6 +76,7 @@ def _user_is_active(user: dict[str, Any]) -> bool:
     return bool(user.get("is_active", user.get("active", True)))
 
 
+# 접근·갱신 토큰은 같은 사용자 역할로 발급하되 용도와 유효 기간을 구분한다.
 def _issue_pair(settings: Settings, user_id: str, role: str) -> tuple[Any, Any]:
     access = issue_token(
         settings,
@@ -96,6 +100,7 @@ def _token_hash(encoded: str) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+# 토큰 해시와 로그인 계열을 저장하고 교체 시 이전 jti를 함께 전달한다.
 def _refresh_record(
     token: Any,
     *,
@@ -114,6 +119,7 @@ def _refresh_record(
     return record
 
 
+# 접근 쿠키는 전체 경로에, 갱신 쿠키는 인증 경로에만 보내도록 범위를 구분한다.
 def _set_auth_cookies(
     response: Response, settings: Settings, access: Any, refresh: Any
 ) -> None:
@@ -137,6 +143,7 @@ def _set_auth_cookies(
     )
 
 
+# 발급 때와 같은 이름·경로·속성을 사용해야 브라우저의 두 쿠키가 제거된다.
 def _clear_auth_cookies(response: Response, settings: Settings) -> None:
     response.delete_cookie(
         settings.access_cookie_name,
@@ -154,6 +161,7 @@ def _clear_auth_cookies(response: Response, settings: Settings) -> None:
     )
 
 
+# 모바일용 JSON과 브라우저용 HttpOnly 쿠키에 같은 토큰 쌍을 제공한다.
 def _token_response(
     settings: Settings, access: Any, refresh: Any, user: dict[str, Any]
 ) -> JSONResponse:
@@ -170,6 +178,7 @@ def _token_response(
     return response
 
 
+# 유효한 Bearer 형식의 비어 있지 않은 토큰만 골라 로그아웃 처리에 사용한다.
 def _extract_bearer(request: Request) -> str | None:
     authorization = request.headers.get("Authorization", "")
     scheme, _, value = authorization.partition(" ")
@@ -178,11 +187,13 @@ def _extract_bearer(request: Request) -> str | None:
     return None
 
 
+# 클라이언트 접속 주소와 대소문자를 접은 계정명으로 로그인 실패 이력을 구분한다.
 def _login_key(request: Request, username: str) -> str:
     host = request.client.host if request.client is not None else "unknown"
     return f"{host}:{username.casefold()}"
 
 
+# 모바일이 본문에 준 갱신 토큰을 우선하고 없을 때 브라우저 쿠키를 사용한다.
 def _optional_refresh_token(
     request: Request,
     settings: Settings,
@@ -193,6 +204,7 @@ def _optional_refresh_token(
     return request.cookies.get(settings.refresh_cookie_name)
 
 
+# 실패 지연을 적용하고 비밀번호·활성 계정 확인 및 세션 저장이 끝난 뒤 토큰을 돌려준다.
 @router.post("/api/v1/auth/login", response_model=TokenResponse)
 async def login(
     payload: LoginRequest,
@@ -235,6 +247,7 @@ async def login(
     return _token_response(settings, access, refresh, user)
 
 
+# 서명만 믿지 않고 DB의 소유자·해시·교체 상태를 확인한 후 최신 역할로 새 토큰을 발급한다.
 @router.post("/api/v1/auth/refresh", response_model=TokenResponse)
 async def refresh(
     request: Request,
@@ -297,6 +310,7 @@ async def refresh(
     return _token_response(settings, access, new_refresh, user)
 
 
+# 유효한 접근 토큰은 폐기 목록에 기록하고 갱신 세션을 제거한 다음 브라우저 쿠키를 지운다.
 @router.post("/api/v1/auth/logout", status_code=204)
 async def logout(
     request: Request,
