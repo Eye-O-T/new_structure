@@ -10,6 +10,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from server.setup.validation import read_deployment_env
+
 START_ARGUMENTS = ("up", "-d", "--build", "--wait", "--remove-orphans")
 
 
@@ -116,19 +118,7 @@ def installation_prerequisites(server_dir: str | Path) -> list[Prerequisite]:
 
 # 선택적 push 설정을 읽을 때 파일이 없으면 빈 구성으로 처리한다.
 def _env_values(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.is_file():
-        return values
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] == "'":
-            value = value[1:-1].replace("\\'", "'")
-        values[key.strip()] = value
-    return values
+    return read_deployment_env(path)
 
 
 # 한 번 선택한 Compose 정의와 env 경로를 모든 서비스 명령에 공통으로 사용한다.
@@ -195,7 +185,9 @@ class ComposeAdapter:
             "Configuration": deployment_path("CONFIG_FILE"),
             "Data service secrets": deployment_path("DATA_SECRETS_FILE"),
             "External service secrets": deployment_path("EXTERNAL_SECRETS_FILE"),
-            "Preprocessing service secrets": deployment_path("PREPROCESSING_SECRETS_FILE"),
+            "Preprocessing service secrets": deployment_path(
+                "PREPROCESSING_SECRETS_FILE"
+            ),
             "Media service secrets": deployment_path("MEDIA_SECRETS_FILE"),
             "Analysis service secrets": deployment_path("ANALYSIS_SECRETS_FILE"),
         }
@@ -220,6 +212,16 @@ class ComposeAdapter:
         required_files["Inference model"] = (
             models_root / model_name if models_root is not None and model_name else None
         )
+        from server.setup.model_manager import (
+            IDENTITY_PLUGIN,
+            deployed_identity_model,
+            validate_identity_model,
+        )
+
+        if (values.get("IDENTITY_PLUGIN") or IDENTITY_PLUGIN) == IDENTITY_PLUGIN:
+            required_files["OSNet identity model"] = deployed_identity_model(
+                values, models_root
+            )
         certificate_root = deployment_path("CERTS_DIR")
         required_files["TLS certificate"] = (
             certificate_root / "tls.crt" if certificate_root is not None else None
@@ -229,6 +231,11 @@ class ComposeAdapter:
         )
         for name, path in required_files.items():
             present = path is not None and path.is_file()
+            if present and name == "OSNet identity model":
+                try:
+                    validate_identity_model(path)
+                except (OSError, ValueError):
+                    present = False
             results.append(
                 Prerequisite(
                     present,

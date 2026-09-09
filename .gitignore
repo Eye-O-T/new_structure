@@ -1,4 +1,5 @@
 .venv/
+.venv-osnet/
 .venv-mock-edge/
 .mock-edge/
 venv/
@@ -17,6 +18,8 @@ dist/
 .env
 *.env
 !*.env.example
+# 설정 도구가 남기는 이전 비밀값·설정 백업은 소스에 포함하지 않는다.
+*.bak
 config/config.yaml
 config/secrets.env
 server/config/config.yaml

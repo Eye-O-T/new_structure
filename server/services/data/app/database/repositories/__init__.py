@@ -6,10 +6,12 @@ from ..connection import Database
 from .base import CameraHasHistory, CameraLimitReached
 from .cameras import CamerasRepositoryMixin
 from .events import EventsRepositoryMixin
+from .identity import MATCH_MARGIN, MATCH_THRESHOLD, validate_match_policy
 from .notifications import PushRepositoryMixin
 from .objects import ObjectRepositoryMixin
 from .recordings import RecordingsRepositoryMixin
 from .recovery import RecoveryRepositoryMixin
+from .retention import RetentionRepositoryMixin
 from .sessions import SessionsRepositoryMixin
 from .users import UsersRepositoryMixin
 
@@ -26,9 +28,19 @@ class DataRepository(
     RecoveryRepositoryMixin,
     PushRepositoryMixin,
     ObjectRepositoryMixin,
+    RetentionRepositoryMixin,
 ):
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        identity_match_threshold: float = MATCH_THRESHOLD,
+        identity_match_margin: float = MATCH_MARGIN,
+    ) -> None:
+        validate_match_policy(identity_match_threshold, identity_match_margin)
         self.database = database
+        self.identity_match_threshold = identity_match_threshold
+        self.identity_match_margin = identity_match_margin
 
     def initialize(self) -> None:
         self.database.initialize()

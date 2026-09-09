@@ -17,6 +17,13 @@ from server.setup.config_core import (
 from server.setup.model_manager import install_local_model
 
 
+def _prepared_identity_model(server_dir):
+    # 설치 파일 연결만 검사하며 이 바이트를 실제 ONNX 모델로 실행하지 않는다.
+    path = server_dir / "runtime/models/osnet_x0_25_msmt17.onnx"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"identity-model-presence-only")
+
+
 def _env_value(text: str, key: str) -> str:
     return next(
         line.partition("=")[2].strip("'")
@@ -29,6 +36,7 @@ def _env_value(text: str, key: str) -> str:
 def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
     server_dir = tmp_path / "server"
     server_dir.mkdir()
+    _prepared_identity_model(server_dir)
     model_source = tmp_path / "selected-model.pt"
     model_source.write_bytes(b"model-content")
     result = initialize(
@@ -164,6 +172,7 @@ def test_initialize_generates_valid_config_and_non_plaintext_secrets(tmp_path):
 def test_generated_media_credentials_are_valid_json_in_memory(tmp_path):
     server_dir = tmp_path / "server"
     server_dir.mkdir()
+    _prepared_identity_model(server_dir)
     model_source = tmp_path / "default.pt"
     model_source.write_bytes(b"model-content")
     result = initialize(
@@ -310,6 +319,7 @@ def test_initialize_copies_tls_and_compose_env_outside_server_package(
 ):
     server_dir = tmp_path / "read-only-server-package"
     server_dir.mkdir()
+    _prepared_identity_model(server_dir)
     model = tmp_path / "model.pt"
     model.write_bytes(b"model")
     certificate = tmp_path / "certificate.pem"

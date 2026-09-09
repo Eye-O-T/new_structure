@@ -11,7 +11,7 @@ from .clients.mediamtx import MediaControlError
 
 # 허용한 카메라 충돌 정보만 공개하고 나머지 Data 오류의 내부 메시지는 숨긴다.
 async def handle_data_error(_: Request, exc: DataServiceError) -> JSONResponse:
-    if exc.code in {"CAMERA_HAS_HISTORY", "CAMERA_LIMIT_REACHED"}:
+    if exc.code in {"CAMERA_HAS_HISTORY", "CAMERA_LIMIT_REACHED", "INVALID_EVENT_CURSOR"}:
         return JSONResponse(
             status_code=exc.status_code,
             content={

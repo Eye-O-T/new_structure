@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import uuid
 from typing import Any
 
 from fastapi import (
@@ -18,6 +19,7 @@ from fastapi.responses import JSONResponse
 
 from ..clients.data import (
     DataClient,
+    DataConflict,
     DataNotFound,
     DataServiceError,
 )
@@ -34,6 +36,7 @@ from ..schemas import (
     TokenResponse,
 )
 from ..security.login_backoff import LoginBackoff
+from ..security.client_address import TrustedProxyAddresses
 from ..security.passwords import verify_password
 from ..security.tokens import (
     TokenExpiredError,
@@ -77,13 +80,21 @@ def _user_is_active(user: dict[str, Any]) -> bool:
 
 
 # 접근·갱신 토큰은 같은 사용자 역할로 발급하되 용도와 유효 기간을 구분한다.
-def _issue_pair(settings: Settings, user_id: str, role: str) -> tuple[Any, Any]:
+def _issue_pair(
+    settings: Settings,
+    user_id: str,
+    role: str,
+    *,
+    family_id: str | None = None,
+) -> tuple[Any, Any]:
+    family_id = family_id or uuid.uuid4().hex
     access = issue_token(
         settings,
         user_id=user_id,
         role=role,
         token_type="access",
         ttl_seconds=settings.access_ttl_seconds,
+        session_id=family_id,
     )
     refresh = issue_token(
         settings,
@@ -91,6 +102,7 @@ def _issue_pair(settings: Settings, user_id: str, role: str) -> tuple[Any, Any]:
         role=role,
         token_type="refresh",
         ttl_seconds=settings.refresh_ttl_seconds,
+        session_id=family_id,
     )
     return access, refresh
 
@@ -111,7 +123,7 @@ def _refresh_record(
         "jti": token.claims.jti,
         "user_id": token.claims.sub,
         "token_hash": _token_hash(token.encoded),
-        "family_id": family_id or token.claims.jti,
+        "family_id": family_id or token.claims.session_id or token.claims.jti,
         "expires_at": utc_iso_from_epoch(token.claims.exp),
     }
     if rotated_from_jti is not None:
@@ -187,10 +199,13 @@ def _extract_bearer(request: Request) -> str | None:
     return None
 
 
-# 클라이언트 접속 주소와 대소문자를 접은 계정명으로 로그인 실패 이력을 구분한다.
-def _login_key(request: Request, username: str) -> str:
-    host = request.client.host if request.client is not None else "unknown"
-    return f"{host}:{username.casefold()}"
+# 검증한 접속 주소를 계정별 지연과 주소별 실패 제한 양쪽에 사용한다.
+async def _login_address(request: Request, settings: Settings) -> str:
+    resolver = getattr(request.app.state, "trusted_proxy_addresses", None)
+    if resolver is None:
+        resolver = TrustedProxyAddresses(settings.trusted_proxy_hosts)
+        request.app.state.trusted_proxy_addresses = resolver
+    return await resolver.client_address(request)
 
 
 # 모바일이 본문에 준 갱신 토큰을 우선하고 없을 때 브라우저 쿠키를 사용한다.
@@ -213,8 +228,9 @@ async def login(
     data: DataClient = Depends(get_data_client),
     backoff: LoginBackoff = Depends(get_login_backoff),
 ) -> Response:
-    key = _login_key(request, payload.username)
-    retry_after = backoff.retry_after(key)
+    address = await _login_address(request, settings)
+    key = f"{address}/{payload.username.casefold()}"
+    retry_after = backoff.retry_after(key, address=address)
     if retry_after:
         raise HTTPException(
             status_code=429,
@@ -225,7 +241,7 @@ async def login(
     try:
         user = await data.get_user_by_username(payload.username)
     except DataNotFound:
-        backoff.record_failure(key)
+        backoff.record_failure(key, address=address)
         raise _auth_error()
 
     password_hash = user.get("password_hash")
@@ -234,15 +250,13 @@ async def login(
         payload.password.get_secret_value(),
     )
     if not password_valid or not _user_is_active(user):
-        backoff.record_failure(key)
+        backoff.record_failure(key, address=address)
         raise _auth_error()
 
     user_id = _user_id(user)
     role = _user_role(user)
     access, refresh = _issue_pair(settings, user_id, role)
-    await data.create_refresh_token(
-        _refresh_record(refresh, family_id=refresh.claims.jti)
-    )
+    await data.create_refresh_token(_refresh_record(refresh))
     backoff.clear(key)
     return _token_response(settings, access, refresh, user)
 
@@ -296,17 +310,22 @@ async def refresh(
 
     user_id = _user_id(user)
     role = _user_role(user)
-    access, new_refresh = _issue_pair(settings, user_id, role)
     family_id = str(record.get("family_id") or claims.jti)
+    if claims.session_id is not None and claims.session_id != family_id:
+        raise _auth_error("Invalid refresh session")
+    access, new_refresh = _issue_pair(settings, user_id, role, family_id=family_id)
     # 토큰을 갱신할 때마다 교체하되 로그인 계열은 유지한다. 교체 원자성은 Data가 보장한다.
-    await data.rotate_refresh_token(
-        claims.jti,
-        _refresh_record(
-            new_refresh,
-            family_id=family_id,
-            rotated_from_jti=claims.jti,
-        ),
-    )
+    try:
+        await data.rotate_refresh_token(
+            claims.jti,
+            _refresh_record(
+                new_refresh,
+                family_id=family_id,
+                rotated_from_jti=claims.jti,
+            ),
+        )
+    except (DataConflict, DataNotFound) as exc:
+        raise _auth_error("Refresh session revoked or already rotated") from exc
     return _token_response(settings, access, new_refresh, user)
 
 
@@ -327,6 +346,7 @@ async def logout(
         except TokenValidationError:
             access = None
         if access is not None:
+            await data.revoke_session_family(access.session_id, access.sub)
             await data.revoke_access_token(
                 access.jti,
                 {

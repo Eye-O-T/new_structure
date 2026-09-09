@@ -87,13 +87,13 @@ class HistoryScreen extends ConsumerWidget {
                   ],
                 ),
               ),
-              data: (rows) => RefreshIndicator(
+              data: (history) => RefreshIndicator(
                 // 다시 조회한 Future가 끝날 때까지 당겨서 새로고침 표시를 유지한다.
                 onRefresh: () async {
                   ref.invalidate(eventsProvider);
                   await ref.read(eventsProvider.future);
                 },
-                child: rows.isEmpty
+                child: history.items.isEmpty
                     ? ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         children: const [
@@ -103,9 +103,33 @@ class HistoryScreen extends ConsumerWidget {
                       )
                     : ListView.builder(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: rows.length,
-                        itemBuilder: (_, index) =>
-                            EventCard(event: rows[index]),
+                        itemCount:
+                            history.items.length +
+                            (history.nextCursor == null ? 0 : 1),
+                        itemBuilder: (_, index) => index < history.items.length
+                            ? EventCard(event: history.items[index])
+                            : Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  children: [
+                                    if (history.error != null)
+                                      Text(history.error!),
+                                    if (history.loadingMore)
+                                      const LinearProgressIndicator()
+                                    else
+                                      OutlinedButton(
+                                        onPressed: () => ref
+                                            .read(eventsProvider.notifier)
+                                            .loadMore(),
+                                        child: Text(
+                                          history.error == null
+                                              ? '이전 이벤트 더 보기'
+                                              : '추가 조회 다시 시도',
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
                       ),
               ),
             ),

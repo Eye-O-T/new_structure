@@ -8,6 +8,7 @@
 | 서버와 카메라 관리 | [서버 관리자 화면](guide.md#서버-관리자-화면), [호스트 상태 확인](guide.md#호스트-상태와-백업) |
 | 백업·복원·업데이트 | [전체 백업](guide.md#전체-백업), [백업 복원](guide.md#백업-복원), [업그레이드](guide.md#업그레이드) |
 | 개발 환경·검증 | [소스 배포](guide.md#소스-배포), [개발과 검증](guide.md#개발과-검증) |
+| OSNet 인물 연결 모델 준비 | [모델 변환 도구](../server/tools/README.md), [Preprocessing 기본 모델](../server/services/preprocessing/README.md#기본-osnet-모델과-data의-인물-연결) |
 | 시스템 흐름·현재 구현 범위 이해 | [전체 구조](architecture.md), [통신·인증·저장소 상세](guide.md#상세-설정-부록) |
 
 ## 영구 문서: 설치와 사용
@@ -15,6 +16,7 @@
 | 문서 | 내용 |
 |---|---|
 | [설치·운영·개발 상세 안내](guide.md) | Windows 설치 설정, 소스 배포, 모바일 푸시, 백업·복원, 업그레이드, 개발·검증 |
+| [보관·장애 복구·배포 인수 기준](operations.md) | 자료별 보관 기한, 오류별 복구, 자원 설정, 버전별 실환경 검증 기록 |
 | [Windows 설치 도우미](../server/setup/install_helper/README.md) | 설치 마법사, 기존 서버 관리, Edge 연결, CLI, 설치 파일 빌드 |
 | [Raspberry Pi Edge](../edge/README.md) | Pi 패키지 설치, 영상 송출, 장치 연결, 수동 등록, 업데이트 |
 | [Android 앱](../mobile/README.md) | 앱 빌드·설정, 로그인과 영상 확인, 푸시 알림 |
@@ -27,7 +29,7 @@
 | [전체 구조](architecture.md) | SVG 그림으로 보는 구성 요소, 영상·이벤트·복구 흐름과 현재 구현 범위 |
 | [공개 API 명세](openapi.yaml) | 모바일 등 외부 클라이언트의 인증·영상·알림 API |
 
-여러 카메라의 동일 인물 연결과 추가 정보(metadata) 분석은 인터페이스만 준비된 미구현 영역이다. 현재 구현 범위는 구조 문서에서, 현행 입출력 계약과 검증 코드는 각 서비스 README에서 확인한다.
+인물 연결은 준비한 OSNet 모델의 특징과 Data gallery로 수행하며, 추가 정보(metadata) 분석은 상·하의 후보 영역 색과 영상 품질을 측정한다. 두 기능의 기본 구현이 있으며, 실제 CCTV 재식별·색 분석 정확도와 설치 현장의 동작은 별도 검증이 필요하다. 현재 구현 범위와 제한은 구조 문서에서, 모델 준비·입출력 계약·검증 코드는 각 서비스 README에서 확인한다.
 
 ## 영구 문서: 서버 구성 요소 개발
 
@@ -35,7 +37,7 @@
 |---|---|
 | [Data](../server/services/data/README.md) | 데이터·인증·설정 저장, DB 백업 도구와 개발 절차 |
 | [External](../server/services/external/README.md) | 공개 API, 서버 관리자 화면, 관리자 생성과 OpenAPI 도구 |
-| [Preprocessing](../server/services/preprocessing/README.md) | 영상 감지·추적과 인물 연결 실행 구성 |
+| [Preprocessing](../server/services/preprocessing/README.md) | YOLO/ByteTrack 감지·추적, OSNet 모델 준비와 Data 인물 연결 |
 | [Analysis](../server/services/analysis/README.md) | 분석 작업 처리와 분석 모듈 실행 구성 |
 
 공통 개발 환경과 자동 테스트 명령은 [개발과 검증](guide.md#개발과-검증)을 따른다. 프로젝트 소스 코드는 [MIT License](../LICENSE)로 제공하며, 제3자 구성요소에는 각자의 라이선스와 배포 조건이 적용된다.

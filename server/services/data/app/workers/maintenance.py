@@ -12,17 +12,22 @@ from ..schemas import (
 )
 from ..storage.recordings import reconcile
 from ..storage.retention import retention_cleanup
+from .supervision import WorkerStatus
 
 LOGGER = logging.getLogger("ai_cctv.data")
 
 
 # 주기마다 파일 상태를 먼저 대조한 뒤 보관 정책을 적용하고 실패는 다음 주기에 재시도한다.
-async def maintain_storage(repository: DataRepository, settings: Settings) -> None:
+async def maintain_storage(
+    repository: DataRepository, settings: Settings, state: WorkerStatus | None = None
+) -> None:
+    if state is not None:
+        state.succeeded()
     while True:
         await asyncio.sleep(settings.maintenance_interval_seconds)
         try:
             await asyncio.to_thread(reconcile, repository, settings)
-            await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 retention_cleanup,
                 repository,
                 settings,
@@ -31,5 +36,12 @@ async def maintain_storage(repository: DataRepository, settings: Settings) -> No
                     dry_run=False,
                 ),
             )
-        except Exception:
+            if state is not None:
+                if result["errors"]:
+                    state.failed(RuntimeError("retention delete failed"))
+                else:
+                    state.succeeded()
+        except Exception as exc:
+            if state is not None:
+                state.failed(exc)
             LOGGER.exception("scheduled storage maintenance failed")

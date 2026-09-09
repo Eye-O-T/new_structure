@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shutil
@@ -650,6 +651,8 @@ class EdgeStatusService:
         metrics: SystemMetricsCollector,
         power_monitor: PowerMonitor,
         capability_probe: CapabilityProbe,
+        *,
+        runtime_root: Path | None = None,
     ):
         self.config = config
         self.selection_store = selection_store
@@ -657,10 +660,10 @@ class EdgeStatusService:
         self.metrics = metrics
         self.power_monitor = power_monitor
         self.capability_probe = capability_probe
+        self.runtime_root = runtime_root or default_runtime_root()
 
     # PID 존재를 확인하되 접근 권한이 없는 경우에도 프로세스는 존재하는 것으로 본다.
-    @staticmethod
-    def _capture_process_alive(runtime: dict[str, object]) -> bool | None:
+    def _capture_process_alive(self, runtime: dict[str, object]) -> bool | None:
         state = runtime.get("state")
         if state not in {"starting", "running"}:
             return None
@@ -668,10 +671,37 @@ class EdgeStatusService:
             pid = int(runtime["runner_pid"])
             if pid <= 0:
                 return False
+            updated = float(runtime["updated_monotonic"])
+            age = time.monotonic() - updated
+            if not math.isfinite(updated) or not -1 <= age <= max(
+                15,
+                self.config.monitoring.frame_timeout_seconds * 3,
+            ):
+                return False
+            lock_path = self.runtime_root / f"{self.config.camera_id}.lock"
+            with lock_path.open("r", encoding="utf-8") as handle:
+                owner = json.load(handle)
+                if (
+                    owner.get("pid") != pid
+                    or not runtime.get("runner_instance_id")
+                    or owner.get("runner_instance_id") != runtime["runner_instance_id"]
+                ):
+                    return False
+                if fcntl is not None:
+                    try:
+                        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        pass
+                    else:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+                        return False
+        except (KeyError, TypeError, ValueError, OSError, AttributeError):
+            return False
+        try:
             os.kill(pid, 0)
         except PermissionError:
             return True
-        except (KeyError, TypeError, ValueError, OSError):
+        except OSError:
             return False
         return True
 
@@ -723,7 +753,11 @@ class EdgeStatusService:
             "capability_status": capabilities.status,
             "encoder": self.config.video.encoder,
             "capture_state": capture_state,
-            "last_error_code": runtime.get("last_error_code"),
+            "last_error_code": (
+                "CAPTURE_STATUS_STALE"
+                if capture_state == "stale"
+                else runtime.get("last_error_code")
+            ),
             "last_seen_at": utc_timestamp(),
             "capture_updated_at": runtime.get("updated_at"),
         }
@@ -768,6 +802,7 @@ def create_control_app(
         metrics or SystemMetricsCollector(config.backup.root),
         monitor,
         probe,
+        runtime_root=runtime_root,
     )
     manager = ProfileManager(config, probe, runtime, journal)
     authenticate = BearerAuthenticator(load_tokens(config.control.token_file))

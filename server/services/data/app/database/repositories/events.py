@@ -3,10 +3,38 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any
 
 from ..connection import Database
 from .base import _event, _now
+from .identity import note_track_observation
+
+
+def _event_details(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
+    result = _event(row)
+    assert result is not None
+    event_id = int(row["id"])
+    links = connection.execute(
+        """
+        SELECT recording_segment_id FROM event_recording_segments
+        WHERE event_id = ? ORDER BY recording_segment_id
+        """,
+        (event_id,),
+    ).fetchall()
+    # 이전 버전에서 남은 metadata 불일치도 현재 작업 상태로 일관되게 읽는다.
+    jobs = connection.execute(
+        "SELECT stage,state,updated_at FROM object_jobs WHERE event_id=?",
+        (event_id,),
+    ).fetchall()
+    for job in jobs:
+        stage_metadata = dict(result["metadata"].get(job["stage"], {}))
+        stage_metadata.update(status=job["state"], updated_at=job["updated_at"])
+        result["metadata"][job["stage"]] = stage_metadata
+    result["recording_segment_ids"] = [
+        int(link["recording_segment_id"]) for link in links
+    ]
+    return result
 
 
 class EventsRepositoryMixin:
@@ -41,6 +69,18 @@ class EventsRepositoryMixin:
                     existing_id = int(existing["id"])
                     # 같은 Edge 이벤트를 다시 받으면 기존 결과를 반환하여 후속 작업 중복을 막는다.
                     return self.get_event(existing_id) or {}
+            if values["event_type"] in {
+                "central_connection_lost", "central_connection_restored"
+            }:
+                origin = connection.execute(
+                    "SELECT e.edge_device_id FROM cameras c "
+                    "JOIN edge_devices e ON e.edge_device_id=c.edge_device_id "
+                    "WHERE c.camera_id=?", (values["camera_id"],)
+                ).fetchone()
+                values["metadata"] = dict(values.get("metadata", {}))
+                values["metadata"]["recovery_edge_device_id"] = (
+                    origin["edge_device_id"] if origin is not None else None
+                )
             automatic = connection.execute(
                 """
                 SELECT id FROM recording_segments
@@ -104,6 +144,13 @@ class EventsRepositoryMixin:
                 ),
             )
             event_id = int(cursor.lastrowid)
+            if session and values.get("person_id") and values["event_type"] in {
+                "person_appeared", "person_disappeared"
+            }:
+                note_track_observation(
+                    connection, values["camera_id"], session, values["person_id"],
+                    values["occurred_at"], ended=values["event_type"] == "person_disappeared",
+                )
             # 이벤트와 발송·분석 예약을 같은 트랜잭션에 넣는다.
             # 따라서 이벤트만 저장되고 후속 작업이 사라지는 중간 상태가 남지 않는다.
             self._enqueue_push(connection, event_id)
@@ -124,25 +171,19 @@ class EventsRepositoryMixin:
     # 단일 대표 녹화와 함께 다대다 연결의 전체 녹화 ID를 돌려준다.
     def get_event(self, event_id: int) -> dict[str, Any] | None:
         with self.database.connection() as connection:
+            connection.execute("BEGIN")
             row = connection.execute(
                 "SELECT * FROM events WHERE id = ?", (event_id,)
             ).fetchone()
-            result = _event(row)
-            if result is None:
+            if row is None:
                 return None
-            links = connection.execute(
-                """
-                SELECT recording_segment_id FROM event_recording_segments
-                WHERE event_id = ? ORDER BY recording_segment_id
-                """,
-                (event_id,),
-            ).fetchall()
-        result["recording_segment_ids"] = [
-            int(link["recording_segment_id"]) for link in links
-        ]
-        return result
+            return _event_details(connection, row)
 
     # 시작은 포함하고 종료는 제외하는 시간 조건으로 검색하여 시간·ID 순 페이지를 만든다.
+    def event_snapshot_max_id(self) -> int:
+        with self.database.connection() as connection:
+            return int(connection.execute("SELECT coalesce(max(id), 0) FROM events").fetchone()[0])
+
     def search_events(
         self,
         *,
@@ -152,6 +193,10 @@ class EventsRepositoryMixin:
         end_time: str | None,
         limit: int,
         offset: int,
+        snapshot_max_id: int | None = None,
+        after_time: str | None = None,
+        after_id: int | None = None,
+        descending: bool = False,
     ) -> list[dict[str, Any]]:
         conditions: list[str] = []
         parameters: list[Any] = []
@@ -167,11 +212,21 @@ class EventsRepositoryMixin:
         if end_time is not None:
             conditions.append("occurred_at < ?")
             parameters.append(end_time)
+        if snapshot_max_id is not None:
+            conditions.append("id <= ?")
+            parameters.append(snapshot_max_id)
+        if after_time is not None and after_id is not None:
+            operator = "<" if descending else ">"
+            conditions.append(f"(occurred_at {operator} ? OR (occurred_at = ? AND id {operator} ?))")
+            parameters.extend((after_time, after_time, after_id))
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        order = "DESC" if descending else "ASC"
         with self.database.connection() as connection:
+            # 보존 작업이 동시에 삭제해도 선택한 행과 연결 정보는 한 스냅샷에서 읽는다.
+            connection.execute("BEGIN")
             rows = connection.execute(
-                f"SELECT id FROM events{where} "
-                "ORDER BY occurred_at, id LIMIT ? OFFSET ?",
+                f"SELECT * FROM events{where} "
+                f"ORDER BY occurred_at {order}, id {order} LIMIT ? OFFSET ?",
                 (*parameters, limit, offset),
             ).fetchall()
-        return [self.get_event(int(row["id"])) or {} for row in rows]
+            return [_event_details(connection, row) for row in rows]

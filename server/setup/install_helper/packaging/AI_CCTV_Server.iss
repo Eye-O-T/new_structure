@@ -52,7 +52,13 @@ Source: "..\..\..\..\dist\AI_CCTV_CLI.exe"; DestDir: "{app}"; Flags: ignoreversi
 Source: "..\..\..\..\.dockerignore"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\lib\*"; DestDir: "{app}\lib"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,*.pyc,*.pyo,*.egg-info\*,build\*,dist\*"
 ; 여섯 서비스의 실행 코드를 포함하고 개발·테스트 도구와 실제 운영 데이터는 제외한다.
-Source: "..\..\..\..\server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,secrets\*.env,secrets\*.json,runtime\*,certs\*,config\config.yaml,__pycache__\*,*.pyc,*.pyo,*.key,*.crt,*.pem,tests\*,setup\tests\*,setup\.venv\*,setup\*.egg-info\*,setup\build\*,setup\dist\*,setup\install_helper\*,.venv\*,*.egg-info\*,build\*,dist\*,compose.dev.yml,compose.test.yml,services\external\tools\export_openapi.py"
+Source: "..\..\..\..\server\*"; DestDir: "{app}\server"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env,*.env,*.bak,secrets\*,runtime\*,certs\*,config\config.yaml,__pycache__\*,*.pyc,*.pyo,*.key,*.crt,*.pem,tests\*,setup\tests\*,setup\.venv\*,setup\*.egg-info\*,setup\build\*,setup\dist\*,setup\install_helper\*,.venv\*,*.egg-info\*,build\*,dist\*,compose.dev.yml,compose.test.yml,services\external\tools\export_openapi.py"
+; secrets는 전체 제외 후 배포용 예제만 허용한다. 운영 파일·이전 비밀값 백업을 포함하지 않는다.
+Source: "..\..\..\..\server\secrets\data.env.example"; DestDir: "{app}\server\secrets"; Flags: ignoreversion
+Source: "..\..\..\..\server\secrets\external.env.example"; DestDir: "{app}\server\secrets"; Flags: ignoreversion
+Source: "..\..\..\..\server\secrets\preprocessing.env.example"; DestDir: "{app}\server\secrets"; Flags: ignoreversion
+Source: "..\..\..\..\server\secrets\media.env.example"; DestDir: "{app}\server\secrets"; Flags: ignoreversion
+Source: "..\..\..\..\server\secrets\analysis.env.example"; DestDir: "{app}\server\secrets"; Flags: ignoreversion
 ; 영구 README·상세 안내·구조 그림·API·라이선스를 같은 상대 위치에 둔다. 임시 인수 SRS는 배포하지 않는다.
 Source: "..\..\..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -62,6 +68,7 @@ Source: "..\..\..\..\edge\README.md"; DestDir: "{app}\edge"; Flags: ignoreversio
 Source: "..\..\..\..\tests\mock_edge\README.md"; DestDir: "{app}\tests\mock_edge"; Flags: ignoreversion
 Source: "..\..\..\..\docs\README.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\..\..\docs\guide.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\..\..\docs\operations.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\..\..\docs\architecture.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\..\..\docs\assets\architecture\*.svg"; DestDir: "{app}\docs\assets\architecture"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\..\..\docs\openapi.yaml"; DestDir: "{app}\docs"; Flags: ignoreversion

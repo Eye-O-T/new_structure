@@ -100,6 +100,34 @@ def set_password(window):
     window.confirm_password.setText("example-password-123")
 
 
+def test_osnet_discovery_keeps_detection_and_identity_models_separate(window, tmp_path):
+    window.server_dir = tmp_path / "package"
+    models = Path(window.storage.text()) / "models"
+    models.mkdir(parents=True)
+    detector = models / "detector.pt"
+    detector.write_bytes(b"detector-presence-only")
+    identity = models / "osnet_x0_25_msmt17.onnx"
+    identity.write_bytes(b"identity-presence-only")
+    window.model.clear()
+    window.identity_model.clear()
+    window._discover_files()
+    assert Path(window.model.text()) == detector
+    assert Path(window.identity_model.text()) == identity
+
+
+def test_identity_file_selection_is_forwarded_and_invalidates_preflight(
+    window, monkeypatch, tmp_path
+):
+    set_password(window)
+    window.model.setText(str(tmp_path / "detector.pt"))
+    identity = tmp_path / "site_osnet.onnx"
+    window._preflight_ok = True
+    window.identity_model.setText(str(identity))
+    assert not window._preflight_ok
+    monkeypatch.setattr(wizard, "_validate_request", lambda request: request.model_path)
+    assert window._make_request().identity_model_path == identity
+
+
 def test_missing_dependencies_block_next_and_file_change_requires_new_check(
     window, app, monkeypatch
 ):

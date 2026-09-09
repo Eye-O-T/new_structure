@@ -19,6 +19,7 @@ from .compose_adapter import (
 )
 from server.setup.config_core import InstallRequest, initialize
 from .doctor import checks
+from .workflow import _validate_install_input, install_new
 from server.setup.model_manager import validate_custom_model
 from .server_api import (
     ServerApiClient,
@@ -55,32 +56,40 @@ def _init(args: argparse.Namespace) -> int:
             if args.compose_env is not None
             else args.data_root.expanduser().resolve() / "config" / "compose.env"
         )
-        result = initialize(
-            InstallRequest(
-                data_root=args.data_root,
-                server_dir=args.server_dir,
-                admin_username=args.admin_username,
-                admin_password=password,
-                model_path=model,
-                cameras=args.camera,
-                compose_env_path=compose_env_path,
-                tls_certificate_path=args.tls_certificate,
-                tls_private_key_path=args.tls_private_key,
-                public_http_port=args.http_port,
-                public_https_port=args.https_port,
-                public_bind_address=args.public_bind,
-                public_base_url=args.public_base_url,
-                rtsp_bind_address=args.rtsp_bind,
-                rtsp_port=args.rtsp_port,
-                recording_segment_seconds=args.recording_segment_seconds,
-                retention_days=args.retention_days,
-                storage_warning_free_percent=args.storage_warning_free_percent,
-                inference_device=args.inference_device,
-            )
+        request = InstallRequest(
+            data_root=args.data_root,
+            server_dir=args.server_dir,
+            admin_username=args.admin_username,
+            admin_password=password,
+            model_path=model,
+            identity_model_path=args.identity_model,
+            cameras=args.camera,
+            compose_env_path=compose_env_path,
+            tls_certificate_path=args.tls_certificate,
+            tls_private_key_path=args.tls_private_key,
+            public_http_port=args.http_port,
+            public_https_port=args.https_port,
+            public_bind_address=args.public_bind,
+            public_base_url=args.public_base_url,
+            rtsp_bind_address=args.rtsp_bind,
+            rtsp_port=args.rtsp_port,
+            recording_segment_seconds=args.recording_segment_seconds,
+            retention_days=args.retention_days,
+            storage_warning_free_percent=args.storage_warning_free_percent,
+            inference_device=args.inference_device,
         )
-    except (EOFError, OSError, ValueError) as exc:
+        if getattr(args, "reset_existing", False):
+            # 명시적 재설정만 기존 파일을 백업하고 인증키를 교체한다.
+            _validate_install_input(request, require_tls=False)
+            result = initialize(request)
+        else:
+            result = install_new(request, check_environment=False, require_tls=False)
+    except (EOFError, OSError, ValueError, RuntimeError) as exc:
         print(f"[ERROR] INITIALIZATION_FAILED: {exc}")
-        print("No service was started. Correct the input and run the command again.")
+        print(
+            "No service was started. Preserve existing files; use start for an "
+            "initialized deployment, or diagnose an interrupted installation."
+        )
         return 1
     print(f"Configuration: {result.config_path}")
     print(f"Data service secrets: {result.secrets_path}")
@@ -238,6 +247,14 @@ def _add_api_auth(parser: argparse.ArgumentParser) -> None:
 # init과 install이 동일한 모델·TLS·녹화 기본값과 입력 규칙을 공유하게 한다.
 def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--reset-existing",
+        action="store_true",
+        help=(
+            "explicitly replace existing configuration and rotate all JWT/service "
+            "keys after making .bak files; does not reset existing DB user passwords"
+        ),
+    )
+    parser.add_argument(
         "--data-root",
         type=Path,
         default=default_data_root(),
@@ -257,6 +274,11 @@ def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         required=True,
         help="path to an already-downloaded .pt, .onnx, or .engine model",
+    )
+    parser.add_argument(
+        "--identity-model",
+        type=Path,
+        help="prepared OSNet ONNX; otherwise look in persistent/package models directories",
     )
     parser.add_argument(
         "--inference-device",

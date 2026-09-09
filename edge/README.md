@@ -69,6 +69,8 @@ sudo ai-cctv-edge status
 
 ## Edge 코드 검증
 
+캡처 상태는 PID 존재뿐 아니라 실행 잠금의 PID·인스턴스 ID와 단조 시계 heartbeat를 함께 확인한다. 갱신이 `max(15초, frame_timeout_seconds × 3)`를 넘거나 실행 소유자가 다르면 `capture_state=stale`, `camera_input=offline`, `last_error_code=CAPTURE_STATUS_STALE`로 응답한다. 중앙은 이전 입력이 정상이었고 Edge 일지에 손실 기록이 없을 때 입력 손실 이벤트를 보완한다. 업데이트 시 캡처·제어 서비스를 함께 재시작하여 새 heartbeat 형식을 적용한다.
+
 Python 3.11 가상환경을 활성화하고 저장소 루트에서 실행한다. 실제 카메라·GStreamer 검증은 Pi에서 따로 수행한다.
 
 ```bash

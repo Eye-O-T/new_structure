@@ -20,7 +20,7 @@ AI CCTV는 Raspberry Pi 카메라, 중앙 서버, Android 앱을 연결하는 �
 
 ### Windows 서버 설치
 
-Windows x64 PC에 **Docker Desktop을 설치하고 Linux 컨테이너 모드로 실행**해 두세요. 사람 감지 모델 파일과 서버 접속 주소에 맞는 HTTPS 인증서·개인키도 필요합니다. 이 파일들은 설치 프로그램에 포함되지 않으므로 [필수 파일 안내](server/setup/install_helper/README.md#처음-설치)를 확인해 준비하세요.
+Windows x64 PC에 **Docker Desktop을 설치하고 Linux 컨테이너 모드로 실행**해 두세요. 사람 감지용 YOLO 모델, 인물 연결용 OSNet ONNX 모델과 서버 접속 주소에 맞는 HTTPS 인증서·개인키도 필요합니다. 모델은 서비스가 자동으로 내려받지 않으므로 배포 담당자가 준비한 파일을 받으세요. 설치 파일 조건은 [필수 파일 안내](server/setup/install_helper/README.md#처음-설치), 소스 배포의 OSNet 준비 방법은 [모델 변환 도구](server/tools/README.md)를 참고하세요.
 
 1. 받은 설치 EXE를 실행하고 안내에 따라 설치한 뒤 **AI CCTV 서버 설치 도우미**를 엽니다.
 2. **설치 준비 확인**에서 Docker·Compose·모델·인증서 검사 결과를 확인합니다. 누락된 프로그램이나 파일을 준비하고 **다시 검사**를 누른 뒤 **다음**으로 진행합니다.

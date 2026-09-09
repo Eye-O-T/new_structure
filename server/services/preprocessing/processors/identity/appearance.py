@@ -15,6 +15,49 @@ _MODEL_MAX_BYTES = 256 * 1024 * 1024
 _ONNX_PREPROCESSING = "rgb256x128-imagenet-v1"
 
 
+def _read_onnx_model(model_path: str | Path, models_root: Path) -> tuple[bytes, str]:
+    """허용된 모델 폴더의 단일 ONNX를 제한 크기로 읽고 동일 바이트의 지문을 반환한다."""
+    if not str(model_path).strip():
+        raise ValueError("IDENTITY_MODEL_PATH must name an ONNX model")
+    path = Path(model_path).resolve(strict=True)
+    if not path.is_relative_to(models_root.resolve()) or path.suffix.lower() != ".onnx":
+        raise ValueError(
+            "Identity model must be an ONNX file inside the models directory"
+        )
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= _MODEL_MAX_BYTES:
+        raise ValueError("Identity model file size or type is invalid")
+    with path.open("rb") as handle:
+        payload = handle.read(_MODEL_MAX_BYTES + 1)
+    if len(payload) > _MODEL_MAX_BYTES:
+        raise ValueError("Identity model exceeds the size limit")
+    return payload, hashlib.sha256(payload).hexdigest()
+
+
+def _load_onnx_net(payload: bytes):
+    """검사·해시 계산을 마친 동일 모델 바이트를 OpenCV CPU 실행기에 전달한다."""
+    try:
+        network = cv2.dnn.readNetFromONNX(np.frombuffer(payload, dtype=np.uint8))
+        network.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        network.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        if network.empty() or len(network.getUnconnectedOutLayersNames()) != 1:
+            raise ValueError(
+                "Identity ONNX model must have exactly one embedding output"
+            )
+    except cv2.error as error:
+        raise ValueError("Identity ONNX model cannot be loaded") from error
+    return network
+
+
+def _onnx_input(image: np.ndarray) -> np.ndarray:
+    """RGB 256×128에 ImageNet 평균·표준편차를 적용한 연속 float32 NCHW 입력이다."""
+    resized = cv2.resize(image, (128, 256), interpolation=cv2.INTER_LINEAR)
+    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    return np.ascontiguousarray(((rgb - mean) / std).transpose(2, 0, 1)[None])
+
+
 def _normalized(values: np.ndarray) -> list[float]:
     """벡터 길이·유한값·영벡터를 검사한 뒤 비교용 단위 길이로 정규화한다."""
     vector = np.asarray(values)
@@ -142,54 +185,15 @@ class LocalAppearanceIdentity:
         )
         if configured is not None:
             # 잘못 지정한 모델을 기본 특징으로 대체하면 서로 다른 특징 공간이 섞이므로 실패시킨다.
-            if not str(configured).strip():
-                raise ValueError("IDENTITY_MODEL_PATH must name an ONNX model")
-            path = Path(configured).resolve(strict=True)
-            if (
-                not path.is_relative_to(models_root.resolve())
-                or path.suffix.lower() != ".onnx"
-            ):
-                raise ValueError(
-                    "Identity model must be an ONNX file inside the models directory"
-                )
-            info = path.stat()
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or not 0 < info.st_size <= _MODEL_MAX_BYTES
-            ):
-                raise ValueError("Identity model file size or type is invalid")
-            with path.open("rb") as handle:
-                payload = handle.read(_MODEL_MAX_BYTES + 1)
-            if len(payload) > _MODEL_MAX_BYTES:
-                raise ValueError("Identity model exceeds the size limit")
-            digest = hashlib.sha256(payload).hexdigest()
-            try:
-                # 해시를 계산한 동일 바이트를 로드해 모델 파일 교체로 특징 공간명이 어긋나지 않게 한다.
-                self._net = cv2.dnn.readNetFromONNX(
-                    np.frombuffer(payload, dtype=np.uint8)
-                )
-                self._net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-                self._net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-                if (
-                    self._net.empty()
-                    or len(self._net.getUnconnectedOutLayersNames()) != 1
-                ):
-                    raise ValueError(
-                        "Identity ONNX model must have exactly one embedding output"
-                    )
-            except cv2.error as error:
-                raise ValueError("Identity ONNX model cannot be loaded") from error
+            payload, digest = _read_onnx_model(configured, models_root)
+            self._net = _load_onnx_net(payload)
             self._space_id = f"onnx-reid:{digest}:{_ONNX_PREPROCESSING}"
             self._backend = "onnx-reid"
             self._method = _ONNX_PREPROCESSING
 
     def _onnx_features(self, image: np.ndarray) -> np.ndarray:
         """고정 RGB/ImageNet 전처리의 1×3×256×128 입력과 단일 1×D 출력을 강제한다."""
-        resized = cv2.resize(image, (128, 256), interpolation=cv2.INTER_LINEAR)
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        blob = np.ascontiguousarray(((rgb - mean) / std).transpose(2, 0, 1)[None])
+        blob = _onnx_input(image)
         try:
             self._net.setInput(blob)
             output = self._net.forward()

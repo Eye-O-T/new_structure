@@ -1,0 +1,5 @@
+# 별도 준비 환경에 CPU torch==2.8.0을 공식 CPU index에서 먼저 설치한다(README 참조).
+# 서비스 실행에는 이 파일이 필요하지 않다.
+onnx==1.17.0
+numpy==1.26.4
+opencv-python==4.11.0.86

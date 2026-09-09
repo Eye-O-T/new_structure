@@ -151,12 +151,53 @@
   // 관리자 전용 점검 API로 서버와 Data 준비 상태를 확인하고 조회 시각을 표시한다.
   async function systemStatus() {
     const result = await api("/api/v1/admin/system/status");
-    byId("system-status").textContent = `External: ${display(result.external?.status)} · Data: ${display(result.data?.status)} · 조회 ${new Date().toLocaleTimeString("ko-KR")}`;
+    byId("system-status").textContent = `전체: ${display(result.status)} · 조회 ${new Date().toLocaleTimeString("ko-KR")}`;
+    const details = byId("system-details");
+    details.replaceChildren();
+    function group(title, fields) {
+      const section = document.createElement("section");
+      const heading = document.createElement("h3");
+      heading.textContent = title;
+      const list = document.createElement("dl");
+      list.className = "status-grid";
+      for (const [label, raw] of fields) {
+        const term = document.createElement("dt");
+        const value = document.createElement("dd");
+        term.textContent = label;
+        value.textContent = display(raw);
+        list.append(term, value);
+      }
+      section.append(heading, list);
+      details.append(section);
+    }
+    const data = result.data || {};
+    const preprocessing = result.preprocessing || {};
+    group("서버 · 영상", [["공개 API", result.external?.status], ["Data", data.status], ["미디어 서버", result.media?.status], ["송출 중 카메라", result.media?.active_publishers], ["미디어 진단", result.media?.last_error_code]]);
+    for (const [name, label] of [["recovery", "녹화 복구 작업"], ["storage", "보존 정리 작업"]]) {
+      const worker = data.workers?.[name] || {};
+      group(label, [["상태", worker.status], ["작업자 실행", worker.alive === undefined ? null : worker.alive ? "실행 중" : "중지됨"], ["마지막 완료", worker.last_success_at], ["오류", worker.last_error_code]]);
+    }
+    for (const [name, volume] of Object.entries(data.storage?.volumes || {})) {
+      const labels = { recordings: "녹화", snapshots: "스냅샷", database: "데이터베이스", backups: "백업" };
+      const free = typeof volume.free_bytes === "number" ? `${(volume.free_bytes / 1024 ** 3).toFixed(1)} GiB` : null;
+      group(`${labels[name] || name} 저장소`, [["상태", volume.status], ["남은 용량", free], ["남은 비율 (%)", volume.free_percent]]);
+    }
+    if (data.retention) group("미전송 자료 보호", [["정리 가능 여부", data.retention.status === "ready" ? "가능" : "보호 목록 확인 대기"], ["보호 중 이미지", data.retention.protected_paths], ["보호 중 이벤트", data.retention.protected_events], ["보호 목록 갱신", data.retention.generated_at], ["진단", data.retention.last_error_code]]);
+    group("감지 · 식별", [["전처리", preprocessing.status], ["식별 준비", preprocessing.identity?.model_ready === undefined ? null : preprocessing.identity.model_ready ? "준비됨" : "미준비"], ["식별 지연", preprocessing.identity?.stalled === undefined ? null : preprocessing.identity.stalled ? "처리 중단 확인 필요" : "없음"], ["식별 오류", preprocessing.identity?.last_error_code], ["이벤트 전송 대기", preprocessing.event_delivery?.pending], ["전송 거부", preprocessing.event_delivery?.rejected], ["등록을 기다리는 카메라", preprocessing.event_delivery?.waiting], ["전송 오류", preprocessing.event_delivery?.last_error_code]]);
+    for (const camera of preprocessing.cameras || []) {
+      group(`감지 입력 · ${camera.camera_id}`, [["상태", camera.state], ["감지 모델", camera.model_ready ? "준비됨" : "미준비"], ["영상 갱신", camera.frame_stale ? "오래된 영상" : "정상"], ["마지막 프레임 경과 (초)", camera.frame_age_seconds], ["이벤트 저장 실패", camera.event_persistence_failures], ["오류", camera.last_error_code]]);
+    }
+    for (const [name, queue] of Object.entries(data.queues || {})) {
+      const names = { identity: "식별", analysis: "분석", recovery: "복구", push: "푸시" };
+      const metrics = data.queue_metrics?.[name] || {};
+      group(`${names[name] || name} 대기열`, [...Object.entries(queue).map(([state, count]) => [display(state), count]), ["가장 오래된 대기 (초)", metrics.oldest_pending_seconds], ["최근 완료", metrics.last_success_at], ["최근 실패", metrics.last_failure_at]]);
+    }
+    group("푸시 발송", [["상태", result.push?.status], ["발송 확인", result.push?.delivery_confirmed ? "발송 성공 확인됨" : "아직 확인되지 않음"], ["마지막 성공", result.push?.last_sent_at], ["오류", result.push?.last_error_code]]);
   }
 
   // 공통 상태는 한국어로 표시하고 미관측 값은 false나 0과 구분한다.
   function display(value) {
-    const words = { true: "온라인", false: "오프라인", online: "연결됨", offline: "연결 안 됨", lost: "입력 끊김", unknown: "확인되지 않음", external: "외부 전원", battery: "배터리", running: "실행 중", ready: "준비됨", hd: "HD", fhd: "FHD" };
+    const words = { true: "온라인", false: "오프라인", online: "연결됨", offline: "연결 안 됨", lost: "입력 끊김", unknown: "확인되지 않음", external: "외부 전원", battery: "배터리", running: "실행 중", ready: "준비됨", degraded: "기능 저하", unavailable: "연결 확인 불가", disabled: "사용 안 함", waiting: "발송 대기", starting: "시작 중", stopped: "중지됨", ok: "정상", warning: "주의", error: "오류", pending: "대기", failed: "실패", unconfigured: "미설정", complete: "완료", completed: "완료", sending: "발송 중", sent: "발송 완료", cancelled: "취소", detected: "복구 필요", waiting_for_recovery: "복구 대기", downloading: "다운로드 중", indexing: "목록 반영 중", hd: "HD", fhd: "FHD" };
     return value === null || value === undefined ? "정보 없음" : (words[String(value)] || String(value));
   }
 

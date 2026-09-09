@@ -763,8 +763,9 @@ def test_refresh_rotation_and_revoked_token_state(data_client) -> None:
         client.delete(f"{BASE}/tokens/refresh/new-jti", headers=HEADERS).status_code
         == 204
     )
-    missing = client.get(f"{BASE}/tokens/refresh/new-jti", headers=HEADERS)
-    assert missing.status_code == 404
+    revoked = client.get(f"{BASE}/tokens/refresh/new-jti", headers=HEADERS)
+    assert revoked.status_code == 200
+    assert revoked.json()["revoked_at"] is not None
 
 
 # 시간대 없는 시각은 서버 로컬 시간으로 추정하지 않고 검증 오류로 거절한다.

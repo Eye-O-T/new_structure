@@ -53,6 +53,7 @@ def test_inno_installer_packages_gui_cli_and_required_compose_context():
     for document in (
         "README.md",
         "guide.md",
+        "operations.md",
         "architecture.md",
         "openapi.yaml",
     ):
@@ -69,8 +70,7 @@ def test_inno_installer_packages_gui_cli_and_required_compose_context():
     assert 'DestDir: "{app}\\docs\\assets\\architecture"' in asset_rule
     assert "recursesubdirs" in asset_rule
     assert "createallsubdirs" in asset_rule
-    assert "secrets\\*.env" in installer
-    assert "secrets\\*.json" in installer
+    assert "secrets\\*" in installer
     assert "runtime\\*" in installer
     assert "config\\config.yaml" in installer
     assert "__pycache__\\*" in installer
@@ -94,7 +94,7 @@ def test_inno_installer_packages_gui_cli_and_required_compose_context():
         for line in installer.splitlines()
         if line.startswith('Source: "..\\..\\..\\..\\server\\*"')
     )
-    for private_input in ("secrets\\*.env", "secrets\\*.json", "runtime\\*"):
+    for private_input in ("secrets\\*", "*.env", "*.bak", "runtime\\*"):
         assert private_input in server_source
     assert (
         "server/secrets/*.json"
@@ -163,6 +163,8 @@ def test_windows_build_script_builds_both_entrypoints_and_checksum():
         "mobile\\README.md",
         "server\\setup\\install_helper\\uv.lock",
         "docs\\architecture.md",
+        "docs\\operations.md",
+        "server\\tools\\export_release_manifest.py",
         "docs\\openapi.yaml",
     ):
         assert f"(Join-Path $repositoryRoot '{document}')" in script
@@ -268,6 +270,10 @@ def test_installer_keeps_operational_tools_and_excludes_moved_development_payloa
         "setup/tools/generate_secrets.py",
         "setup/tools/generate_dev_cert.py",
         "setup/tools/enable_object_processing.py",
+        "tools/prepare_osnet.py",
+        "tools/export_release_manifest.py",
+        "tools/requirements-osnet.txt",
+        "tools/README.md",
         "services/data/tools/backup_database.py",
         "services/external/tools/bootstrap_admin.py",
     ):
@@ -280,10 +286,29 @@ def test_installer_keeps_operational_tools_and_excludes_moved_development_payloa
         "setup/tests/test_config_core.py",
         "services/external/tools/export_openapi.py",
         "secrets/data.env",
+        "secrets/data.env.bak",
+        "secrets/camera_credentials.json.bak",
+        "secrets/old/custom.backup",
+        ".env.bak",
+        "compose.env.bak",
+        "config/config.yaml.bak",
         "config/config.yaml",
         "runtime/database/cctv.db",
     ):
         assert any(fnmatchcase(relative, pattern) for pattern in patterns), relative
+
+
+def test_installer_secrets_allowlist_contains_only_the_five_public_templates():
+    entries = _installer_entries("Files")
+    selected = [
+        entry for entry in entries if entry["DestDir"] == r"{app}\server\secrets"
+    ]
+    assert {PureWindowsPath(entry["Source"]).name for entry in selected} == {
+        f"{name}.env.example"
+        for name in ("data", "external", "preprocessing", "media", "analysis")
+    }
+    assert len(selected) == 5
+    assert all("*" not in entry["Source"] for entry in selected)
 
 
 # 업그레이드 정리 규칙은 알려진 옛 소스만 대상으로 하며 와일드카드나 운영 저장소를 포함하지 않는다.

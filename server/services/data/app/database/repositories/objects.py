@@ -7,7 +7,8 @@ from datetime import timedelta
 from ai_cctv_core.contracts.objects import ObjectJobCompletion
 from ai_cctv_core.time import format_utc, utc_now
 
-from .identity import resolve_identity
+from .identity import conflicting_global_ids, note_track_observation, resolve_identity
+from .job_state import update_event_job_state
 
 
 class ObjectRepositoryMixin:
@@ -15,10 +16,19 @@ class ObjectRepositoryMixin:
         # 아직 모델이 없는 작업은 실패와 구분한다. 모델 연결 후 이 목록을 다시 대기 상태로 옮긴다.
         now = format_utc(utc_now())
         with self.database.transaction() as connection:
+            rows = connection.execute(
+                "SELECT id,event_id FROM object_jobs WHERE stage=? "
+                "AND state='unconfigured' ORDER BY id LIMIT 100",
+                (stage,),
+            ).fetchall()
             result = connection.execute(
                 "UPDATE object_jobs SET state='pending',attempts=0,next_attempt_at=?,updated_at=? WHERE id IN (SELECT id FROM object_jobs WHERE stage=? AND state='unconfigured' ORDER BY id LIMIT 100)",
                 (now, now, stage),
             )
+            for row in rows:
+                update_event_job_state(
+                    connection, row["event_id"], stage, "pending", now
+                )
             return result.rowcount
 
     # 관측 시각이 더 최신인 자료만 덮어써 늦게 도착한 좌표가 화면을 되돌리지 않게 한다.
@@ -26,10 +36,20 @@ class ObjectRepositoryMixin:
         stamp = format_utc(utc_now())
         observed = format_utc(payload.observed_at)
         with self.database.transaction() as connection:
-            connection.execute(
+            changed = connection.execute(
                 "INSERT INTO live_objects VALUES (?,?,?,?) ON CONFLICT(camera_id) DO UPDATE SET payload_json=excluded.payload_json,observed_at=excluded.observed_at,received_at=excluded.received_at WHERE excluded.observed_at>live_objects.observed_at",
                 (camera_id, payload.model_dump_json(), observed, stamp),
             )
+            if changed.rowcount:
+                # 모든 활성 track의 관측 구간을 보존하여 늦게 완료되는 식별에도 동시성을 검사한다.
+                for obj in payload.objects:
+                    note_track_observation(
+                        connection,
+                        camera_id,
+                        payload.tracking_session_id,
+                        obj.person_id,
+                        observed,
+                    )
 
     # 활성 카메라의 신선한 관찰에 같은 추적 세션의 전역 인물 ID를 결합한다.
     def get_live_objects(self, camera_id):
@@ -70,6 +90,7 @@ class ObjectRepositoryMixin:
                 "INSERT INTO object_jobs(event_id,stage,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,?)",
                 (event_id, stage, now, now, now),
             )
+            update_event_job_state(connection, event_id, stage, "pending", now)
 
     # 최대 시도 횟수 안에서 대기 중이거나 임대가 만료된 작업 하나를 원자적으로 할당한다.
     def claim_object_job(self, stage):
@@ -78,10 +99,26 @@ class ObjectRepositoryMixin:
         now = utc_now()
         stamp = format_utc(now)
         with self.database.transaction() as connection:
-            connection.execute(
-                "UPDATE object_jobs SET state='failed',updated_at=? WHERE stage=? AND attempts>=5 AND (state='pending' OR (state='running' AND lease_until<=?))",
-                (stamp, stage, stamp),
+            exhausted = connection.execute(
+                "SELECT id,event_id FROM object_jobs WHERE stage=? AND attempts>=5 "
+                "AND (state='pending' OR (state='running' AND lease_until<=?)) "
+                "ORDER BY id LIMIT 1000",
+                (stage, stamp),
+            ).fetchall()
+            connection.executemany(
+                "UPDATE object_jobs SET state='failed',lease_id=NULL,lease_until=NULL,"
+                "updated_at=? WHERE id=?",
+                [(stamp, row["id"]) for row in exhausted],
             )
+            for exhausted_job in exhausted:
+                update_event_job_state(
+                    connection,
+                    exhausted_job["event_id"],
+                    stage,
+                    "failed",
+                    stamp,
+                    error_code="ATTEMPTS_EXHAUSTED",
+                )
             row = connection.execute(
                 "SELECT j.id,j.event_id,j.attempts,e.camera_id,e.person_id,e.global_person_id,e.occurred_at,e.metadata_json FROM object_jobs j JOIN events e ON e.id=j.event_id WHERE j.stage=? AND j.attempts<5 AND ((j.state='pending' AND j.next_attempt_at<=?) OR (j.state='running' AND j.lease_until<=?)) ORDER BY j.id LIMIT 1",
                 (stage, stamp, stamp),
@@ -93,6 +130,7 @@ class ObjectRepositoryMixin:
                 "UPDATE object_jobs SET state='running',attempts=attempts+1,lease_id=?,lease_until=?,updated_at=? WHERE id=?",
                 (lease, format_utc(now + timedelta(minutes=5)), stamp, row["id"]),
             )
+            update_event_job_state(connection, row["event_id"], stage, "running", stamp)
             result = dict(row)
             result["object_observation"] = json.loads(result.pop("metadata_json"))[
                 "object"
@@ -129,6 +167,8 @@ class ObjectRepositoryMixin:
                     metadata["object"]["tracking_session_id"],
                     completion.identity_descriptor,
                     stamp,
+                    threshold=self.identity_match_threshold,
+                    margin=self.identity_match_margin,
                 )
                 result_metadata["match"] = match
             # 두 단계가 독립적으로 끝나므로 DB의 최신 metadata에서 자기 단계의 결과만 바꾼다.
@@ -140,14 +180,17 @@ class ObjectRepositoryMixin:
             if stage == "identity" and global_person_id is not None:
                 # person_id는 재접속 후 다시 쓰일 수 있으므로 카메라와 추적 세션을 함께 식별한다.
                 session = metadata["object"]["tracking_session_id"]
+                if global_person_id in conflicting_global_ids(
+                    connection, row, session, stamp
+                ):
+                    raise ValueError(
+                        "Concurrent camera tracks cannot share a global person ID"
+                    )
                 existing = connection.execute(
                     "SELECT global_person_id FROM person_identity_links WHERE camera_id=? AND tracking_session_id=? AND person_id=?",
                     (row["camera_id"], session, row["person_id"]),
                 ).fetchone()
-                if (
-                    existing
-                    and existing["global_person_id"] != global_person_id
-                ):
+                if existing and existing["global_person_id"] != global_person_id:
                     raise ValueError("Identity already assigned for this camera track")
                 connection.execute(
                     "INSERT OR IGNORE INTO person_identity_links VALUES (?,?,?,?,?)",

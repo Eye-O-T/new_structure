@@ -64,6 +64,7 @@ async def _lifespan(application: FastAPI):
         )
         if settings.push_enabled:
             dispatcher = PushDispatcher(settings, client)
+            application.state.push_dispatcher = dispatcher
             push_task = asyncio.create_task(dispatcher.run(), name="external-fcm-push")
     try:
         yield
@@ -96,6 +97,7 @@ def create_app(
     if data_client is not None:
         application.state.data_client = data_client
     application.state.camera_lifecycle_lock_factory = CameraLifecycleLocks()
+    application.state.camera_admission_lock_factory = CameraLifecycleLocks()
     register_exception_handlers(application)
     for router in (
         admin_ui.router,

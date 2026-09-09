@@ -23,7 +23,7 @@ from server.setup.config_core import (
     _validate_tls_files,
     initialize,
 )
-from server.setup.model_manager import validate_custom_model
+from server.setup.model_manager import resolve_identity_model, validate_custom_model
 from server.setup.validation import deployment_path, read_deployment_env
 
 from .compose_adapter import Prerequisite, installation_prerequisites
@@ -152,6 +152,8 @@ def preflight(
     model_path: Path | None,
     certificate_path: Path | None,
     private_key_path: Path | None,
+    identity_model_path: Path | None = None,
+    data_root: Path | None = None,
 ) -> list[Prerequisite]:
     """파일을 쓰지 않고 Docker와 사용자가 준비한 모델·TLS를 검사한다."""
 
@@ -227,6 +229,18 @@ def preflight(
                 "비어 있지 않은 2 GiB 이하의 .pt, .onnx, .engine 파일을 선택하세요."
             )
     results.append(Prerequisite(model_ok, "추론 모델", model_message))
+    try:
+        identity = resolve_identity_model(identity_model_path, data_root, server_dir)
+    except (OSError, ValueError) as exc:
+        results.append(Prerequisite(False, "인물 식별 모델(OSNet)", str(exc)))
+    else:
+        results.append(
+            Prerequisite(
+                True,
+                "인물 식별 모델(OSNet)",
+                f"ONNX 파일을 확인했습니다: {identity.name}",
+            )
+        )
 
     tls_ok = False
     tls_message = "HTTPS 인증서와 암호화되지 않은 개인키 파일을 모두 선택하세요."
@@ -248,9 +262,13 @@ def preflight(
 
 
 # 모든 입력과 스키마를 쓰기 전에 확인하고 민감한 입력이 담길 수 있는 원래 오류는 가린다.
-def _validate_install_input(request: InstallRequest) -> None:
+def _validate_install_input(
+    request: InstallRequest, *, require_tls: bool = True
+) -> None:
     try:
-        if request.tls_certificate_path is None or request.tls_private_key_path is None:
+        if require_tls and (
+            request.tls_certificate_path is None or request.tls_private_key_path is None
+        ):
             raise ValueError("TLS files are required for installation")
         model = _validate_request(request)
         _validate_public_base_url(request.public_base_url)
@@ -287,7 +305,9 @@ def _validate_install_input(request: InstallRequest) -> None:
         ) from None
 
 
-def install_new(request: InstallRequest) -> InstallResult:
+def install_new(
+    request: InstallRequest, *, check_environment: bool = True, require_tls: bool = True
+) -> InstallResult:
     """신규 저장소만 초기화한다. 실패한 여러 파일의 자동 롤백·재초기화는 하지 않는다."""
 
     root = request.data_root.expanduser().resolve()
@@ -304,16 +324,19 @@ def install_new(request: InstallRequest) -> InstallResult:
     )
     if _has_installation_traces(root) or env_file.exists():
         raise ValueError(_RECOVERY_MESSAGE)
-    prerequisites = preflight(
-        request.server_dir,
-        request.model_path,
-        request.tls_certificate_path,
-        request.tls_private_key_path,
-    )
-    failures = [item.message for item in prerequisites if not item.ok]
-    if failures:
-        raise ValueError("\n".join(failures))
-    _validate_install_input(request)
+    if check_environment:
+        prerequisites = preflight(
+            request.server_dir,
+            request.model_path,
+            request.tls_certificate_path,
+            request.tls_private_key_path,
+            request.identity_model_path,
+            request.data_root,
+        )
+        failures = [item.message for item in prerequisites if not item.ok]
+        if failures:
+            raise ValueError("\n".join(failures))
+    _validate_install_input(request, require_tls=require_tls)
     # 오래 걸리는 사전 검사 사이에 다른 설치가 저장한 경우도 보호한다.
     if _has_installation_traces(root) or env_file.exists():
         raise ValueError(_RECOVERY_MESSAGE)

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
 from ai_cctv_core.config import load_config
+
+from .database.repositories.identity import validate_match_policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +29,7 @@ class Settings:
     data_analysis_token: str | None = None
     busy_timeout_ms: int = 5_000
     retention_days: int = 7
+    job_max_age_days: int = 30
     maintenance_interval_seconds: int = 3_600
     event_pre_roll_seconds: int = 5
     event_post_roll_seconds: int = 10
@@ -35,12 +39,16 @@ class Settings:
     recovery_retry_base_seconds: int = 30
     recovery_settle_seconds: int = 15
     recovery_timeout_seconds: float = 30.0
+    recovery_job_timeout_seconds: float = 1800.0
     central_recording_segment_seconds: int = 60
     recovery_data_base_url: str = "http://127.0.0.1:8000/internal/v1"
     edge_auth_tokens: Mapping[str, str] | None = None
     initial_admin_username: str | None = None
     initial_admin_password_hash: str | None = None
     config_path: Path | None = None
+    # 모델·카메라 자료로 교정할 운영값이다. 코사인 점수는 동일인 확률이 아니다.
+    identity_match_threshold: float = 0.97
+    identity_match_margin: float = 0.05
 
     # 개별 환경 변수, 공통 설정 파일, 기본값 순으로 실행 설정을 구성한다.
     @classmethod
@@ -103,6 +111,7 @@ class Settings:
                     str(shared_config.recording.retention_days if shared_config else 7),
                 )
             ),
+            job_max_age_days=int(os.getenv("DATA_JOB_MAX_AGE_DAYS", "30")),
             maintenance_interval_seconds=int(
                 os.getenv("DATA_MAINTENANCE_INTERVAL_SECONDS", "3600")
             ),
@@ -145,6 +154,7 @@ class Settings:
             ),
             recovery_settle_seconds=int(os.getenv("RECOVERY_SETTLE_SECONDS", "15")),
             recovery_timeout_seconds=float(os.getenv("RECOVERY_TIMEOUT_SECONDS", "30")),
+            recovery_job_timeout_seconds=float(os.getenv("RECOVERY_JOB_TIMEOUT_SECONDS", "1800")),
             central_recording_segment_seconds=int(
                 os.getenv(
                     "CENTRAL_RECORDING_SEGMENT_SECONDS",
@@ -163,6 +173,10 @@ class Settings:
                 os.getenv("INITIAL_ADMIN_PASSWORD_HASH") or None
             ),
             config_path=config_path,
+            identity_match_threshold=float(
+                os.getenv("IDENTITY_MATCH_THRESHOLD", "0.97")
+            ),
+            identity_match_margin=float(os.getenv("IDENTITY_MATCH_MARGIN", "0.05")),
         )
 
     def data_api_tokens(self) -> dict[str, str]:
@@ -182,6 +196,7 @@ class Settings:
 
     # 서비스별 인증값의 완전성·서로 다른 값 여부와 운영 범위를 확인한 뒤 저장 폴더를 만든다.
     def prepare_directories(self) -> None:
+        validate_match_policy(self.identity_match_threshold, self.identity_match_margin)
         scoped_tokens = (
             self.data_external_token,
             self.data_inference_token,
@@ -211,6 +226,8 @@ class Settings:
             )
         if self.retention_days < 1:
             raise ValueError("DATA_RETENTION_DAYS must be at least 1")
+        if self.job_max_age_days < 1:
+            raise ValueError("DATA_JOB_MAX_AGE_DAYS must be at least 1")
         if self.maintenance_interval_seconds < 60:
             raise ValueError("DATA_MAINTENANCE_INTERVAL_SECONDS must be at least 60")
         if self.event_pre_roll_seconds < 0 or self.event_post_roll_seconds < 0:
@@ -225,8 +242,10 @@ class Settings:
             raise ValueError("RECOVERY_RETRY_BASE_SECONDS must be at least 1")
         if self.recovery_settle_seconds < 0:
             raise ValueError("RECOVERY_SETTLE_SECONDS cannot be negative")
-        if self.recovery_timeout_seconds <= 0:
+        if not math.isfinite(self.recovery_timeout_seconds) or self.recovery_timeout_seconds <= 0:
             raise ValueError("RECOVERY_TIMEOUT_SECONDS must be greater than zero")
+        if not math.isfinite(self.recovery_job_timeout_seconds) or self.recovery_job_timeout_seconds <= 0:
+            raise ValueError("RECOVERY_JOB_TIMEOUT_SECONDS must be finite and greater than zero")
         if not 10 <= self.central_recording_segment_seconds <= 300:
             raise ValueError(
                 "CENTRAL_RECORDING_SEGMENT_SECONDS must be in range 10..300"

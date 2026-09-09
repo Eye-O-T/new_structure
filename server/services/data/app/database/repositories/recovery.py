@@ -24,6 +24,8 @@ class RecoveryRepositoryMixin:
         occurred_at: str,
         max_attempts: int,
         settle_seconds: int = 15,
+        origin_edge_device_id: str | None = None,
+        origin_recorded: bool = False,
     ) -> dict[str, Any] | None:
         """Edge의 중앙 연결 끊김·복구 보고를 하나의 복구 구간으로 합친다.
 
@@ -93,14 +95,21 @@ class RecoveryRepositoryMixin:
             ).fetchone()
 
         with self.database.transaction() as connection:
+            if not origin_recorded:
+                camera = connection.execute(
+                    "SELECT e.edge_device_id FROM cameras c "
+                    "JOIN edge_devices e ON e.edge_device_id=c.edge_device_id "
+                    "WHERE c.camera_id=?", (camera_id,)
+                ).fetchone()
+                origin_edge_device_id = camera["edge_device_id"] if camera else None
             if event_type in lost_types:
                 open_job = connection.execute(
                     """
                     SELECT * FROM recovery_jobs
-                    WHERE camera_id = ? AND outage_ended_at IS NULL
+                    WHERE camera_id = ? AND edge_device_id IS ? AND outage_ended_at IS NULL
                     ORDER BY id DESC LIMIT 1
                     """,
-                    (camera_id,),
+                    (camera_id, origin_edge_device_id),
                 ).fetchone()
                 dedup_upper = format_utc(
                     parse_utc(occurred_at)
@@ -110,12 +119,13 @@ class RecoveryRepositoryMixin:
                     """
                     SELECT * FROM recovery_jobs
                     WHERE camera_id = ?
+                      AND edge_device_id IS ?
                       AND outage_started_at <= ?
                       AND outage_ended_at IS NOT NULL
                       AND outage_ended_at >= ?
                     ORDER BY id DESC LIMIT 1
                     """,
-                    (camera_id, dedup_upper, occurred_at),
+                    (camera_id, origin_edge_device_id, dedup_upper, occurred_at),
                 ).fetchone()
                 if existing is not None:
                     return _as_dict(
@@ -132,10 +142,11 @@ class RecoveryRepositoryMixin:
                     SELECT occurred_at FROM events
                     WHERE camera_id = ?
                       AND event_type = 'central_connection_restored'
+                      AND json_extract(metadata_json,'$.recovery_edge_device_id') IS ?
                       AND occurred_at > ?
                     ORDER BY occurred_at, id LIMIT 1
                     """,
-                    (camera_id, occurred_at),
+                    (camera_id, origin_edge_device_id, occurred_at),
                 ).fetchone()
                 outage_end = (
                     str(pending_restore["occurred_at"])
@@ -146,8 +157,8 @@ class RecoveryRepositoryMixin:
                     """
                     INSERT INTO recovery_jobs(
                         camera_id, outage_started_at, outage_ended_at, status,
-                        max_attempts, next_retry_at, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        max_attempts, next_retry_at, created_at, updated_at, edge_device_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         camera_id,
@@ -158,6 +169,7 @@ class RecoveryRepositoryMixin:
                         recovery_ready_at(outage_end) if outage_end else None,
                         now,
                         now,
+                        origin_edge_device_id,
                     ),
                 )
                 existing = connection.execute(
@@ -169,11 +181,11 @@ class RecoveryRepositoryMixin:
             job = connection.execute(
                 """
                 SELECT * FROM recovery_jobs
-                WHERE camera_id = ? AND outage_ended_at IS NULL
+                WHERE camera_id = ? AND edge_device_id IS ? AND outage_ended_at IS NULL
                   AND outage_started_at < ?
                 ORDER BY outage_started_at DESC, id DESC LIMIT 1
                 """,
-                (camera_id, occurred_at),
+                (camera_id, origin_edge_device_id, occurred_at),
             ).fetchone()
             if job is not None:
                 return _as_dict(merge_bounds(connection, job, end=occurred_at))
@@ -189,12 +201,12 @@ class RecoveryRepositoryMixin:
             job = connection.execute(
                 """
                 SELECT * FROM recovery_jobs
-                WHERE camera_id = ? AND outage_ended_at IS NOT NULL
+                WHERE camera_id = ? AND edge_device_id IS ? AND outage_ended_at IS NOT NULL
                   AND outage_started_at < ?
                   AND outage_ended_at BETWEEN ? AND ?
                 ORDER BY outage_ended_at DESC, id DESC LIMIT 1
                 """,
-                (camera_id, occurred_at, correlation_start, correlation_end),
+                (camera_id, origin_edge_device_id, occurred_at, correlation_start, correlation_end),
             ).fetchone()
             if job is None:
                 return None
@@ -209,7 +221,7 @@ class RecoveryRepositoryMixin:
                 SELECT j.*, e.management_url, e.recovery_url, e.auth_token
                 FROM recovery_jobs j
                 JOIN cameras c ON c.camera_id = j.camera_id
-                LEFT JOIN edge_devices e ON e.edge_device_id = c.edge_device_id
+                LEFT JOIN edge_devices e ON e.edge_device_id = j.edge_device_id
                 WHERE j.outage_ended_at IS NOT NULL
                   AND j.attempt_count < j.max_attempts
                   AND j.status IN ('waiting_for_recovery', 'failed')

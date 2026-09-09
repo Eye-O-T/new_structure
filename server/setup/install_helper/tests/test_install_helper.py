@@ -206,8 +206,11 @@ def test_server_doctor_validates_scoped_tokens_and_secret_allowlists(
     monkeypatch.setattr(
         "sys.argv",
         [
-            "doctor.py", "--server-dir", str(server_dir),
-            "--skip-runtime", "--skip-compose",
+            "doctor.py",
+            "--server-dir",
+            str(server_dir),
+            "--skip-runtime",
+            "--skip-compose",
         ],
     )
     assert server_doctor.main() == 0
@@ -309,8 +312,11 @@ def test_server_doctor_rejects_legacy_combined_secret_deployment(
     monkeypatch.setattr(
         "sys.argv",
         [
-            "doctor.py", "--server-dir", str(server_dir),
-            "--skip-runtime", "--skip-compose",
+            "doctor.py",
+            "--server-dir",
+            str(server_dir),
+            "--skip-runtime",
+            "--skip-compose",
         ],
     )
     assert server_doctor.main() == 1
@@ -350,6 +356,27 @@ def test_compose_adapter_keeps_explicit_env_outside_server_package(tmp_path):
     compose_env.write_text("TEST=1\n", encoding="utf-8")
 
     assert ComposeAdapter(server_dir, compose_env).env_file == compose_env.resolve()
+
+
+def test_compose_env_double_quotes_match_shared_parser_and_activate_push(
+    tmp_path, monkeypatch
+):
+    from server.setup.install_helper import compose_adapter
+    from server.setup.validation import read_deployment_env
+
+    env = tmp_path / "compose.env"
+    env.write_text('CONFIG_FILE="./config with spaces/config.yaml"\n', encoding="utf-8")
+    push = tmp_path / "push.env"
+    push.write_text('PUSH_ENABLED="true"\n', encoding="utf-8")
+    assert compose_adapter._env_values(env) == read_deployment_env(env)
+    adapter = ComposeAdapter(tmp_path, env)
+    assert str(tmp_path / "compose.push.yml") in adapter.command("up")
+    monkeypatch.setattr(compose_adapter, "installation_prerequisites", lambda _: [])
+    config = tmp_path / "config with spaces" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("schema_version: 1", encoding="utf-8")
+    checks = adapter.deployment_prerequisites()
+    assert next(item for item in checks if item.name == "Configuration").ok
 
 
 def test_cli_exposes_installation_and_host_controls_only():

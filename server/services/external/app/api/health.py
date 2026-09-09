@@ -6,6 +6,8 @@ from typing import Any
 from fastapi import (
     APIRouter,
     Depends,
+    Request,
+    Response,
 )
 
 from ..clients.data import (
@@ -13,7 +15,10 @@ from ..clients.data import (
 )
 from ..dependencies import (
     get_data_client,
+    get_settings_dependency,
 )
+from ..config import Settings
+from ..diagnostics import system_diagnostics
 from ..schemas import (
     SystemStatusResponse,
 )
@@ -41,11 +46,31 @@ async def health_ready(
 @router.get("/api/v1/system/status", response_model=SystemStatusResponse)
 @router.get("/api/v1/admin/system/status", response_model=SystemStatusResponse)
 async def system_status(
+    request: Request,
+    response: Response,
     _: Principal = Depends(require_admin),
     data: DataClient = Depends(get_data_client),
+    settings: Settings = Depends(get_settings_dependency),
 ) -> Any:
-    data_status = await data.health()
+    diagnostics = await system_diagnostics(settings, data)
+    dispatcher = getattr(request.app.state, "push_dispatcher", None)
+    push = (
+        {"enabled": False, "status": "disabled", "delivery_confirmed": False}
+        if not settings.push_enabled else
+        dispatcher.status() if dispatcher is not None else
+        {"enabled": True, "status": "unavailable", "delivery_confirmed": False,
+         "last_error_code": "PUSH_DISPATCHER_UNAVAILABLE"}
+    )
+    push["queues"] = diagnostics["data"].get("queues", {}).get("push", {})
+    push["queue_metrics"] = diagnostics["data"].get("queue_metrics", {}).get("push", {})
+    degraded = any(
+        component["status"] not in {"ready", "disabled", "waiting"}
+        for component in (*diagnostics.values(), push)
+    )
+    response.headers["Cache-Control"] = "no-store"
     return {
+        "status": "degraded" if degraded else "ready",
         "external": {"status": "running", "version": SERVICE_VERSION},
-        "data": data_status,
+        **diagnostics,
+        "push": push,
     }

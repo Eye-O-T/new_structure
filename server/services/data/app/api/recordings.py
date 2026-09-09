@@ -34,11 +34,10 @@ def create_recording_segment(
     repository: Repo,
     settings: RuntimeSettings,
 ) -> dict[str, Any]:
-    segment, created = repository.create_segment(prepare_segment(payload, settings))
-    repository.link_segment_to_events(
-        segment,
-        settings.event_pre_roll_seconds,
-        settings.event_post_roll_seconds,
+    segment, created = repository.create_segment(
+        prepare_segment(payload, settings),
+        pre_roll_seconds=settings.event_pre_roll_seconds,
+        post_roll_seconds=settings.event_post_roll_seconds,
     )
     segment["idempotent_replay"] = not created
     return segment
@@ -121,12 +120,9 @@ def recording_complete_hook(
             segment_path=segment_path,
             duration_seconds=duration_seconds,
             settings=settings,
-        )
-    )
-    repository.link_segment_to_events(
-        segment,
-        settings.event_pre_roll_seconds,
-        settings.event_post_roll_seconds,
+        ),
+        pre_roll_seconds=settings.event_pre_roll_seconds,
+        post_roll_seconds=settings.event_post_roll_seconds,
     )
     segment["idempotent_replay"] = not created
     return segment

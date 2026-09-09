@@ -261,7 +261,7 @@ async def test_runtime_shutdown_cancels_slow_initialization(tmp_path, monkeypatc
     assert time.monotonic() - started < 5
 
 
-def test_compose_empty_identity_model_uses_cpu_default(tmp_path, monkeypatch):
+def test_explicit_legacy_identity_accepts_an_empty_optional_model(tmp_path, monkeypatch):
     from server.services.preprocessing.processors.identity import (
         LocalAppearanceIdentity,
     )
@@ -283,7 +283,7 @@ def test_compose_empty_identity_model_uses_cpu_default(tmp_path, monkeypatch):
         ),
     ],
 )
-def test_default_cpu_plugins_process_real_jpeg_in_spawned_child(
+def test_explicit_cpu_plugins_process_real_jpeg_in_spawned_child(
     tmp_path, monkeypatch, reference, result_key
 ):
     monkeypatch.setenv("IDENTITY_MODEL_PATH", "")

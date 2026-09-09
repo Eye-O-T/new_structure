@@ -357,7 +357,7 @@ async def test_worker_reports_rejected_lease_and_recovers_on_next_job(objects, s
         assert worker.last_outcome == "rejected"
         assert worker.last_error == "COMPLETION_NOT_ACCEPTED"
         assert not worker.stalled
-        assert repo.get_event(event["id"])["metadata"][stage] == {"status": "pending"}
+        assert repo.get_event(event["id"])["metadata"][stage]["status"] == "running"
 
         expire_lease = False
         assert await worker.once()
@@ -420,7 +420,7 @@ def test_existing_deployment_upgrade_keeps_existing_tokens(tmp_path, monkeypatch
     for key, expected in (
         (
             "IDENTITY_PLUGIN",
-            "server.services.preprocessing.processors.identity:LocalAppearanceIdentity",
+            "server.services.preprocessing.processors.identity:OsNetIdentity",
         ),
         ("ANALYSIS_PLUGIN", "server.services.analysis.processors:LocalAppearanceAnalyzer"),
         (
@@ -501,7 +501,7 @@ def test_existing_deployment_upgrade_migrates_custom_legacy_paths(
     assert config["ANALYSIS_SECRETS_FILE"] == str(analysis)
     assert (
         config["IDENTITY_PLUGIN"]
-        == "server.services.preprocessing.processors.identity:LocalAppearanceIdentity"
+        == "server.services.preprocessing.processors.identity:OsNetIdentity"
     )
     assert (
         config["ANALYSIS_PLUGIN"]

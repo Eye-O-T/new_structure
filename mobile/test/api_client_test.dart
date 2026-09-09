@@ -36,6 +36,7 @@ Map<String, dynamic> session([
   'expires_in': 900,
   'user': {'id': 1, 'username': 'admin', 'role': 'admin', 'is_active': true},
 };
+
 /// UTF-8 JSON 응답을 만들어 실제 API 응답 디코딩 경로를 테스트한다.
 http.Response json(Object value, [int status = 200]) => http.Response(
   jsonEncode(value),
@@ -146,8 +147,8 @@ void main() {
     },
   );
 
-  // 현지 날짜의 UTC 전송, 빈 페이지까지 조회, 알 수 없는 이벤트 종류의 보존을 확인한다.
-  test('event contract paginates to empty and sends UTC bounds', () async {
+  // 현지 날짜의 UTC 전송, 첫 페이지와 cursor, 알 수 없는 이벤트 종류의 보존을 확인한다.
+  test('event page sends UTC bounds and retains stable cursor', () async {
     final offsets = <String>[];
     final api = ApiClient(
       store: MemoryStore(),
@@ -155,12 +156,15 @@ void main() {
         if (request.url.path.endsWith('/login')) return json(session());
         expect(request.url.path, '/api/v1/events');
         expect(request.url.queryParameters['camera_id'], 'cam-001');
+        expect(request.url.queryParameters['order'], 'desc');
+        expect(request.url.queryParameters['limit'], '50');
         final from = request.url.queryParameters['from']!;
         expect(from, endsWith('Z'));
         expect(DateTime.parse(from).toLocal(), DateTime(2026, 9, 6));
         final offset = request.url.queryParameters['offset']!;
         offsets.add(offset);
         return json({
+          'next_cursor': 'snapshot-cursor',
           'items': offset == '0'
               ? [
                   {
@@ -177,13 +181,122 @@ void main() {
     );
     addTearDown(api.dispose);
     await api.login('https://cctv.test', 'admin', 'password');
-    final events = await ApiEventRepository(
+    final page = await ApiEventRepository(
       apiClient: api,
       cameraId: 'cam-001',
-    ).getEventsByDate(DateTime(2026, 9, 6));
-    expect(offsets, ['0', '1']);
-    expect(events.single.title, 'new_future_event');
-    expect(events.single.metadata['custom'], 42);
+    ).getPage(DateTime(2026, 9, 6));
+    expect(offsets, ['0']);
+    expect(page.nextCursor, 'snapshot-cursor');
+    expect(page.items.single.title, 'new_future_event');
+    expect(page.items.single.metadata['custom'], 42);
+  });
+
+  test('late retry 401 cannot clear a newer login session', () async {
+    final retryStarted = Completer<void>();
+    final retryResponse = Completer<http.Response>();
+    var reads = 0;
+    final store = MemoryStore();
+    final api = ApiClient(
+      store: store,
+      client: MockClient((request) async {
+        if (request.url.path.endsWith('/login')) {
+          return json(
+            session(request.url.host == 'second.test' ? 'second' : 'first'),
+          );
+        }
+        if (request.url.path.endsWith('/refresh')) {
+          return json(session('refreshed'));
+        }
+        if (request.url.path.endsWith('/logout')) return json({}, 204);
+        if (++reads == 1) return json({}, 401);
+        retryStarted.complete();
+        return retryResponse.future;
+      }),
+    );
+    addTearDown(api.dispose);
+    await api.login('https://first.test', 'admin', 'password');
+    final completed = expectLater(
+      api.request('GET', '/api/v1/cameras'),
+      throwsA(isA<ApiException>()),
+    );
+    await retryStarted.future;
+    await api.logout();
+    await api.login('https://second.test', 'admin', 'password');
+    final newSession = store.values['session'];
+    retryResponse.complete(json({}, 401));
+    await completed;
+    expect(api.signedIn, isTrue);
+    expect(await api.accessToken(), 'second');
+    expect(store.values['session'], newSession);
+  });
+
+  test(
+    'cancelled request cannot refresh authentication after a late 401',
+    () async {
+      final response = Completer<http.Response>();
+      final started = Completer<void>();
+      var refreshes = 0;
+      final api = ApiClient(
+        store: MemoryStore(),
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/login')) return json(session());
+          if (request.url.path.endsWith('/refresh')) {
+            refreshes++;
+            return json(session('new'));
+          }
+          started.complete();
+          return response.future;
+        }),
+      );
+      addTearDown(api.dispose);
+      await api.login('https://cctv.test', 'admin', 'password');
+      final cancellation = ApiCancellation();
+      final finished = expectLater(
+        api.request('GET', '/api/v1/events', cancellation: cancellation),
+        throwsA(isA<ApiRequestCancelled>()),
+      );
+      await started.future;
+      cancellation.cancel();
+      response.complete(json({}, 401));
+      await finished;
+      expect(refreshes, 0);
+      expect(api.signedIn, isTrue);
+    },
+  );
+
+  test('cancellation reaches the HTTP transport abort trigger', () async {
+    final started = Completer<void>();
+    var aborted = false;
+    final api = ApiClient(
+      store: MemoryStore(),
+      client: MockClient.streaming((request, body) async {
+        await body.drain<void>();
+        if (request.url.path.endsWith('/login')) {
+          return http.StreamedResponse(
+            Stream.value(utf8.encode(jsonEncode(session()))),
+            200,
+          );
+        }
+        expect(request, isA<http.Abortable>());
+        final trigger = (request as http.Abortable).abortTrigger;
+        expect(trigger, isNotNull);
+        started.complete();
+        await trigger;
+        aborted = true;
+        throw http.RequestAbortedException(request.url);
+      }),
+    );
+    addTearDown(api.dispose);
+    await api.login('https://cctv.test', 'admin', 'password');
+    final cancellation = ApiCancellation();
+    final completed = expectLater(
+      api.request('GET', '/api/v1/events', cancellation: cancellation),
+      throwsA(isA<ApiRequestCancelled>()),
+    );
+    await started.future;
+    cancellation.cancel();
+    await completed;
+    expect(aborted, isTrue);
   });
 
   // 재생에 필요한 쿼리는 유지하면서 다른 origin과 URL 내 자격 증명은 거부해야 한다.

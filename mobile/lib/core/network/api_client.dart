@@ -19,6 +19,24 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// 화면 선택이 바뀌면 진행 중인 HTTP 요청과 이어질 재시도를 중단한다.
+class ApiCancellation {
+  final _cancelled = Completer<void>();
+  Future<void> get whenCancelled => _cancelled.future;
+  bool get isCancelled => _cancelled.isCompleted;
+  void cancel() {
+    if (!isCancelled) _cancelled.complete();
+  }
+
+  void check() {
+    if (isCancelled) throw const ApiRequestCancelled();
+  }
+}
+
+class ApiRequestCancelled implements Exception {
+  const ApiRequestCancelled();
+}
+
 /// 인증 세션을 소유하고 로그인 상태 변경을 라우터와 알림 관리자에게 알린다.
 class ApiClient extends ChangeNotifier {
   ApiClient({required this.store, http.Client? client})
@@ -34,6 +52,8 @@ class ApiClient extends ChangeNotifier {
   DateTime? _expires;
   // 토큰 회전 중 들어오는 요청들이 같은 Future를 기다리도록 보관한다.
   Future<void>? _refreshing;
+  // 인증 응답과 저장소 변경을 같은 순서로 완료해 이전 저장이 새 세션을 덮지 않게 한다.
+  Future<void>? _sessionOperations;
   bool restoring = true;
   // 비동기 요청을 시작한 로그인 세션이 아직 유효한지 판별하는 세대 번호다.
   int _generation = 0;
@@ -52,9 +72,28 @@ class ApiClient extends ChangeNotifier {
     ).join();
   }
 
-  /// 저장된 세션을 복원하며 읽기 실패나 손상된 데이터는 비로그인 상태로 처리한다.
+  /// 읽기·인증·저장·삭제가 완료될 때까지 다음 세션 변경을 대기시킨다.
+  Future<T> _serializeSession<T>(Future<T> Function() operation) async {
+    final previous = _sessionOperations;
+    final completed = Completer<void>();
+    _sessionOperations = completed.future;
+    try {
+      if (previous != null) await previous;
+      return await operation();
+    } finally {
+      // 실패도 호출자에게 전달한 뒤 다음 작업을 허용한다. 대기 큐는 오류로 중단되지 않는다.
+      completed.complete();
+      if (identical(_sessionOperations, completed.future)) {
+        _sessionOperations = null;
+      }
+    }
+  }
+
+  /// 저장된 세션을 복원하며 손상·읽기 실패는 비로그인 상태로 처리한다.
   /// 저장소가 응답하지 않아도 시작 화면에 머물지 않도록 읽기 시간을 제한한다.
-  Future<void> restore() async {
+  Future<void> restore() => _serializeSession(_restore);
+
+  Future<void> _restore() async {
     try {
       final raw = await store
           .read('session')
@@ -73,6 +112,7 @@ class ApiClient extends ChangeNotifier {
       _refresh = null;
       user = null;
     } finally {
+      _generation++;
       restoring = false;
       notifyListeners();
     }
@@ -88,7 +128,9 @@ class ApiClient extends ChangeNotifier {
     String? token,
     Uri? target,
     Duration timeout = const Duration(seconds: 20),
+    ApiCancellation? cancellation,
   }) async {
+    cancellation?.check();
     final base = target ?? origin;
     if (base == null) throw const ApiException(0, '서버 주소를 설정하세요.');
     if (!path.startsWith('/api/v1/')) {
@@ -96,9 +138,14 @@ class ApiClient extends ChangeNotifier {
     }
     final uri = base.resolve(path).replace(queryParameters: query);
     // 리다이렉트를 자동 추적하지 않아 인증 헤더를 다른 주소로 재전송하지 않는다.
-    final request = http.Request(method, uri)
-      ..followRedirects = false
-      ..headers['Accept'] = 'application/json';
+    final request =
+        http.AbortableRequest(
+            method,
+            uri,
+            abortTrigger: cancellation?.whenCancelled,
+          )
+          ..followRedirects = false
+          ..headers['Accept'] = 'application/json';
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
@@ -109,6 +156,8 @@ class ApiClient extends ChangeNotifier {
         final response = await _client.send(request);
         return http.Response.fromStream(response);
       })().timeout(timeout);
+    } on http.RequestAbortedException {
+      throw const ApiRequestCancelled();
     } on TimeoutException {
       throw const ApiException(0, '서버 응답 시간이 초과되었습니다. 다시 시도하세요.');
     } on http.ClientException {
@@ -138,7 +187,10 @@ class ApiClient extends ChangeNotifier {
   }
 
   /// 검증한 서버에서 인증받은 뒤 토큰과 사용자 정보를 저장하고 화면 전환을 알린다.
-  Future<void> login(String server, String username, String password) async {
+  Future<void> login(String server, String username, String password) =>
+      _serializeSession(() => _login(server, username, password));
+
+  Future<void> _login(String server, String username, String password) async {
     final target = ApiConfig.parseOrigin(server);
     final result = _decode(
       await _raw(
@@ -148,16 +200,23 @@ class ApiClient extends ChangeNotifier {
         body: {'username': username.trim(), 'password': password},
       ),
     );
-    _generation++;
-    _deviceId = _newDeviceId();
-    origin = target;
-    await _setSession(result);
+    await _setSession(
+      result,
+      target: target,
+      device: _newDeviceId(),
+      newLogin: true,
+    );
     restoring = false;
     notifyListeners();
   }
 
   /// 토큰 저장이 성공한 뒤 메모리의 세션을 교체한다. 비밀번호는 저장 대상에 포함하지 않는다.
-  Future<void> _setSession(Map<String, dynamic> value) async {
+  Future<void> _setSession(
+    Map<String, dynamic> value, {
+    required Uri target,
+    required String device,
+    bool newLogin = false,
+  }) async {
     final access = value['access_token'] as String;
     final refresh = value['refresh_token'] as String;
     final sessionUser = Map<String, dynamic>.from(value['user'] as Map);
@@ -167,14 +226,18 @@ class ApiClient extends ChangeNotifier {
     await store.write(
       'session',
       jsonEncode({
-        'origin': origin.toString(),
+        'origin': target.toString(),
         'access_token': access,
         'refresh_token': refresh,
-        'device_id': _deviceId,
+        'device_id': device,
         'user': sessionUser,
         'expires_at': expiry.toIso8601String(),
       }),
     );
+    // 저장이 끝날 때 origin과 자격 증명을 함께 교체한다. 대기 중에는 이전 세션만 보인다.
+    if (newLogin) _generation++;
+    origin = target;
+    _deviceId = device;
     _access = access;
     _refresh = refresh;
     user = sessionUser;
@@ -185,7 +248,13 @@ class ApiClient extends ChangeNotifier {
   Future<void> refreshSession() async {
     // 서버가 refresh 토큰을 교체하므로 동시 요청은 하나의 갱신 결과를 공유한다.
     if (_refreshing != null) return _refreshing!;
-    final future = _performRefresh();
+    final generation = _generation;
+    final future = _serializeSession(() async {
+      if (_generation != generation) {
+        throw const ApiException(401, '세션이 변경되었습니다.');
+      }
+      await _performRefresh();
+    });
     _refreshing = future;
     try {
       await future;
@@ -211,7 +280,7 @@ class ApiClient extends ChangeNotifier {
       if (_generation != generation) {
         throw const ApiException(401, '세션이 변경되었습니다.');
       }
-      await _setSession(value);
+      await _setSession(value, target: origin!, device: _deviceId!);
     } on ApiException catch (error) {
       if (error.statusCode == 401 && _generation == generation) {
         await _clearSession();
@@ -222,12 +291,16 @@ class ApiClient extends ChangeNotifier {
 
   /// 전송 중 만료될 가능성을 줄이기 위해 만료 60초 전부터 access 토큰을 갱신한다.
   Future<String> accessToken() async {
+    final generation = _generation;
     if (!signedIn) throw const ApiException(401, '로그인이 필요합니다.');
     if (_expires == null ||
         _expires!.isBefore(
           DateTime.now().toUtc().add(const Duration(seconds: 60)),
         )) {
       await refreshSession();
+    }
+    if (_generation != generation || !signedIn) {
+      throw const ApiException(401, '세션이 변경되었습니다.');
     }
     return _access!;
   }
@@ -239,9 +312,15 @@ class ApiClient extends ChangeNotifier {
     String path, {
     Map<String, String>? query,
     Object? body,
+    ApiCancellation? cancellation,
   }) async {
+    cancellation?.check();
     final generation = _generation;
     final token = await accessToken();
+    cancellation?.check();
+    if (_generation != generation) {
+      throw const ApiException(401, '세션이 변경되었습니다.');
+    }
     // accessToken이 refresh 토큰도 회전했을 수 있어 본문에 실을 토큰을 다시 읽는다.
     if (body is Map<String, dynamic> && body.containsKey('refresh_token')) {
       body = {...body, 'refresh_token': _refresh};
@@ -257,13 +336,19 @@ class ApiClient extends ChangeNotifier {
       body: body,
       token: token,
       timeout: timeout,
+      cancellation: cancellation,
     );
+    cancellation?.check();
     if (_generation != generation) {
       throw const ApiException(401, '세션이 변경되었습니다.');
     }
     if (response.statusCode == 401) {
       // 다른 요청이 이미 토큰을 갱신했다면 재사용하고, 인증 실패 재시도는 한 번만 한다.
       if (_access == token) await refreshSession();
+      cancellation?.check();
+      if (_generation != generation) {
+        throw const ApiException(401, '세션이 변경되었습니다.');
+      }
       if (body is Map<String, dynamic> && body.containsKey('refresh_token')) {
         body = {...body, 'refresh_token': _refresh};
       }
@@ -274,8 +359,17 @@ class ApiClient extends ChangeNotifier {
         body: body,
         token: _access,
         timeout: timeout,
+        cancellation: cancellation,
       );
-      if (response.statusCode == 401) await _clearSession();
+      cancellation?.check();
+      if (_generation != generation) {
+        throw const ApiException(401, '세션이 변경되었습니다.');
+      }
+      if (response.statusCode == 401) {
+        await _serializeSession(() async {
+          if (_generation == generation) await _clearSession();
+        });
+      }
     }
     if (_generation != generation) {
       throw const ApiException(401, '세션이 변경되었습니다.');
@@ -308,8 +402,9 @@ class ApiClient extends ChangeNotifier {
   Uri mediaUri(String value) => ApiConfig.mediaUri(origin!, value);
 
   /// 진행 중인 토큰 회전 후 서버에서 세션을 폐기한다. 실패하면 재시도할 세션을 유지한다.
-  Future<void> logout() async {
-    if (_refreshing != null) await _refreshing;
+  Future<void> logout() => _serializeSession(_logout);
+
+  Future<void> _logout() async {
     _decode(
       await _raw(
         'POST',

@@ -32,9 +32,11 @@ def _validated_time_range(
     start: datetime | None,
     end: datetime | None,
 ) -> tuple[str | None, str | None]:
+    start_utc = _normalize_time(start, "start")
+    end_utc = _normalize_time(end, "end")
     if start is not None and end is not None and start >= end:
         raise HTTPException(status_code=400, detail="start must be earlier than end")
-    return _normalize_time(start, "start"), _normalize_time(end, "end")
+    return start_utc, end_utc
 
 
 # 공개 origin이 설정되면 절대 주소를, 없으면 동일 출처 상대 주소를 반환한다.

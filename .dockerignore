@@ -17,6 +17,7 @@
 # 운영 설정·인증·영상·개발 가상환경은 테스트 이미지에도 포함하지 않는다.
 **/.env
 **/*.env
+**/*.bak
 **/push.env
 !**/*.env.example
 server/secrets/**

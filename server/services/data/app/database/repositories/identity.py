@@ -16,6 +16,89 @@ MATCH_MARGIN = 0.05
 MAX_OBSERVATION_GAP_SECONDS = 1800
 SAME_CAMERA_EXCLUSION_SECONDS = 30
 MAX_GALLERY_SAMPLES = 5000
+ACTIVE_OBSERVATION_SECONDS = 3
+
+
+def note_track_observation(
+    connection: sqlite3.Connection,
+    camera_id: str,
+    session: str,
+    person_id: str,
+    observed_at: str,
+    *,
+    ended: bool = False,
+) -> None:
+    """이벤트·현재 좌표가 공유하는 관측 구간이며 지연 도착에도 범위가 줄지 않는다."""
+    connection.execute(
+        "INSERT INTO person_track_presence VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(camera_id,tracking_session_id,person_id) DO UPDATE SET "
+        "first_seen_at=MIN(first_seen_at,excluded.first_seen_at),"
+        "last_seen_at=MAX(last_seen_at,excluded.last_seen_at),"
+        "ended_at=CASE WHEN excluded.last_seen_at>=last_seen_at "
+        "THEN excluded.ended_at ELSE ended_at END",
+        (
+            camera_id,
+            session,
+            person_id,
+            observed_at,
+            observed_at,
+            observed_at if ended else None,
+        ),
+    )
+
+
+def conflicting_global_ids(
+    connection: sqlite3.Connection, row: sqlite3.Row, session: str, stamp: str
+) -> set[str]:
+    """동일 카메라에서 관측 구간이 겹치는 다른 track의 전역 ID를 배제한다.
+
+    현재 프레임뿐 아니라 보관된 관측 구간을 사용하므로 작업 완료 순서나 gallery
+    표본 시각에 의존하지 않는다. 최근 열린 track의 끝은 현재 시각까지 확장한다.
+    """
+    active_since = format_utc(
+        parse_utc(stamp) - timedelta(seconds=ACTIVE_OBSERVATION_SECONDS)
+    )
+    target = connection.execute(
+        "SELECT * FROM person_track_presence WHERE camera_id=? "
+        "AND tracking_session_id=? AND person_id=?",
+        (row["camera_id"], session, row["person_id"]),
+    ).fetchone()
+    target_start = target["first_seen_at"] if target else row["occurred_at"]
+    target_end = target["last_seen_at"] if target else row["occurred_at"]
+    if target and target["ended_at"] is None and active_since <= target_end <= stamp:
+        target_end = stamp
+    candidates = connection.execute(
+        "SELECT p.*,l.global_person_id FROM person_track_presence p "
+        "JOIN person_identity_links l USING(camera_id,tracking_session_id,person_id) "
+        "WHERE p.camera_id=? AND NOT (p.tracking_session_id=? AND p.person_id=?) "
+        "AND p.first_seen_at<=? AND (p.last_seen_at>=? OR "
+        "(p.ended_at IS NULL AND p.last_seen_at BETWEEN ? AND ?))",
+        (
+            row["camera_id"],
+            session,
+            row["person_id"],
+            target_end,
+            target_start,
+            active_since,
+            stamp,
+        ),
+    ).fetchall()
+    blocked: set[str] = set()
+    for candidate in candidates:
+        end = candidate["last_seen_at"]
+        if candidate["ended_at"] is None and active_since <= end <= stamp:
+            end = stamp
+        if candidate["first_seen_at"] <= target_end and end >= target_start:
+            blocked.add(candidate["global_person_id"])
+    return blocked
+
+
+def validate_match_policy(threshold: float, margin: float) -> None:
+    """오타나 NaN 설정으로 모든 인물을 연결하는 일을 시작 단계에서 막는다."""
+    if not math.isfinite(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("IDENTITY_MATCH_THRESHOLD must be finite and in range 0..1")
+    if not math.isfinite(margin) or not 0 <= margin <= 1:
+        raise ValueError("IDENTITY_MATCH_MARGIN must be finite and in range 0..1")
 
 
 def resolve_identity(
@@ -24,6 +107,9 @@ def resolve_identity(
     session: str,
     descriptor: IdentityDescriptor,
     stamp: str,
+    *,
+    threshold: float = MATCH_THRESHOLD,
+    margin: float = MATCH_MARGIN,
 ) -> tuple[str, dict]:
     """비공개 표본을 비교하고 확정할 ID와 공개 가능한 결정 근거만 반환한다."""
     track = (row["camera_id"], session, row["person_id"])
@@ -66,6 +152,7 @@ def resolve_identity(
             and abs((observed - parse_utc(candidate["observed_at"])).total_seconds())
             <= SAME_CAMERA_EXCLUSION_SECONDS
         }
+        blocked_ids.update(conflicting_global_ids(connection, row, session, stamp))
         scores: dict[str, float] = {}
         norm = math.hypot(*descriptor.features)
         for candidate in candidates:
@@ -86,8 +173,8 @@ def resolve_identity(
         similarity = ranked[0][1] if ranked else None
         if (
             ranked
-            and ranked[0][1] >= MATCH_THRESHOLD
-            and (len(ranked) == 1 or ranked[0][1] - ranked[1][1] >= MATCH_MARGIN)
+            and ranked[0][1] >= threshold
+            and (len(ranked) == 1 or ranked[0][1] - ranked[1][1] >= margin)
         ):
             global_id, decision = ranked[0][0], "matched"
         else:
@@ -118,8 +205,11 @@ def resolve_identity(
         )
         _trim_gallery(connection)
     return global_id, {
-        "method": "appearance",
+        "method": "osnet" if descriptor.space_id.startswith("osnet:") else "appearance",
         "decision": decision,
+        # 운영자가 실제 CCTV 자료로 교정한 기준을 결과에 남긴다. 기본값은 검증된 정확도가 아니다.
+        "threshold": threshold,
+        "margin": margin,
         # 코사인 유사도는 일치 확률이 아니다. 후보가 없거나 기존 track이면 점수가 없다.
         "similarity": round(similarity, 6) if similarity is not None else None,
     }

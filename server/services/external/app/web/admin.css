@@ -34,6 +34,10 @@ th { background: #f5f8fa; }
 .status-grid { display: grid; grid-template-columns: minmax(130px, 1fr) 2fr; gap: .3rem 1rem; }
 dt { color: #4e6575; }
 dd { margin: 0; overflow-wrap: anywhere; }
+.diagnostic-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 1rem; }
+.diagnostic-grid section { border: 1px solid #dce4e9; border-radius: .35rem; padding: 1rem; }
+.diagnostic-grid h3 { margin: 0 0 .5rem; }
+.diagnostic-grid .status-grid { grid-template-columns: minmax(110px, 1fr) 1.5fr; margin: 0; }
 #message:not(:empty) { padding: .8rem 1rem; background: #e5f1f7; border-left: 4px solid #176087; }
 #message.error { background: #fff0ef; border-color: #9e3535; }
 /* flex/grid 규칙보다 hidden 상태가 우선되어 로그인 전·미선택 영역이 노출되지 않게 한다. */

@@ -15,6 +15,7 @@ async def test_failed_initialization_reports_unavailable_then_recovers(monkeypat
     monkeypatch.setenv("DATA_ANALYSIS_TOKEN", "a" * 40)
     monkeypatch.setattr(main, "STARTUP_RETRY_SECONDS", 0.02)
     recovered = asyncio.Event()
+    allow_recovery = asyncio.Event()
     attempts = []
     closed = []
 
@@ -23,6 +24,8 @@ async def test_failed_initialization_reports_unavailable_then_recovers(monkeypat
         attempts.append(args[-1])
         if len(attempts) == 1:
             raise RuntimeError("private model details must not appear in HTTP")
+        # HTTP 검사 속도가 20ms 재시도보다 느려도 실패 상태를 먼저 관측하도록 제어한다.
+        await allow_recovery.wait()
         recovered.set()
         try:
             yield SimpleNamespace(
@@ -47,6 +50,7 @@ async def test_failed_initialization_reports_unavailable_then_recovers(monkeypat
             assert failed.status_code == 503
             assert failed.json()["detail"]["last_error"] == "ANALYSIS_STARTUP_FAILED"
             assert "private" not in failed.text
+            allow_recovery.set()
             await asyncio.wait_for(recovered.wait(), timeout=2)
             ready = await client.get("/health/ready")
             assert ready.status_code == 200

@@ -21,7 +21,7 @@
 
 Raspberry Pi가 보낸 영상을 Preprocessing이 감지·추적하여 사람 크롭과 등장 이벤트를 만든다. Data는 이벤트와 함께 identity·analysis 작업을 각각 저장한다. Analysis는 **Nginx를 통해 Data의 내부 HTTP API를 호출**하고, 크롭 파일은 공유 폴더에서 읽는다. Data가 Analysis로 작업을 밀어 넣거나 Preprocessing이 Analysis를 직접 호출하지 않는다.
 
-identity는 Preprocessing 내부에서 별도로 실행된다. Analysis의 입력 `global_person_id`는 아직 `null`일 수 있으며, 분석 도중 바뀔 수도 있다. identity 완료를 기다리지 않는다. 현재 입력은 등장 시점의 정지 이미지이며 연속 영상·감지 confidence·다른 이벤트 전체 metadata는 제공되지 않는다. 연속 동작이 필요한 분석은 이 입력만으로 가능하다고 가정하지 않는다.
+identity는 Preprocessing 내부에서 별도로 실행된다. Analysis의 입력 `global_person_id`는 아직 `null`일 수 있으며, 분석 도중 바뀔 수도 있다. identity 완료를 기다리지 않는다. 현재 입력은 등장 뒤 대표 프레임 선택 창에서 확정한 정지 이미지다. 기본 선택 창은 1초이며 이벤트의 `occurred_at`은 최초 등장 시각을 유지한다. 연속 영상·감지 confidence·다른 이벤트 전체 metadata는 제공되지 않는다. 연속 동작이 필요한 분석은 이 입력만으로 가능하다고 가정하지 않는다.
 
 ### 현재 기본 분석기가 제공하는 결과
 
@@ -185,15 +185,16 @@ Data 오류는 `{"error":{"code":"...","message":"...","details":{}}}` 형식이
 4. 완료 응답 유실 시 같은 lease·본문을 재전송할 수 있다. 현재 실행기는 완료 결과를 메모리에 보관해 재전송 중 다시 분석하지 않는다. 첫 요청이 반영됐다면 재전송은 `false`이므로, 이 값만으로 이전 성공 여부까지 판별할 수 없다. `last_outcome:rejected`는 유지하되 이후 정상 빈 claim에서 해당 완료 거부 오류를 지워 유휴 상태를 영구 장애로 표시하지 않는다. 별도 작업 상태 조회 API는 없다.
 5. 중단된 작업은 임대 만료 후 다음 claim에서 회수된다. **중복 분석이 가능**하므로 외부 쓰기가 있다면 작업 ID로 중복을 막는다.
 
-claim은 총 5회까지다. `retry` 후 1~4번째 대기 시간은 30·60·120·240초다. 5번째 시도의 `retry`는 실패로 종료한다. 5번째 lease가 만료된 경우 다음 claim이 작업을 `failed`로 정리하지만 이벤트 metadata는 함께 바뀌지 않는다. claim 직후에도 metadata가 `pending`으로 남을 수 있어 **이벤트 metadata가 작업 큐 상태를 항상 그대로 나타내지는 않는다.**
+claim은 총 5회까지다. `retry` 후 1~4번째 대기 시간은 30·60·120·240초다. 5번째 시도의 `retry`는 실패로 종료한다. 5번째 lease가 만료된 경우 다음 claim이 작업과 이벤트 `metadata.analysis`를 함께 `failed`로 정리하고 `result.error_code:ATTEMPTS_EXHAUSTED`를 기록한다. claim 시에는 `running`, 재등록 시에는 `pending`으로 이벤트 상태도 같은 트랜잭션에서 갱신한다. 기존 버전에서 남은 상태 불일치는 이벤트 조회에서도 현재 작업 상태로 보정한다. 작업 생성·전이 이후 상태 객체에는 `status`, `updated_at`, `result`가 있으며 `running`은 완료 요청에 보내는 outcome이 아니다.
 
-모델 연결 뒤에는 `/object-jobs/analysis/requeue-unconfigured`로 기존 `unconfigured` 작업을 다시 대기시킨다. 호출당 최대 100건, 횟수는 0으로 초기화한다. 필요하면 `requeued=0`까지 반복하며 크롭이 남아 있는지 확인한다. 재등록 자체는 이벤트 metadata를 갱신하지 않는다. 재시작만으로 재등록되지 않으며 `failed`용 재등록 API는 없다.
+모델 연결 뒤에는 `/object-jobs/analysis/requeue-unconfigured`로 기존 `unconfigured` 작업을 다시 대기시킨다. 호출당 최대 100건, 횟수는 0으로 초기화한다. 필요하면 `requeued=0`까지 반복하며 크롭이 남아 있는지 확인한다. 재등록 시 이벤트 metadata도 `pending`으로 갱신하되 이전 result는 다음 결과 수락까지 보존한다. 재시작만으로 재등록되지 않으며 `failed`용 재등록 API는 없다.
 
 ### 공유 이미지와 시간 제한
 
 - `SNAPSHOTS_ROOT`와 상대 경로를 결합하고 `..`·심볼릭 링크를 해석한 실제 경로가 저장소 내부의 일반 파일인지 확인한다. URL·저장소 밖 절대 경로를 열지 않는다.
 - 사람 크롭은 박스가 없는 JPEG다. 공용 로더는 파일 8 MiB·1,600만 픽셀 상한을 JPEG 헤더에서 먼저 검사하고 디코딩 후 크기가 `(x2-x1)×(y2-y1)`인지 다시 확인한다. EXIF 회전 없이 저장된 BGR 픽셀을 사용한다. 기본 분석기는 각 변 16픽셀 이상 및 축소 표본의 최소 폭도 검사한다. 이미 잘린 이미지에 원본 bbox로 다시 자르지 않는다.
-- 작업 생성 후 보관 정리로 파일이 없어질 수 있다. 경로 이탈·없는 파일·손상 이미지는 `failed`로 보고한다. 파일을 수정하거나 가짜 성공 결과를 만들지 않는다.
+- Data는 pending·running 작업이 참조하는 이벤트·이미지를 보관 정리에서 보호한다. 생성 후 기본 30일(`DATA_JOB_MAX_AGE_DAYS`)을 넘긴 pending 또는 lease가 만료된 running은 `failed/OBJECT_RETENTION_EXPIRED`로 정리하며 유효한 lease는 만료까지 보호한다. 최종 작업 상태는 추가 보관기간 동안 남는다. 최종 상태·미설정 작업의 자료는 이후 보관 정책에 따라 삭제될 수 있고 수동 삭제·손상도 가능하다. 경로 이탈·없는 파일·손상 이미지는 `failed`로 보고하며 파일을 수정하거나 가짜 성공 결과를 만들지 않는다.
+- Preprocessing의 미전송·격리·포화 대기 이미지 보호 목록이 불완전하거나 누락·노후됐을 때 Data는 이벤트·이미지 정리를 보류한다. Analysis는 이 목록이나 outbox DB를 수정하지 않는다. 모델 교체 전후의 크롭·기존 결과 보존기간은 [운영 정책](operations.md)을 함께 확인한다.
 - HTTP·모델 호출에 유한한 제한 시간을 둔다. 시간 초과한 모델을 안전하게 취소·격리할 수 없으면 새 claim을 멈추고 준비 상태를 실패로 전환한다. 종료 신호에도 새 claim을 중단한다.
 
 현재 Python 실행기는 HTTP 10초, 빈 큐·통신 실패 후 대기 1초를 사용한다. 플러그인 팩토리와 호출은 별도 `spawn` 프로세스에서 실행하며, 초기화 기본 30초·호출 기본 120초로 제한한다. 각각 `OBJECT_STARTUP_TIMEOUT_SECONDS`(`0 < 값 ≤ 120`)와 `OBJECT_MODEL_TIMEOUT_SECONDS`(`0 < 값 ≤ 240`)로 설정한다. 호출 시간 초과 시 자식을 종료하고 `retry/MODEL_TIMEOUT`을 보고한 뒤 다음 처리를 위해 재생성한다. 초기화 오류는 30초 후 재시도한다. 강제 종료에 실패한 경우에만 작업을 정지시켜 중첩 실행을 막는다. 이 제한은 Data의 **5분 lease와 별개**이므로 완료 전송 여유를 남겨야 한다.
@@ -354,6 +355,7 @@ docker compose -f server/compose.test.yml run --rm tests python -m pytest -c tes
 | 단계 독립 | 전역 ID가 없는 입력도 처리하고, identity가 먼저/나중에 끝나도 관측·identity·전역 ID를 덮어쓰지 않음 |
 | 잘못된 입력·결과 | 경로 이탈·없는/손상 크롭·잘못된 bbox, 초과 metadata·NaN·전역 ID 지정이 차단되고 가짜 성공을 남기지 않음 |
 | 임대·장애 | 빈 큐, Data 장애, 응답 유실·중복 완료, 5분 만료·재할당 후 늦은 결과 거절, 5회 한도 확인 |
+| 상태·보존 | claim→running, 재등록→pending, 시도 소진→failed/ATTEMPTS_EXHAUSTED, 장기 미처리→OBJECT_RETENTION_EXPIRED, 실행 중 유효 lease·crop 보존 |
 | 모델·복구 | 미설정→모델 연결→unconfigured 재등록, 모델 오류·시간 초과, 종료·재시작 뒤 작업 재개 |
 
 HTTP 계약과 모델 품질은 따로 인수한다. 모델 품질은 대표 크롭·기대 결과·측정 지표·처리시간을 담당자와 검토자가 합의하고 결과를 기록한다. 기존 테스트 통과나 health 200만으로 새 모델 인수를 끝내지 않는다.

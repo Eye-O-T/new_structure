@@ -19,8 +19,16 @@ from argon2 import PasswordHasher
 
 from ai_cctv_core.config import AppConfig, CameraBootstrap, write_config_atomic
 
-from .model_manager import install_local_model, sha256_file, validate_custom_model
+from .model_manager import (
+    IDENTITY_PLUGIN,
+    MAX_IDENTITY_MODEL_BYTES,
+    install_local_model,
+    resolve_identity_model,
+    sha256_file,
+    validate_custom_model,
+)
 from .private_files import restrict_private_file
+from .validation import read_deployment_env
 
 SAFE_ENV = re.compile(r"^[A-Za-z0-9_./:@+-]+$")
 AI_CCTV_VERSION = "0.3.0"
@@ -58,6 +66,7 @@ class InstallRequest:
     compose_env_path: Path | None = None
     tls_certificate_path: Path | None = None
     tls_private_key_path: Path | None = None
+    identity_model_path: Path | None = None
 
 
 # 생성된 파일 경로와 초기 카메라 인계 정보를 반환한다. 비밀값은 화면에 출력하지 않는다.
@@ -263,15 +272,44 @@ def _validate_request(request: InstallRequest) -> Path:
     model_source = request.model_path.expanduser()
     validate_custom_model(model_source)
     _validate_tls_pair(request)
+    identity_source = resolve_identity_model(
+        request.identity_model_path, request.data_root, request.server_dir
+    )
+    # 두 모델은 같은 디렉터리에 복사하므로 Windows에서도 서로 다른 대상이어야 한다.
+    if identity_source.name.casefold() == model_source.name.casefold():
+        raise ValueError(
+            "detection and identity models must use different filenames "
+            "(case-insensitive)"
+        )
     return model_source.resolve()
 
 
 # 입력 검증 → 운영 폴더·모델 준비 → 설정·인증 파일 생성 순서다. 기존 파일은 백업한다.
 def initialize(request: InstallRequest) -> InstallResult:
-
     model_source = _validate_request(request)
+    identity_source = resolve_identity_model(
+        request.identity_model_path, request.data_root, request.server_dir
+    )
     public_base_url = _validate_public_base_url(request.public_base_url)
     root = request.data_root.expanduser().resolve()
+    compose_env_path = (
+        request.compose_env_path.expanduser().resolve()
+        if request.compose_env_path is not None
+        else request.server_dir.resolve() / ".env"
+    )
+    previous_environment = read_deployment_env(compose_env_path)
+    identity_companions = []
+    for suffix in (".onnx.json", ".LICENSE.txt"):
+        companion = identity_source.with_suffix(suffix)
+        if companion.exists():
+            if (
+                not companion.is_file()
+                or not 0 < companion.stat().st_size <= 1024 * 1024
+            ):
+                raise ValueError(
+                    "OSNet provenance/license must be a non-empty file up to 1 MiB"
+                )
+            identity_companions.append((companion, suffix))
     directories = {
         name: root / name
         for name in (
@@ -346,6 +384,18 @@ def initialize(request: InstallRequest) -> InstallResult:
     _backup_existing(installed_model)
     installed_model = install_local_model(model_source, directories["models"])
     container_model_path = PurePosixPath("/models") / installed_model.name
+    _backup_existing(directories["models"] / identity_source.name)
+    installed_identity = install_local_model(
+        identity_source, directories["models"], max_bytes=MAX_IDENTITY_MODEL_BYTES
+    )
+    container_identity_path = PurePosixPath("/models") / installed_identity.name
+    # 배포 출처와 라이선스를 ONNX와 함께 전달하되 모델 실행에는 ONNX만 필요하다.
+    for companion, suffix in identity_companions:
+        target = installed_identity.with_suffix(suffix)
+        _backup_existing(target)
+        _copy_atomic(companion, target)
+        if sha256_file(companion) != sha256_file(target):
+            raise OSError("OSNet provenance/license copy verification failed")
 
     config = AppConfig(
         server={
@@ -385,6 +435,11 @@ def initialize(request: InstallRequest) -> InstallResult:
         "model": {
             "filename": installed_model.name,
             "sha256": sha256_file(installed_model),
+        },
+        "identity_model": {
+            "plugin": IDENTITY_PLUGIN,
+            "filename": installed_identity.name,
+            "sha256": sha256_file(installed_identity),
         },
     }
     _write_atomic(
@@ -482,6 +537,14 @@ def initialize(request: InstallRequest) -> InstallResult:
         "SNAPSHOTS_DIR": directories["snapshots"],
         "MODELS_DIR": directories["models"],
         "MODEL_FILE": installed_model.name,
+        "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
+        "IDENTITY_MODEL_PATH": str(container_identity_path),
+        "IDENTITY_MATCH_THRESHOLD": previous_environment.get(
+            "IDENTITY_MATCH_THRESHOLD", "0.97"
+        ),
+        "IDENTITY_MATCH_MARGIN": previous_environment.get(
+            "IDENTITY_MATCH_MARGIN", "0.05"
+        ),
         "LOGS_DIR": directories["logs"],
         "CERTS_DIR": directories["certs"],
         "PUBLIC_HTTP_PORT": request.public_http_port,
@@ -495,11 +558,6 @@ def initialize(request: InstallRequest) -> InstallResult:
     if runtime_identity is not None:
         compose_values["AI_CCTV_UID"] = runtime_identity[0]
         compose_values["AI_CCTV_GID"] = runtime_identity[1]
-    compose_env_path = (
-        request.compose_env_path.expanduser().resolve()
-        if request.compose_env_path is not None
-        else request.server_dir.resolve() / ".env"
-    )
     _backup_existing(compose_env_path, private=True)
     compose_payload = "".join(
         f"{key}={_dotenv(value)}\n" for key, value in compose_values.items()

@@ -67,13 +67,13 @@ Windows 10/11 x64와 Linux 컨테이너 모드의 Docker Desktop·Compose v2 이
 
 설정 생성에는 관리자 권한이 필요하다. 배포 env는 저장소 아래 `config\compose.env`이며 코드와 별도로 DB·영상·모델·인증 파일을 보존한다. 도우미는 설치하거나 관리한 저장 경로를 기억하고 다시 실행할 때 기존 `config.yaml`·`compose.env`를 읽어 관리 화면으로 연결한다. **기존 설치에서는 설정·서비스 토큰·JWT 키를 다시 생성하지 않는다.** **서버 시작 / 업데이트 적용**은 이미지·설정을 반영하고, **재시작**은 현재 컨테이너를 다시 실행한다. 운영 중 관리는 [서버 관리자 화면](#서버-관리자-화면)을 사용하며 도우미는 종료해도 된다.
 
-CLI `init`·`install`은 여전히 초기 설정·인증키를 생성하는 명령이다. 기존 배포의 일상적인 시작에는 `start --env-file <실제 경로>`, 단순 재시작에는 `restart --env-file <실제 경로>`를 사용한다.
+CLI `init`·`install`도 기존 설정과 불완전한 설치를 기본적으로 보호한다. 의도적인 인증키 재발급·재초기화에만 `--reset-existing`을 사용하며 기존 파일은 `.bak`으로 보존한다. 기존 배포의 일상적인 시작에는 `start --env-file <실제 경로>`, 단순 재시작에는 `restart --env-file <실제 경로>`를 사용한다.
 
 GUI 대신 설치 후 새로 연 관리자 PowerShell에서 사용할 수 있다. 설치 때 PATH 추가를 선택하지 않았다면 설치 폴더에서 `AI_CCTV_CLI.exe`를 `.\AI_CCTV_CLI.exe`로 바꿔 실행한다. 아래 `192.0.2.10`은 서버 LAN IP의 예시다. 비밀번호는 숨김 입력으로 받는다.
 
 ```powershell
 AI_CCTV_CLI.exe preflight
-AI_CCTV_CLI.exe install --model 'D:\Models\person.pt' --tls-certificate 'D:\TLS\tls.crt' --tls-private-key 'D:\TLS\tls.key' --public-base-url 'https://cctv.example.com' --public-bind 192.0.2.10 --rtsp-bind 192.0.2.10
+AI_CCTV_CLI.exe install --model 'D:\Models\person.pt' --identity-model 'D:\Models\osnet_x0_25_msmt17.onnx' --tls-certificate 'D:\TLS\tls.crt' --tls-private-key 'D:\TLS\tls.key' --public-base-url 'https://cctv.example.com' --public-bind 192.0.2.10 --rtsp-bind 192.0.2.10
 AI_CCTV_CLI.exe status
 ```
 
@@ -113,6 +113,21 @@ Linux에서는 `Copy-Item`을 `cp`, `python`을 Python 3.11의 `python3` 명령�
 
 감지 모델은 별도로 준비해 `MODELS_DIR/MODEL_FILE`(기본 `server/runtime/models/default.pt`)에 둔다. Compose가 `MODEL_FILE`로 컨테이너의 `MODEL_PATH`를 지정하므로 모델 파일명을 바꿀 때는 `server/.env`의 `MODEL_FILE`을 수정한다. `config.yaml`의 `inference.model_path`만 바꿔도 기본 Compose의 모델 경로는 바뀌지 않는다. 기본 구현은 사람 클래스 번호가 `0`인 Ultralytics 호환 모델을 사용한다. 모델 없이 영상·녹화 연결부터 시험하려면 `config.yaml`의 `inference.enabled`를 `false`로 설정한다. 이때 자동 사람 감지·박스 표시는 작동하지 않는다.
 
+인물 식별에는 탐지 모델과 별도로 **OSNet x0.25 ONNX**가 필요하다.
+[모델 준비 도구](../server/tools/README.md)의 의존성을 준비한 뒤 저장소 루트에서
+`python server/tools/prepare_osnet.py`를 실행하면
+`server/runtime/models/osnet_x0_25_msmt17.onnx`가 생성된다.
+`MODELS_DIR`가 다르면 도구의 `--output`을 해당 폴더로 지정한다.
+서비스는 모델을 자동 다운로드하지 않으며, 감지를 꺼도 인물 식별 작업자는 별도로 실행된다.
+
+기존 HSV 배포를 전환할 때는 준비한 모델을 실제 `MODELS_DIR`에 넣고 기존 배포 env의
+`IDENTITY_PLUGIN=server.services.preprocessing.processors.identity:OsNetIdentity`,
+`IDENTITY_MODEL_PATH=/models/osnet_x0_25_msmt17.onnx`를 설정한다.
+그 뒤 Data·Preprocessing 컨테이너를 재생성하여 새 설정을 적용한다.
+이 작업에 `init`·`install` 재실행은 필요하지 않다. 기존 ID는 유지되며 완료된 관측을
+자동으로 다시 판정하지 않는다. 매칭 기준과 한 장 관측의 제한은
+[Preprocessing 안내](../server/services/preprocessing/README.md#기본-osnet-모델과-data의-인물-연결)를 따른다.
+
 `server/.env`에서 다음을 확인한다.
 
 | 설정 | 확인 사항 |
@@ -124,6 +139,8 @@ Linux에서는 `Copy-Item`을 `cp`, `python`을 Python 3.11의 `python3` 명령�
 | `*_SECRETS_FILE` | 생성한 역할별 env 5개, 서로 다른 경로 |
 | `AI_CCTV_UID/GID` | Linux 호스트 저장소 소유자와 일치 |
 | `RECORDING_SEGMENT_SECONDS` | 10~300초, 기본 60초 |
+| `IDENTITY_PLUGIN`, `IDENTITY_MODEL_PATH` | 기본 OSNet 구현체와 컨테이너의 `/models/...onnx` 경로 |
+| `IDENTITY_MATCH_THRESHOLD`, `IDENTITY_MATCH_MARGIN` | Data 판정 기준 0.97·0.05. 실제 CCTV 자료로 교정 필요 |
 | `COMPOSE_PROJECT_NAME` | 운영·업데이트 때 유지할 프로젝트 이름 |
 
 위 개발 인증서는 `localhost`용이다. PC 안에서 시험할 때는 `PUBLIC_BASE_URL=https://localhost`로 맞추고 시험 클라이언트에 해당 인증서를 신뢰하도록 설정한다. 인증서 생성만으로 신뢰가 등록되지는 않는다. 휴대폰에서 `localhost`는 휴대폰 자신을 뜻하므로 실제 서버 주소와 단말이 신뢰하는 인증서가 필요하다. 운영 인증서는 `CERTS_DIR/tls.crt`(전체 인증서 체인), 개인키는 `tls.key`에 둔다.
@@ -176,7 +193,7 @@ docker compose --env-file C:/path/to/compose.env --env-file C:/path/to/push.env 
 
 ### 서버 관리자 화면
 
-서버 기동 후 브라우저에서 `https://서버주소/admin/`에 접속하고 관리자 계정으로 로그인한다. Edge·카메라 등록, 등록 정보 수정, 게시 계정 재발급, 지원 HD/FHD 변경, 카메라·Edge 상태와 서버 API 상태를 확인할 수 있다. 서버 API 상태는 External·Data의 확인 범위이며 전체 컨테이너 진단은 호스트의 `doctor`를 사용한다.
+서버 기동 후 브라우저에서 `https://서버주소/admin/`에 접속하고 관리자 계정으로 로그인한다. Edge·카메라 등록, 등록 정보 수정, 게시 계정 재발급, 지원 HD/FHD 변경을 수행한다. 시스템 상태에는 External·Data·Preprocessing·MediaMTX, 감지·인물 연결 작업자·전송 대기열·복구 작업자·저장소·푸시 상태를 표시한다. Analysis 컨테이너의 모델 상태는 이 화면의 검사 범위에 포함하지 않는다. 전체 컨테이너 진단은 호스트의 `doctor`를 사용한다.
 
 브라우저에서 Edge를 수동 등록할 때는 [수동 연결](../edge/README.md#수동-연결)의 토큰과 관리·복구 주소를 사용한다. 등록·게시 계정 재발급 후에는 JSON을 내려받아 해당 Edge의 `setup --publish-credentials-file`로 적용한다. LAN 자동 검색·최초 Pairing은 설치 도우미를 사용한다.
 
@@ -232,6 +249,8 @@ try { docker compose --env-file C:/path/to/compose.env -f server/compose.yml exe
 실제 배포의 추가 Compose 설정도 포함한다. 이 명령은 크기·해시를 검사해 중앙에 등록하며 Edge 원본을 삭제하지 않는다. 자세한 인자는 Data 내부의 `python -m app.workers.recovery --help`로 확인한다.
 
 ## 업그레이드
+
+보관 정책·장애별 복구 절차와 버전별 실환경 인수 기록은 [운영 기준](operations.md)을 따른다. 이번 보관 정책은 오래된 이벤트·crop도 정리하므로 업그레이드 전에 보관 기간과 전체 백업을 확인한다.
 
 먼저 [전체 백업](#전체-백업)을 완료하고 기존 프로젝트 이름·데이터 경로를 기록한다. Windows 배포는 담당자에게 받은 새 버전 설치 EXE와 체크섬을 확인한 뒤 기존 설치 폴더에 설치한다. 소스 배포는 새 버전의 소스를 확보하고 그 폴더에서 아래 작업을 진행한다. **서버 시작 / 업데이트 적용**과 Compose의 `--build`는 현재 폴더의 코드를 사용하며 새 소스 버전을 자동으로 내려받지 않는다.
 
@@ -369,6 +388,6 @@ SQLite는 Data만 직접 열고 다른 서비스는 내부 API를 사용한다. 
 - MediaMTX 1.9.0은 기본 60초 중앙 녹화를 만들고 완료 Hook으로 Data에 등록한다. Hook 유실은 파일 정합성 점검으로 보완한다. 모델 장애 중에도 영상 송출과 녹화는 별도로 동작한다.
 - 중앙 fMP4 재생은 Nginx → MediaMTX, 복구 MPEG-TS 재생은 공개 `/api/v1/recordings/{id}/content`의 Nginx → External → 내부 Nginx → Data 경로를 사용한다.
 - Edge는 평소에도 기본 10초 MPEG-TS를 로컬에 저장한다. Data는 중앙 연결 복구 이벤트를 받아 파일 크기·SHA-256을 검증한 뒤 별도 복구 저장소에 등록한다. 자동 복구 작업은 관리자 `GET /api/v1/recovery-jobs`로 확인한다.
-- 감지 이벤트를 받으면 Data가 이벤트·객체 작업·해당 푸시 대기열을 같은 DB 트랜잭션에 저장한다. 감지기에는 Data 수신 전 이벤트를 보존하는 디스크 송신 대기열이 없다.
+- 감지 이벤트를 받으면 Data가 이벤트·객체 작업·해당 푸시 대기열을 같은 DB 트랜잭션에 저장한다. Preprocessing은 Data 수신 전 이벤트를 스냅샷 저장소의 SQLite 송신 대기열에 보존하고 안정적인 이벤트 ID로 재전송 중복을 막는다.
 - 객체 작업은 Preprocessing·Analysis가, 푸시 작업은 External이 Data에서 주기적으로 가져간다. 별도 메시지 브로커는 없다. 인물 연결·분석의 완료 순서는 보장되지 않으며 후속 metadata 갱신은 새 이벤트나 추가 푸시를 만들지 않는다.
 - 시각은 UTC로 저장하며 녹화 검색은 요청 구간과 겹치는 Segment를 반환한다. 운영 카메라 정보는 Data DB가 기준이며, 초기 설정에서 전달한 Edge 연결 정보의 재적용 조건은 [서버 관리자 화면](#서버-관리자-화면)을 따른다.

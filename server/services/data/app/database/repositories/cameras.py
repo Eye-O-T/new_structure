@@ -276,8 +276,14 @@ class CamerasRepositoryMixin:
                       AND NOT EXISTS(
                           SELECT 1 FROM cameras WHERE edge_device_id = ?
                       )
+                      AND NOT EXISTS(
+                          SELECT 1 FROM recovery_jobs WHERE edge_device_id = ?
+                      )
+                      AND NOT EXISTS(
+                          SELECT 1 FROM events WHERE json_extract(metadata_json,'$.recovery_edge_device_id') = ?
+                      )
                     """,
-                    (old_edge_device_id, old_edge_device_id),
+                    (old_edge_device_id, old_edge_device_id, old_edge_device_id, old_edge_device_id),
                 )
         return _camera(row)
 
@@ -609,8 +615,14 @@ class CamerasRepositoryMixin:
                           AND NOT EXISTS(
                               SELECT 1 FROM cameras WHERE edge_device_id = ?
                           )
+                          AND NOT EXISTS(
+                              SELECT 1 FROM recovery_jobs WHERE edge_device_id = ?
+                          )
+                          AND NOT EXISTS(
+                              SELECT 1 FROM events WHERE json_extract(metadata_json,'$.recovery_edge_device_id') = ?
+                          )
                         """,
-                        (edge_device_id, edge_device_id),
+                        (edge_device_id, edge_device_id, edge_device_id, edge_device_id),
                     )
             return cursor.rowcount > 0
 

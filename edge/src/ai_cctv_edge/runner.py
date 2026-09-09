@@ -169,7 +169,9 @@ class EdgeRunner:
         request: dict[str, object],
         timeout_seconds: float,
     ) -> bool:
-        return time.monotonic() - float(request["requested_monotonic"]) >= timeout_seconds
+        return (
+            time.monotonic() - float(request["requested_monotonic"]) >= timeout_seconds
+        )
 
     # 적용 후 확정되지 않은 요청이 만료되면 재시작 루프에서 저장된 프로필로 돌아간다.
     def _expire_active_profile_request(self) -> bool:
@@ -221,6 +223,7 @@ class EdgeRunner:
             "profile_generation": self.profile_generation,
             "supported_video_profiles": list(self.config.video.supported_profiles),
             "updated_at": utc_timestamp(),
+            "updated_monotonic": time.monotonic(),
             "last_error_code": error_code,
             "last_error": error,
         }

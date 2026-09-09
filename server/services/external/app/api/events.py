@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -41,6 +41,8 @@ async def list_events(
     end: datetime | None = Query(default=None, alias="to"),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    cursor: str | None = Query(default=None, min_length=1, max_length=1024),
+    order: Literal["asc", "desc"] = Query(default="asc"),
     principal: Principal = Depends(get_current_principal),
     data: DataClient = Depends(get_data_client),
 ) -> Any:
@@ -62,6 +64,8 @@ async def list_events(
         end=end_utc,
         limit=limit,
         offset=offset,
+        cursor=cursor,
+        order=order,
     )
 
 

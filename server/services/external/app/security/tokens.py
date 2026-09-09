@@ -31,6 +31,7 @@ class TokenClaims:
     iat: int
     exp: int
     jti: str
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ def issue_token(
     token_type: TokenType,
     ttl_seconds: int,
     now: datetime | None = None,
+    session_id: str | None = None,
 ) -> IssuedToken:
     issued_at = now or datetime.now(timezone.utc)
     expires_at = issued_at + timedelta(seconds=ttl_seconds)
@@ -58,6 +60,7 @@ def issue_token(
         iat=int(issued_at.timestamp()),
         exp=int(expires_at.timestamp()),
         jti=uuid.uuid4().hex,
+        session_id=session_id,
     )
     payload = {
         "sub": claims.sub,
@@ -69,6 +72,8 @@ def issue_token(
         "iss": settings.jwt_issuer,
         "aud": settings.jwt_audience,
     }
+    if session_id is not None:
+        payload["sid"] = session_id
     return IssuedToken(
         encoded=jwt.encode(payload, settings.jwt_secret, algorithm="HS256"),
         claims=claims,
@@ -103,6 +108,18 @@ def decode_token(
     token_type = payload.get("type")
     if role not in {"admin", "viewer"} or token_type != expected_type:
         raise TokenValidationError("token claims invalid")
+    session_id = payload.get("sid")
+    if session_id is not None and (
+        not isinstance(session_id, str)
+        or not 1 <= len(session_id) <= 128
+        or any(
+            not (character.isascii() and (character.isalnum() or character in "_-"))
+            for character in session_id
+        )
+    ):
+        raise TokenValidationError("invalid session identity")
+    if expected_type == "access" and session_id is None:
+        raise TokenValidationError("session binding required; authenticate again")
 
     try:
         return TokenClaims(
@@ -112,6 +129,7 @@ def decode_token(
             iat=int(payload["iat"]),
             exp=int(payload["exp"]),
             jti=str(payload["jti"]),
+            session_id=session_id,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise TokenValidationError("token claims invalid") from exc

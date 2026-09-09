@@ -1127,6 +1127,26 @@ paths:
           default: 0
           title: Offset
         description: 건너뛸 항목 수. items가 빈 목록이면 조회를 마친다.
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            minLength: 1
+            maxLength: 1024
+          - type: 'null'
+          title: Cursor
+      - name: order
+        in: query
+        required: false
+        schema:
+          enum:
+          - asc
+          - desc
+          type: string
+          default: asc
+          title: Order
       responses:
         '200':
           description: Successful Response
@@ -1762,6 +1782,21 @@ components:
             minimum: 0.0
           - type: 'null'
           title: Offset
+        snapshot_max_id:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Snapshot Max Id
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+        has_more:
+          type: boolean
+          title: Has More
+          default: false
       type: object
       required:
       - items
@@ -2158,15 +2193,34 @@ components:
       title: ServiceStatusResponse
     SystemStatusResponse:
       properties:
+        status:
+          type: string
+          enum:
+          - ready
+          - degraded
+          title: Status
         external:
           $ref: '#/components/schemas/ServiceStatusResponse'
         data:
           type: object
           title: Data
+        preprocessing:
+          type: object
+          title: Preprocessing
+        media:
+          type: object
+          title: Media
+        push:
+          type: object
+          title: Push
       type: object
       required:
+      - status
       - external
       - data
+      - preprocessing
+      - media
+      - push
       title: SystemStatusResponse
     TokenResponse:
       properties:

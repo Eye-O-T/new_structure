@@ -67,6 +67,7 @@ class FakeDataClient:
         self.rotated_from: list[str] = []
         self.revoked_access: list[str] = []
         self.revoked_refresh: list[str] = []
+        self.revoked_families: set[str] = set()
         self.camera_acl_calls: list[tuple[str, str]] = []
         self.permission_calls: list[str] = []
         self.created_cameras: list[dict] = []
@@ -126,8 +127,11 @@ class FakeDataClient:
     async def rotate_refresh_token(self, old_jti: str, payload: dict):
         if old_jti not in self.refresh_tokens:
             raise DataNotFound()
+        old = self.refresh_tokens[old_jti]
+        if old.get("revoked_at") or old.get("replaced_by_jti"):
+            raise DataConflict()
         self.rotated_from.append(old_jti)
-        self.refresh_tokens.pop(old_jti)
+        old.update(revoked_at="rotated", replaced_by_jti=payload["jti"])
         self.refresh_tokens[payload["jti"]] = dict(payload)
         return payload
 
@@ -140,8 +144,34 @@ class FakeDataClient:
     async def revoke_refresh_token(self, jti: str):
         if jti not in self.refresh_tokens:
             raise DataNotFound()
-        self.refresh_tokens.pop(jti)
+        row = self.refresh_tokens[jti]
+        await self.revoke_session_family(
+            row.get("family_id") or jti, str(row["user_id"])
+        )
         self.revoked_refresh.append(jti)
+
+    async def is_session_family_active(self, family_id: str, user_id: str):
+        if family_id in self.revoked_families:
+            return False
+        # 개별 권한·제어 테스트가 명시적으로 발급하는 테스트 세션이다.
+        if family_id == f"test-session-{user_id}":
+            return True
+        return any(
+            str(row["user_id"]) == user_id
+            and (row.get("family_id") or row["jti"]) == family_id
+            and not row.get("revoked_at")
+            and not row.get("replaced_by_jti")
+            for row in self.refresh_tokens.values()
+        )
+
+    async def revoke_session_family(self, family_id: str, user_id: str):
+        self.revoked_families.add(family_id)
+        for row in self.refresh_tokens.values():
+            if (
+                str(row["user_id"]) == user_id
+                and (row.get("family_id") or row["jti"]) == family_id
+            ):
+                row["revoked_at"] = "logout"
 
     async def is_access_token_revoked(self, jti: str):
         return jti in self.revoked_access
@@ -452,6 +482,7 @@ def test_expired_jwt_is_rejected(settings: Settings):
         user_id="2",
         role="viewer",
         token_type="access",
+        session_id="test-session-1",
         ttl_seconds=1,
         now=datetime.now(timezone.utc) - timedelta(minutes=2),
     )
@@ -575,7 +606,10 @@ def test_recording_playback_uses_numeric_mediamtx_duration(service):
     ],
 )
 def test_recording_playback_uses_filename_time_without_changing_duration(
-    service, monkeypatch, filename, expected_start,
+    service,
+    monkeypatch,
+    filename,
+    expected_start,
 ):
     client, fake_data = service
     token = _login(client)["access_token"]
@@ -791,6 +825,10 @@ def test_public_openapi_excludes_internal_routes(service):
     assert set(schemas["SystemStatusResponse"]["properties"]) == {
         "external",
         "data",
+        "status",
+        "preprocessing",
+        "media",
+        "push",
     }
     assert schemas["CameraPermissionListResponse"]["properties"]["items"]["items"][
         "$ref"
@@ -1098,6 +1136,7 @@ async def test_camera_lifecycle_lock_preserves_newer_disable_during_rotation(
         user_id="1",
         role="admin",
         token_type="access",
+        session_id="test-session-1",
         ttl_seconds=60,
     ).encoded
     headers = {"Authorization": f"Bearer {admin_token}"}
@@ -1174,6 +1213,7 @@ async def test_camera_lifecycle_lock_serializes_concurrent_rotations(
         user_id="1",
         role="admin",
         token_type="access",
+        session_id="test-session-1",
         ttl_seconds=60,
     ).encoded
     headers = {"Authorization": f"Bearer {admin_token}"}
@@ -1280,6 +1320,7 @@ async def test_media_auth_finishes_before_concurrent_disable_closes_admission(
         user_id="1",
         role="admin",
         token_type="access",
+        session_id="test-session-1",
         ttl_seconds=60,
     ).encoded
     headers = {"Authorization": f"Bearer {admin_token}"}
@@ -1488,6 +1529,7 @@ def test_hls_manifest_and_segment_expiry_then_refresh_cookie_recovery(
         user_id="2",
         role="viewer",
         token_type="access",
+        session_id="test-session-1",
         ttl_seconds=1,
         now=datetime.now(timezone.utc) - timedelta(minutes=2),
     ).encoded
@@ -1791,6 +1833,7 @@ async def test_video_profile_lock_keeps_concurrent_edge_and_data_state_consisten
         user_id="1",
         role="admin",
         token_type="access",
+        session_id="test-session-1",
         ttl_seconds=60,
     ).encoded
     headers = {"Authorization": f"Bearer {admin_token}"}

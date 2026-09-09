@@ -42,7 +42,7 @@ class Settings:
         "server.services.preprocessing.processors.detection.yolo:YoloTracker"
     )
     identity_plugin: str = (
-        "server.services.preprocessing.processors.identity:LocalAppearanceIdentity"
+        "server.services.preprocessing.processors.identity:OsNetIdentity"
     )
     identity_token: str = ""
     capture_timeout_seconds: float = 5.0
@@ -50,6 +50,10 @@ class Settings:
     shutdown_timeout_seconds: float = 15.0
     event_outbox_max_pending: int = 10000
     event_outbox_max_bytes: int = 64 * 1024 * 1024
+    detection_timeout_seconds: float = 10.0
+    detection_startup_seconds: float = 30.0
+    observation_window_seconds: float = 0.0
+    observation_buffer_max_bytes: int = 32 * 1024 * 1024
 
     # 공통 설정의 추론 값을 기본으로 읽고 환경변수와 서비스별 기본값을 적용한다.
     @classmethod
@@ -113,7 +117,7 @@ class Settings:
             ),
             identity_plugin=os.getenv(
                 "IDENTITY_PLUGIN",
-                "server.services.preprocessing.processors.identity:LocalAppearanceIdentity",
+                "server.services.preprocessing.processors.identity:OsNetIdentity",
             ),
             identity_token=os.getenv("DATA_IDENTITY_TOKEN", ""),
             capture_timeout_seconds=float(os.getenv("RTSP_TIMEOUT_SECONDS", "5")),
@@ -125,6 +129,18 @@ class Settings:
                 os.getenv("EVENT_OUTBOX_MAX_PENDING", "10000")
             ),
             event_outbox_max_bytes=int(os.getenv("EVENT_OUTBOX_MAX_BYTES", "67108864")),
+            detection_timeout_seconds=float(
+                os.getenv("DETECTION_MODEL_TIMEOUT_SECONDS", "10")
+            ),
+            detection_startup_seconds=float(
+                os.getenv("DETECTION_STARTUP_TIMEOUT_SECONDS", "30")
+            ),
+            observation_window_seconds=float(
+                os.getenv("OBSERVATION_WINDOW_SECONDS", "1")
+            ),
+            observation_buffer_max_bytes=int(
+                os.getenv("OBSERVATION_BUFFER_MAX_BYTES", "33554432")
+            ),
         )
 
     def validate(self) -> None:
@@ -181,6 +197,8 @@ class Settings:
             ("RTSP_TIMEOUT_SECONDS", self.capture_timeout_seconds, 30),
             ("MODEL_RETRY_SECONDS", self.model_retry_seconds, 3600),
             ("DETECTION_SHUTDOWN_SECONDS", self.shutdown_timeout_seconds, 60),
+            ("DETECTION_MODEL_TIMEOUT_SECONDS", self.detection_timeout_seconds, 60),
+            ("DETECTION_STARTUP_TIMEOUT_SECONDS", self.detection_startup_seconds, 120),
         ):
             if not math.isfinite(value) or not 0 < value <= maximum:
                 raise ValueError(f"{name} must be finite and in range 0..{maximum}")
@@ -188,6 +206,15 @@ class Settings:
             raise ValueError("EVENT_OUTBOX_MAX_PENDING must be in range 1..100000")
         if not 1024 <= self.event_outbox_max_bytes <= 1024 * 1024 * 1024:
             raise ValueError("EVENT_OUTBOX_MAX_BYTES must be in range 1024..1073741824")
+        if (
+            not math.isfinite(self.observation_window_seconds)
+            or not 0 <= self.observation_window_seconds <= 5
+        ):
+            raise ValueError("OBSERVATION_WINDOW_SECONDS must be in range 0..5")
+        if not 256 * 1024 <= self.observation_buffer_max_bytes <= 512 * 1024 * 1024:
+            raise ValueError(
+                "OBSERVATION_BUFFER_MAX_BYTES must be in range 262144..536870912"
+            )
 
     def rtsp_source_url(self, stream_path: str) -> str:
         """인증 정보를 인코딩한 RTSP URL을 만든다. 반환값은 로그에 남기지 않는다."""

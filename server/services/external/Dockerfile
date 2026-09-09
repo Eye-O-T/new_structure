@@ -22,7 +22,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2).read()"]
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+# 실제 client IP는 앱이 TRUSTED_PROXY_HOSTS의 주소와 직접 peer를 비교한 뒤 사용한다.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers"]
 
 # 개발 단계에만 테스트·검사 도구를 추가한다.
 FROM runtime AS development

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import logging
 import re
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -24,7 +25,7 @@ from ..clients.data import (
 )
 from ..config import CAMERA_ID_PATTERN, Settings
 from ..dependencies import (
-    camera_lifecycle_lock,
+    camera_admission_lock,
     get_data_client,
     get_settings_dependency,
 )
@@ -42,6 +43,7 @@ from .auth import _auth_error
 from .validation import _validate_resource_id
 
 router = APIRouter()
+LOGGER = logging.getLogger("ai_cctv.external.media_auth")
 
 
 DUMMY_MEDIA_PASSWORD_HASH = hash_password("invalid-media-credential")
@@ -190,7 +192,7 @@ async def internal_media_auth(
 
     # 카메라 활성 상태 확인부터 인증 응답 전송까지 같은 잠금을 잡는다.
     # 비활성화·키 교체·삭제 도중에 예전 인증으로 새 송출 연결이 끼어드는 것을 막기 위해서다.
-    camera_lock = camera_lifecycle_lock(request, payload.path)
+    camera_lock = camera_admission_lock(request, payload.path)
     await camera_lock.acquire()
     try:
         try:
@@ -219,8 +221,14 @@ async def internal_media_auth(
                 password_valid = verify_password(password_hash, payload.password)
             else:
                 expected = settings.media_publish_credentials.get(payload.path)
-                expected_username = expected.username if expected is not None else ""
-                expected_password = expected.password if expected is not None else ""
+                if expected is None:
+                    # 등록 누락은 빈 비밀번호 계정이 아니다. 원문 인증값 없이 운영 진단을 남긴다.
+                    LOGGER.warning(
+                        "PUBLISH_CREDENTIAL_MISSING camera_id=%s", payload.path
+                    )
+                    raise _auth_error("Media authentication failed")
+                expected_username = expected.username
+                expected_password = expected.password
                 username_valid = hmac.compare_digest(payload.user, expected_username)
                 password_valid = hmac.compare_digest(
                     payload.password, expected_password

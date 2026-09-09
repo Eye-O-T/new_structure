@@ -13,11 +13,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from server.setup.tools.generate_secrets import atomic_write, single_quote  # noqa: E402
 from server.setup.validation import deployment_path, read_deployment_env  # noqa: E402
+from server.setup.model_manager import (  # noqa: E402
+    GENERIC_IDENTITY_PLUGIN,
+    IDENTITY_PLUGIN,
+    IDENTITY_MODEL_CONTAINER_PATH,
+)
 
 
 PLUGIN_DEFAULTS = {
     "DETECTION_PLUGIN": "server.services.preprocessing.processors.detection.yolo:YoloTracker",
-    "IDENTITY_PLUGIN": "server.services.preprocessing.processors.identity:LocalAppearanceIdentity",
+    "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
     "ANALYSIS_PLUGIN": "server.services.analysis.processors:LocalAppearanceAnalyzer",
 }
 OLD_PLUGIN_DEFAULTS = {
@@ -26,6 +31,7 @@ OLD_PLUGIN_DEFAULTS = {
         "server.services.inference.app.pipeline:YoloTracker",
     },
     "IDENTITY_PLUGIN": {
+        GENERIC_IDENTITY_PLUGIN,
         "server.services.preprocessing.processors.identity:IdentityBlackBox",
         "app.plugins:IdentityBlackBox",
         "server.services.object_processing.app.plugins:IdentityBlackBox",
@@ -214,8 +220,32 @@ def enable(server_dir: Path, env_file: Path) -> None:
         "ANALYSIS_SECRETS_FILE": str(analysis_path),
     }
     for key, default in PLUGIN_DEFAULTS.items():
+        if key == "IDENTITY_PLUGIN":
+            continue
         if not values.get(key) or values[key] in OLD_PLUGIN_DEFAULTS[key]:
             env_updates[key] = default
+    identity_plugin = values.get("IDENTITY_PLUGIN") or ""
+    identity_model = values.get("IDENTITY_MODEL_PATH") or ""
+    known_identity = identity_plugin in {
+        "",
+        IDENTITY_PLUGIN,
+        *OLD_PLUGIN_DEFAULTS["IDENTITY_PLUGIN"],
+    }
+    if known_identity:
+        if (
+            identity_model
+            and identity_model != IDENTITY_MODEL_CONTAINER_PATH
+            and identity_plugin != IDENTITY_PLUGIN
+        ):
+            # 이전 범용 ONNX의 입력 규약을 OSNet으로 바꾸지 않고 기존 경로를 그대로 유지한다.
+            env_updates["IDENTITY_PLUGIN"] = GENERIC_IDENTITY_PLUGIN
+        else:
+            env_updates["IDENTITY_PLUGIN"] = IDENTITY_PLUGIN
+            if not identity_model:
+                env_updates["IDENTITY_MODEL_PATH"] = IDENTITY_MODEL_CONTAINER_PATH
+    elif "IDENTITY_MODEL_PATH" not in values:
+        # 사용자 플러그인에 새 기본 OSNet 모델 경로가 암묵적으로 주입되지 않게 한다.
+        env_updates["IDENTITY_MODEL_PATH"] = ""
     data_text = _update_env(data_path.read_text(encoding="utf-8"), added_tokens)
     env_text = _update_env(
         env_file.read_text(encoding="utf-8"),

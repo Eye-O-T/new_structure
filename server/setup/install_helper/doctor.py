@@ -101,12 +101,109 @@ def _configuration_checks(
                 else "model file is missing; configured detection cannot load it",
             )
         )
+        from server.setup.model_manager import (
+            IDENTITY_PLUGIN,
+            deployed_identity_model,
+            validate_identity_model,
+        )
+
+        if (environment.get("IDENTITY_PLUGIN") or IDENTITY_PLUGIN) == IDENTITY_PLUGIN:
+            identity = deployed_identity_model(environment, models_root)
+            ready = False
+            if identity is not None:
+                try:
+                    validate_identity_model(identity)
+                except (OSError, ValueError):
+                    pass
+                else:
+                    ready = True
+            results.append(
+                Check(
+                    "OK" if ready else "ERROR",
+                    "OSNet identity model",
+                    str(identity)
+                    if ready
+                    else "OSNet requires a non-empty ONNX up to 256 MiB inside /models; run server/tools/prepare_osnet.py --output <MODELS_DIR>/osnet_x0_25_msmt17.onnx",
+                )
+            )
     except Exception as exc:
         results.append(Check("ERROR", "Configuration", str(exc)))
     return results
 
 
 # 필수 서비스 상태를 모은 뒤 Preprocessing 내부 상태를 조회해 카메라별 연결 상태를 덧붙인다.
+def _preprocessing_checks(payload: dict) -> list[Check]:
+    """HTTP 200과 추론 정상 동작을 구분하고 원시 오류·민감 입력은 출력하지 않는다."""
+    results = []
+    ready = payload.get("status") == "ready" and payload.get("data_ready") is True
+    results.append(
+        Check(
+            "OK" if ready else "WARN",
+            "Preprocessing readiness",
+            "ready" if ready else "degraded or readiness could not be confirmed",
+        )
+    )
+    workers = payload.get("workers", {})
+    if not isinstance(workers, dict) or any(
+        not isinstance(worker, dict) for worker in workers.values()
+    ):
+        raise ValueError("invalid camera status response")
+    for camera_id, worker in sorted(workers.items()):
+        online = worker.get("state") == "online"
+        model_ready = worker.get("model_ready") is True
+        fresh = worker.get("frame_stale") is False
+        delivery_error = bool(worker.get("event_delivery_error"))
+        results.append(
+            Check(
+                "OK"
+                if online and model_ready and fresh and not delivery_error
+                else "WARN",
+                f"Camera {camera_id}",
+                f"online={online}, model_ready={model_ready}, frame_fresh={fresh}, "
+                f"event_delivery_error={delivery_error}",
+            )
+        )
+    identity = payload.get("identity")
+    identity = identity if isinstance(identity, dict) else {}
+    identity_ready = (
+        identity.get("ready") is True
+        and identity.get("model_ready") is True
+        and identity.get("stalled") is False
+        and not identity.get("last_error")
+        and not identity.get("last_error_code")
+    )
+    results.append(
+        Check(
+            "OK" if identity_ready else "WARN",
+            "Identity worker",
+            "ready" if identity_ready else "not ready, stalled, or reporting an error",
+        )
+    )
+    delivery = payload.get("event_delivery")
+    delivery = delivery if isinstance(delivery, dict) else {}
+    pending, rejected = delivery.get("pending"), delivery.get("rejected")
+    valid_counts = all(
+        type(value) is int and value >= 0 for value in (pending, rejected)
+    )
+    delivery_ok = (
+        valid_counts
+        and pending == 0
+        and rejected == 0
+        and not delivery.get("last_error")
+        and not delivery.get("last_error_code")
+    )
+    results.append(
+        Check(
+            "OK" if delivery_ok else "WARN",
+            "Detection event outbox",
+            f"pending={pending}, rejected={rejected}"
+            if valid_counts
+            else "queue status could not be confirmed",
+        )
+    )
+    return results
+
+
 def _runtime_checks(adapter: ComposeAdapter) -> list[Check]:
     results = []
     try:
@@ -151,10 +248,15 @@ def _runtime_checks(adapter: ComposeAdapter) -> list[Check]:
             "python",
             "-c",
             (
-                "import urllib.request;"
+                "import json,urllib.request,urllib.error;"
                 "opener=urllib.request.build_opener(urllib.request.ProxyHandler({}));"
-                "print(opener.open('http://127.0.0.1:8000/internal/v1/status',"
-                "timeout=3).read().decode())"
+                "state=json.load(opener.open('http://127.0.0.1:8000/internal/v1/status',timeout=3));"
+                "\ntry:\n"
+                " health=json.load(opener.open('http://127.0.0.1:8000/health/ready',timeout=3))\n"
+                " state['status']=health.get('status','unknown')\n"
+                "except (urllib.error.URLError,ValueError,OSError):\n"
+                " state['status']='unavailable'\n"
+                "print(json.dumps(state))"
             ),
             capture=True,
         )
@@ -163,20 +265,7 @@ def _runtime_checks(adapter: ComposeAdapter) -> list[Check]:
                 Check("WARN", "Camera status", "Preprocessing status query failed")
             )
             return results
-        workers = json.loads(camera_probe.stdout).get("workers", {})
-        if not isinstance(workers, dict) or any(
-            not isinstance(worker, dict) for worker in workers.values()
-        ):
-            raise ValueError("invalid camera status response")
-        for camera_id, worker in sorted(workers.items()):
-            camera_state = str(worker.get("state", "unknown"))
-            results.append(
-                Check(
-                    "OK" if camera_state == "online" else "WARN",
-                    f"Camera {camera_id}",
-                    camera_state,
-                )
-            )
+        results.extend(_preprocessing_checks(json.loads(camera_probe.stdout)))
     except (OSError, subprocess.SubprocessError, ValueError, AttributeError):
         results.append(
             Check(

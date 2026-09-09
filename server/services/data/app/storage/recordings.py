@@ -221,16 +221,17 @@ def reconcile(repository: DataRepository, settings: Settings) -> dict[str, Any]:
         if values is None:
             orphaned.append(relative)
             continue
-        segment, created = repository.create_segment(values)
-        if created:
-            repository.link_segment_to_events(
-                segment,
-                settings.event_pre_roll_seconds,
-                settings.event_post_roll_seconds,
-            )
+        repository.create_segment(
+            values,
+            pre_roll_seconds=settings.event_pre_roll_seconds,
+            post_roll_seconds=settings.event_post_roll_seconds,
+        )
         known_paths.add(relative)
         indexed_orphans.append(relative)
     return {
+        "repaired_event_links": repository.repair_event_recording_links(
+            settings.event_pre_roll_seconds, settings.event_post_roll_seconds
+        ),
         "missing": sorted(missing),
         "restored": sorted(restored),
         "corrupt": sorted(corrupt),

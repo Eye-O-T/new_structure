@@ -37,6 +37,7 @@ from server.setup.config_core import (
     _validate_public_base_url,
     _validate_request,
 )
+from server.setup.model_manager import IDENTITY_MODEL_NAME, resolve_identity_model
 
 from .compose_adapter import (
     default_data_root,
@@ -191,10 +192,16 @@ class InstallerWindow(QWidget):
             "필수 프로그램과 파일을 먼저 확인합니다. 빠진 항목을 준비한 뒤 ‘다시 검사’를 누르세요. 검사에 통과하면 기본값으로 설치를 계속할 수 있습니다.",
         )
         self.model = QLineEdit()
+        self.identity_model = QLineEdit()
         self.tls_certificate = QLineEdit()
         self.tls_private_key = QLineEdit()
         files = QFormLayout()
-        self._file_row(files, "AI 모델", self.model, "모델 파일 (*.pt *.onnx *.engine)")
+        self._file_row(
+            files, "사람 탐지 모델", self.model, "모델 파일 (*.pt *.onnx *.engine)"
+        )
+        self._file_row(
+            files, "인물 식별 모델(OSNet)", self.identity_model, "ONNX 모델 (*.onnx)"
+        )
         self._file_row(
             files, "HTTPS 인증서", self.tls_certificate, "인증서 (*.crt *.pem)"
         )
@@ -389,10 +396,18 @@ class InstallerWindow(QWidget):
                         for p in directory.iterdir()
                         if p.is_file()
                         and p.suffix.lower() in {".pt", ".onnx", ".engine"}
+                        and p.name != IDENTITY_MODEL_NAME
                     ]
                     if len(matches) == 1:
                         self.model.setText(str(matches[0]))
                         break
+        if not self.identity_model.text():
+            try:
+                identity = resolve_identity_model(None, root, self.server_dir)
+            except (OSError, ValueError):
+                pass
+            else:
+                self.identity_model.setText(str(identity))
         for directory in (root / "certs", self.server_dir / "runtime" / "certificates"):
             if not self.tls_certificate.text() and (directory / "tls.crt").is_file():
                 self.tls_certificate.setText(str(directory / "tls.crt"))
@@ -460,6 +475,8 @@ class InstallerWindow(QWidget):
             self._path_or_none(self.model),
             self._path_or_none(self.tls_certificate),
             self._path_or_none(self.tls_private_key),
+            self._path_or_none(self.identity_model),
+            Path(self.storage.text()),
         )
 
         def completed(checks):
@@ -564,6 +581,7 @@ class InstallerWindow(QWidget):
             admin_username=self.username.text().strip(),
             admin_password=self.password.text(),
             model_path=Path(self.model.text()),
+            identity_model_path=self._path_or_none(self.identity_model),
             cameras=cameras,
             tls_certificate_path=Path(self.tls_certificate.text()),
             tls_private_key_path=Path(self.tls_private_key.text()),
@@ -601,6 +619,7 @@ class InstallerWindow(QWidget):
                 f"카메라 영상 수신: {request.rtsp_bind_address}:{request.rtsp_port}\n"
                 f"녹화: {request.recording_segment_seconds}초 단위 / {request.retention_days}일 보관\n"
                 f"AI 모델: {request.model_path.name}\n추론 장치: {request.inference_device}\n\n"
+                f"인물 식별 모델: {request.identity_model_path.name if request.identity_model_path else IDENTITY_MODEL_NAME}\n\n"
                 "설정과 인증키 생성 → 모델·인증서 준비 → 서버 이미지 준비 → 서버 실행 순서로 진행합니다.\n"
                 "초기 실행 후 ‘카메라 연결’에서 Edge를 연결하세요. 실제 영상과 감지 동작은 카메라 연결 후 확인합니다."
             )

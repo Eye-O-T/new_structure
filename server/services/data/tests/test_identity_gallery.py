@@ -79,6 +79,91 @@ def decision(event):
     return event["metadata"]["identity"]["result"]["match"]["decision"]
 
 
+def osnet_descriptor(cosine=1.0, *, model="a"):
+    """학습 성능과 구분하여 판정 정책만 검증하는 512차원 단위 벡터를 만든다."""
+    features = [cosine, math.sqrt(1 - cosine**2)] + [0.0] * 510
+    return IdentityDescriptor(
+        space_id=f"osnet:{model * 64}:rgb256x128-imagenet-v1",
+        features=features,
+    )
+
+
+@pytest.mark.parametrize("threshold,expected", [(0.97, "new"), (0.85, "matched")])
+def test_configurable_threshold_controls_osnet_matching(
+    repository, threshold, expected
+):
+    configured = DataRepository(repository.database, identity_match_threshold=threshold)
+    first = finish(configured, appearance(configured), osnet_descriptor())
+    second = finish(
+        configured, appearance(configured, camera="cam-002"), osnet_descriptor(0.9)
+    )
+    assert decision(second) == expected
+    assert (first["global_person_id"] == second["global_person_id"]) == (
+        expected == "matched"
+    )
+    match = second["metadata"]["identity"]["result"]["match"]
+    assert match["method"] == "osnet"
+    assert match["threshold"] == threshold
+    assert match["margin"] == 0.05
+
+
+@pytest.mark.parametrize("margin,expected", [(0.05, "new"), (0.03, "matched")])
+def test_configurable_margin_keeps_close_candidates_ambiguous(
+    repository, margin, expected
+):
+    configured = DataRepository(repository.database, identity_match_margin=margin)
+    first = finish(configured, appearance(configured), osnet_descriptor())
+    # 동일 카메라의 다른 track은 별도 사람으로 남아 두 후보 간 차이를 검증할 수 있다.
+    finish(configured, appearance(configured, person="2"), osnet_descriptor(0.96))
+    third = finish(
+        configured, appearance(configured, camera="cam-002"), osnet_descriptor()
+    )
+    assert decision(third) == expected
+    assert (third["global_person_id"] == first["global_person_id"]) == (
+        expected == "matched"
+    )
+
+
+def test_osnet_upgrade_keeps_track_id_but_separates_model_spaces(repository):
+    first = finish(
+        repository, appearance(repository), descriptor(space="appearance-hsv-v1")
+    )
+    upgraded = finish(repository, appearance(repository), osnet_descriptor())
+    assert decision(upgraded) == "existing_track"
+    assert upgraded["global_person_id"] == first["global_person_id"]
+    assert len(stored_rows(repository)) == 2
+    # 다른 모델 바이트의 512차원 출력도 서로 직접 비교하지 않는다.
+    changed_model = finish(
+        repository,
+        appearance(repository, camera="cam-002"),
+        osnet_descriptor(model="b"),
+    )
+    assert decision(changed_model) == "new"
+    assert changed_model["global_person_id"] != first["global_person_id"]
+    same_model = finish(
+        repository, appearance(repository, camera="cam-003"), osnet_descriptor()
+    )
+    assert decision(same_model) == "matched"
+    assert same_model["global_person_id"] == first["global_person_id"]
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -0.1, 1.1])
+@pytest.mark.parametrize("key", ["identity_match_threshold", "identity_match_margin"])
+def test_invalid_matching_policy_is_rejected_before_writing_db(tmp_path, key, value):
+    with pytest.raises(ValueError, match="IDENTITY_MATCH"):
+        DataRepository(Database(tmp_path / "unused.db"), **{key: value})
+    assert not (tmp_path / "unused.db").exists()
+
+
+def test_environment_matching_policy_reaches_the_application_repository(monkeypatch):
+    monkeypatch.setenv("IDENTITY_MATCH_THRESHOLD", "0.88")
+    monkeypatch.setenv("IDENTITY_MATCH_MARGIN", "0.07")
+    settings = Settings.from_env()
+    repository = create_app(settings).state.repository
+    assert repository.identity_match_threshold == 0.88
+    assert repository.identity_match_margin == 0.07
+
+
 def test_cross_camera_matching_persists_without_exposing_features(repository):
     first = finish(repository, appearance(repository))
     # 객체 작업자와 저장소 객체를 교체해도 인물 연결의 기준은 SQLite에 남는다.
@@ -91,7 +176,13 @@ def test_cross_camera_matching_persists_without_exposing_features(repository):
     result = second["metadata"]["identity"]["result"]
     assert result == {
         "backend": "fixture",
-        "match": {"method": "appearance", "decision": "matched", "similarity": 1.0},
+        "match": {
+            "method": "appearance",
+            "decision": "matched",
+            "similarity": 1.0,
+            "threshold": 0.97,
+            "margin": 0.05,
+        },
     }
     assert "features" not in json.dumps(second)
     assert "identity_descriptor" not in json.dumps(second)

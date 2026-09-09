@@ -80,6 +80,34 @@ def wait_until(condition):
         time.sleep(0.005)
 
 
+def test_shutdown_counts_all_selected_observations_when_crop_storage_fails(
+    settings, monkeypatch
+):
+    worker = pipeline.CameraWorker({"camera_id": "cam-001"}, settings, Data())
+    worker.stop_event.set()
+    tracker = SimpleNamespace(
+        process=lambda frame: DetectionResult(
+            objects=[
+                {"person_id": str(i), "bbox": [0, 0, 20, 20], "confidence": 0.9}
+                for i in range(2)
+            ]
+        )
+    )
+
+    def fail(*args):
+        raise OSError("full")
+
+    monkeypatch.setattr(pipeline, "save_observation", fail)
+    worker._process_frame(
+        np.zeros((20, 20, 3), dtype=np.uint8),
+        tracker,
+        pipeline.TrackState(3),
+        0,
+        float("-inf"),
+    )
+    assert worker.status.event_shutdown_losses == 2
+
+
 @pytest.mark.parametrize(
     "name,value",
     [
@@ -122,10 +150,10 @@ def test_explicit_missing_configuration_and_bad_boolean_are_not_silently_ignored
         Settings.from_env()
 
 
-def test_identity_default_uses_local_appearance_processor(settings, monkeypatch):
+def test_identity_default_uses_osnet_processor(settings, monkeypatch):
     monkeypatch.delenv("AI_CCTV_CONFIG_FILE", raising=False)
     monkeypatch.delenv("IDENTITY_PLUGIN", raising=False)
-    assert settings.identity_plugin.endswith(":LocalAppearanceIdentity")
+    assert settings.identity_plugin.endswith(":OsNetIdentity")
     assert Settings.from_env().identity_plugin == settings.identity_plugin
 
 
@@ -144,10 +172,16 @@ def test_outbox_storage_error_remains_visible_when_status_cannot_read_database(
         assert publisher.status() == {
             "pending": None,
             "rejected": None,
+            "waiting": None,
             "last_error": "EVENT_STORAGE",
         }
     publisher.submit(event())
-    assert publisher.status() == {"pending": 1, "rejected": 0, "last_error": None}
+    assert publisher.status() == {
+        "pending": 1,
+        "rejected": 0,
+        "waiting": 0,
+        "last_error": None,
+    }
 
 
 def test_outbox_survives_restart_and_reuses_source_id_after_lost_response(tmp_path):
@@ -505,7 +539,13 @@ def test_supervisor_retains_stopping_worker_until_exit_and_ignores_late_list(
     client = Data()
     manager = supervisor.DetectionSupervisor(settings, client)
     manager._reconcile([{"camera_id": "cam-001"}])
+    manager.events.max_pending = 1
+    manager.events.submit(event())
+    with pytest.raises(RuntimeError, match="full"):
+        manager.events.submit({**event(), "snapshot_path": "waiting.jpg"})
     manager._reconcile([])
+    # 종료 요청만으로는 아직 살아 있는 생산자의 대기 참조를 해제하지 않는다.
+    assert manager.events.status()["waiting"] == 1
     manager._reconcile([{"camera_id": "cam-001"}])
     assert len(created) == 1 and created[0].stops == 1
     manager._reconcile([{"camera_id": "cam-001", "stream_path": "updated"}])
@@ -516,6 +556,10 @@ def test_supervisor_retains_stopping_worker_until_exit_and_ignores_late_list(
     state = manager.status()
     state["workers"]["cam-001"]["state"] = "changed"
     assert created[1].status.state == "starting"
+    created[1].alive = False
+    manager._reconcile([])
+    assert manager.events.status()["waiting"] == 0
+    assert manager.events.status()["pending"] == 1
     manager.stop()
     manager._reconcile([{"camera_id": "cam-002"}])
     assert len(created) == 2 and client.closed

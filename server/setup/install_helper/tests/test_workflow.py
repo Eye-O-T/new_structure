@@ -14,12 +14,46 @@ from server.setup.install_helper.compose_adapter import Prerequisite
 from server.setup.validation import read_deployment_env
 
 
+def test_cli_initialization_protects_existing_keys_unless_explicit_reset(
+    request_files, available_dependencies, capsys
+):
+    from server.setup.install_helper import cli
+
+    request = request_files
+    password_file = request.data_root.parent / "password.txt"
+    password_file.write_text(request.admin_password, encoding="utf-8")
+    arguments = [
+        "--server-dir",
+        str(request.server_dir),
+        "init",
+        "--data-root",
+        str(request.data_root),
+        "--admin-password-file",
+        str(password_file),
+        "--model",
+        str(request.model_path),
+    ]
+    assert cli.main(arguments) == 0
+    secrets_file = request.data_root / "secrets" / "external.env"
+    original = secrets_file.read_bytes()
+    assert cli.main(arguments) == 1
+    assert secrets_file.read_bytes() == original
+    assert not secrets_file.with_suffix(".env.bak").exists()
+    assert cli.main([*arguments, "--reset-existing"]) == 0
+    assert secrets_file.read_bytes() != original
+    assert secrets_file.with_suffix(".env.bak").read_bytes() == original
+    assert request.admin_password not in capsys.readouterr().out
+
+
 # 공백이 있는 영구 경로와 비기본 포트로 요청을 만들어 경로·입력 전달을 함께 검증한다.
 @pytest.fixture
 def request_files(tmp_path):
     server = tmp_path / "server"
     server.mkdir()
     (server / "compose.yml").write_text("services: {}", encoding="utf-8")
+    identity = server / "runtime/models/osnet_x0_25_msmt17.onnx"
+    identity.parent.mkdir(parents=True)
+    identity.write_bytes(b"identity-model-presence-only")
     model = tmp_path / "model.pt"
     model.write_bytes(b"model-presence-only")
     certificate = tmp_path / "certificate.pem"
@@ -188,7 +222,7 @@ def test_preflight_reports_all_file_failures_even_without_docker(tmp_path, monke
         lambda _: [Prerequisite(False, "Docker Desktop", "private engine output")],
     )
     results = workflow.preflight(tmp_path, tmp_path / "missing.pt", None, None)
-    assert len(results) == 3
+    assert len(results) == 4
     assert all(not item.ok for item in results)
     assert "private engine output" not in repr(results)
     assert any("모델" in item.name for item in results)

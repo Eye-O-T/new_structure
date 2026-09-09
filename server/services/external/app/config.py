@@ -116,6 +116,8 @@ class Settings:
     media_read_username: str
     media_read_password: str
     media_control_url: str = "http://nginx:8080/internal/media"
+    preprocessing_health_url: str = "http://preprocessing:8000/health/ready"
+    system_probe_timeout_seconds: float = 3.0
     jwt_issuer: str = "ai-cctv-external"
     jwt_audience: str = "ai-cctv"
     access_ttl_seconds: int = 900
@@ -144,12 +146,22 @@ class Settings:
     storage_critical_percent: int = 95
     login_backoff_base_seconds: int = 1
     login_backoff_max_seconds: int = 60
+    trusted_proxy_hosts: tuple[str, ...] = ("nginx",)
     media_publish_credentials: Mapping[str, PublishCredential] = field(
         default_factory=dict
     )
 
     # 직접 생성한 설정에도 인증·쿠키·공개 주소·임계값·제어 제한 시간의 운영 조건을 적용한다.
     def __post_init__(self) -> None:
+        if len(self.trusted_proxy_hosts) > 16 or any(
+            not host
+            or len(host) > 253
+            or re.fullmatch(r"[A-Za-z0-9_.:-]+", host) is None
+            for host in self.trusted_proxy_hosts
+        ):
+            raise RuntimeError(
+                "TRUSTED_PROXY_HOSTS must contain explicit hostnames or IPs"
+            )
         if self.push_enabled and (
             not self.firebase_project_id or not self.firebase_credentials_file
         ):
@@ -159,6 +171,9 @@ class Settings:
         _validate_http_url("DATA_BASE_URL", self.data_base_url)
         _validate_http_url("DATA_HEALTH_URL", self.data_health_url)
         _validate_http_url("MEDIA_CONTROL_URL", self.media_control_url)
+        _validate_http_url("PREPROCESSING_HEALTH_URL", self.preprocessing_health_url)
+        if not 0 < self.system_probe_timeout_seconds <= 10:
+            raise RuntimeError("SYSTEM_PROBE_TIMEOUT_SECONDS must be in (0, 10]")
         if len(self.internal_token) < 16:
             raise RuntimeError(
                 "DATA_EXTERNAL_TOKEN or legacy INTERNAL_SERVICE_TOKEN must contain "
@@ -245,6 +260,15 @@ class Settings:
                 "MEDIA_CONTROL_URL",
                 os.getenv("MEDIA_CONTROL_URL", "http://nginx:8080/internal/media"),
             ),
+            preprocessing_health_url=_validate_http_url(
+                "PREPROCESSING_HEALTH_URL",
+                os.getenv(
+                    "PREPROCESSING_HEALTH_URL", "http://preprocessing:8000/health/ready"
+                ),
+            ),
+            system_probe_timeout_seconds=_read_positive_float(
+                "SYSTEM_PROBE_TIMEOUT_SECONDS", 3.0
+            ),
             jwt_issuer=os.getenv("JWT_ISSUER", "ai-cctv-external"),
             jwt_audience=os.getenv("JWT_AUDIENCE", "ai-cctv"),
             access_ttl_seconds=_read_ttl_seconds(
@@ -299,6 +323,11 @@ class Settings:
             login_backoff_max_seconds=_read_positive_int(
                 "LOGIN_BACKOFF_MAX_SECONDS",
                 60,
+            ),
+            trusted_proxy_hosts=tuple(
+                host.strip()
+                for host in os.getenv("TRUSTED_PROXY_HOSTS", "nginx").split(",")
+                if host.strip()
             ),
             media_publish_credentials=_read_publish_credentials(),
         )

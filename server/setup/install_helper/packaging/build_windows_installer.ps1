@@ -97,12 +97,17 @@ foreach ($requiredFile in @(
     (Join-Path $repositoryRoot 'server\setup\tools\generate_secrets.py'),
     (Join-Path $repositoryRoot 'server\setup\tools\generate_dev_cert.py'),
     (Join-Path $repositoryRoot 'server\setup\tools\enable_object_processing.py'),
+    (Join-Path $repositoryRoot 'server\tools\prepare_osnet.py'),
+    (Join-Path $repositoryRoot 'server\tools\export_release_manifest.py'),
+    (Join-Path $repositoryRoot 'server\tools\requirements-osnet.txt'),
+    (Join-Path $repositoryRoot 'server\tools\README.md'),
     (Join-Path $repositoryRoot 'server\services\data\tools\backup_database.py'),
     (Join-Path $repositoryRoot 'server\services\external\tools\bootstrap_admin.py'),
     (Join-Path $repositoryRoot 'tests\runner\ruff.toml'),
     (Join-Path $repositoryRoot 'README.md'),
     (Join-Path $repositoryRoot 'mobile\README.md'),
     (Join-Path $repositoryRoot 'docs\architecture.md'),
+    (Join-Path $repositoryRoot 'docs\operations.md'),
     (Join-Path $repositoryRoot 'docs\openapi.yaml')
 )) {
     if (-not (Test-Path -LiteralPath $requiredFile)) {

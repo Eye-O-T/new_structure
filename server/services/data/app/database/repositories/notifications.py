@@ -141,14 +141,12 @@ class PushRepositoryMixin:
         now = utc_now()
         params = {"now": format_utc(now)}
         with self.database.transaction() as connection:
-            connection.execute(
-                "DELETE FROM push_deliveries WHERE updated_at < ? AND "
-                "state IN ('sent','failed','cancelled')",
-                (format_utc(now - timedelta(days=7)),),
-            )
+            # 종료 이력의 보관 기간은 주기적 보관 작업이 적용한다. 다른 작업자가 이미
+            # 발송 중인 유효 임대는 건드리지 않고, 다음 할당 전에 자격·만료를 재검사한다.
             connection.execute(
                 "UPDATE push_deliveries SET state='cancelled',updated_at=:now "
-                "WHERE state IN ('pending','sending') AND (expires_at <= :now OR "
+                "WHERE (state='pending' OR (state='sending' AND lease_until<=:now)) "
+                "AND (expires_at <= :now OR "
                 "NOT EXISTS (SELECT 1 FROM mobile_devices d JOIN users u "
                 "ON u.id=d.user_id JOIN events e ON e.id=push_deliveries.event_id "
                 "WHERE d.device_id=push_deliveries.device_id AND "

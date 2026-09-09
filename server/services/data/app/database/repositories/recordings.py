@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import timedelta
 from typing import Any
 
@@ -11,11 +12,37 @@ from ..connection import Database
 from .base import _as_dict, _now
 
 
+def _link_segment_to_events(
+    connection: sqlite3.Connection, segment: dict[str, Any],
+    pre_roll_seconds: int, post_roll_seconds: int,
+) -> None:
+    if segment["status"] != "ready":
+        return
+    lower = format_utc(parse_utc(segment["start_time"]) - timedelta(seconds=post_roll_seconds))
+    upper = format_utc(parse_utc(segment["end_time"]) + timedelta(seconds=pre_roll_seconds))
+    connection.execute(
+        "INSERT OR IGNORE INTO event_recording_segments(event_id,recording_segment_id,created_at) "
+        "SELECT id,?,? FROM events WHERE camera_id=? AND occurred_at>? AND occurred_at<?",
+        (segment["id"], _now(), segment["camera_id"], lower, upper),
+    )
+    connection.execute(
+        "UPDATE events SET recording_segment_id=? WHERE recording_segment_id IS NULL "
+        "AND camera_id=? AND occurred_at>? AND occurred_at<?",
+        (segment["id"], segment["camera_id"], lower, upper),
+    )
+
+
 class RecordingsRepositoryMixin:
     database: Database
 
     # 멱등 키와 파일 경로로 중복을 확인하고 반환 불리언으로 실제 신규 생성 여부를 알린다.
-    def create_segment(self, values: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    def create_segment(
+        self, values: dict[str, Any], *,
+        pre_roll_seconds: int | None = None,
+        post_roll_seconds: int | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        if (pre_roll_seconds is None) != (post_roll_seconds is None):
+            raise ValueError("both event roll settings are required")
         now = _now()
         with self.database.transaction() as connection:
             existing = None
@@ -30,7 +57,10 @@ class RecordingsRepositoryMixin:
                     (values["relative_path"],),
                 ).fetchone()
             if existing is not None:
-                return dict(existing), False
+                segment = dict(existing)
+                if pre_roll_seconds is not None:
+                    _link_segment_to_events(connection, segment, pre_roll_seconds, post_roll_seconds)
+                return segment, False
             cursor = connection.execute(
                 """
                 INSERT INTO recording_segments(
@@ -59,6 +89,8 @@ class RecordingsRepositoryMixin:
             row = connection.execute(
                 "SELECT * FROM recording_segments WHERE id = ?", (cursor.lastrowid,)
             ).fetchone()
+            if pre_roll_seconds is not None:
+                _link_segment_to_events(connection, dict(row), pre_roll_seconds, post_roll_seconds)
         return dict(row), True
 
     def get_segment(self, segment_id: int) -> dict[str, Any] | None:
@@ -126,39 +158,30 @@ class RecordingsRepositoryMixin:
     ) -> None:
         """새 녹화 조각을 시간대가 겹치는 기존 이벤트에 연결한다."""
 
-        segment_start = parse_utc(segment["start_time"])
-        segment_end = parse_utc(segment["end_time"])
-        event_lower = format_utc(segment_start - timedelta(seconds=post_roll_seconds))
-        event_upper = format_utc(segment_end + timedelta(seconds=pre_roll_seconds))
-        now = _now()
         with self.database.transaction() as connection:
-            events = connection.execute(
-                """
-                SELECT id FROM events
-                WHERE camera_id = ?
-                  AND occurred_at >= ?
-                  AND occurred_at < ?
-                """,
-                (segment["camera_id"], event_lower, event_upper),
+            _link_segment_to_events(connection, segment, pre_roll_seconds, post_roll_seconds)
+
+    def repair_event_recording_links(self, pre_roll_seconds: int, post_roll_seconds: int) -> int:
+        """구형 버전에서 남은 연결 누락도 실행당 최대 1,000개씩 회복한다."""
+        with self.database.transaction() as connection:
+            rows = connection.execute(
+                "SELECT e.id AS event_id,s.id AS segment_id FROM recording_segments s "
+                "JOIN events e ON e.camera_id=s.camera_id "
+                "AND e.occurred_at>strftime('%Y-%m-%dT%H:%M:%fZ',s.start_time,?) "
+                "AND e.occurred_at<strftime('%Y-%m-%dT%H:%M:%fZ',s.end_time,?) "
+                "WHERE s.status='ready' AND NOT EXISTS(SELECT 1 FROM event_recording_segments l "
+                "WHERE l.event_id=e.id AND l.recording_segment_id=s.id) ORDER BY s.id,e.id LIMIT 1000",
+                (f"-{post_roll_seconds} seconds", f"+{pre_roll_seconds} seconds"),
             ).fetchall()
             connection.executemany(
-                """
-                INSERT OR IGNORE INTO event_recording_segments(
-                    event_id, recording_segment_id, created_at
-                ) VALUES (?, ?, ?)
-                """,
-                [(int(event["id"]), int(segment["id"]), now) for event in events],
+                "INSERT INTO event_recording_segments(event_id,recording_segment_id,created_at) VALUES (?,?,?)",
+                [(row["event_id"], row["segment_id"], _now()) for row in rows],
             )
-            if events:
-                placeholders = ",".join("?" for _ in events)
-                connection.execute(
-                    f"""
-                    UPDATE events SET recording_segment_id = ?
-                    WHERE recording_segment_id IS NULL
-                      AND id IN ({placeholders})
-                    """,
-                    (int(segment["id"]), *(int(event["id"]) for event in events)),
-                )
+            connection.executemany(
+                "UPDATE events SET recording_segment_id=? WHERE id=? AND recording_segment_id IS NULL",
+                [(row["segment_id"], row["event_id"]) for row in rows],
+            )
+            return len(rows)
 
     # 기준 시각보다 먼저 끝난 녹화만 선택하고 이미 삭제 중인 항목은 중복 처리하지 않는다.
     def retention_candidates(self, cutoff: str) -> list[dict[str, Any]]:
@@ -166,8 +189,9 @@ class RecordingsRepositoryMixin:
             rows = connection.execute(
                 """
                 SELECT * FROM recording_segments
-                WHERE end_time < ? AND status NOT IN ('deleting', 'deleted')
+                WHERE end_time < ? AND status NOT IN ('writing', 'deleting', 'deleted')
                 ORDER BY end_time, id
+                LIMIT 1000
                 """,
                 (cutoff,),
             ).fetchall()

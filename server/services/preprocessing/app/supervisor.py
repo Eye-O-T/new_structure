@@ -108,6 +108,10 @@ class DetectionSupervisor:
                 self._workers[camera_id] = worker
                 worker.start()
 
+            # 활성 목록 조회가 성공한 경우에만 고아 참조를 해제한다. stop을 요청했어도
+            # 아직 살아 있는 생산자는 _workers에 남아 있으므로 현재 crop을 계속 보호한다.
+            self.events.prune_waiting(set(self._workers))
+
     # 카메라 ID 순서가 일정한 작업자 상태와 마지막 목록 조회 결과를 반환한다.
     def status(self) -> dict[str, Any]:
         with self._lock:

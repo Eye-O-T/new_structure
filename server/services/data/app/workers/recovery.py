@@ -14,7 +14,8 @@ import math
 import os
 import re
 import sys
-import tempfile
+import threading
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -28,6 +29,7 @@ from ai_cctv_core.time import format_utc, parse_utc, utc_now
 
 from ..config import Settings
 from ..database.repositories import DataRepository
+from .supervision import WorkerStatus
 
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_SEGMENT_BYTES = 512 * 1024 * 1024
@@ -40,6 +42,10 @@ EDGE_PATH_PATTERN = re.compile(
 
 class RecoveryError(RuntimeError):
     """인증값 없이 운영자에게 전달할 복구 오류."""
+
+
+class RecoveryProcessDidNotStop(RecoveryError):
+    """종료되지 않은 자식이 있으므로 후속 작업을 실행해서는 안 된다."""
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -281,6 +287,7 @@ class RecoveryCoordinator:
         max_segment_bytes: int = DEFAULT_MAX_SEGMENT_BYTES,
         open_request: Callable[..., Any] | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        temporary_callback: Callable[[Path | None], None] | None = None,
     ) -> None:
         try:
             self.camera_id = validate_camera_id(camera_id)
@@ -304,6 +311,7 @@ class RecoveryCoordinator:
         self.max_segment_bytes = max_segment_bytes
         self._open_request = open_request or _default_open
         self._progress_callback = progress_callback
+        self._temporary_callback = temporary_callback
 
     # 응답 크기를 제한하고 네트워크·JSON 오류를 인증 정보 없는 복구 오류로 바꾼다.
     def _read_json(self, request: Request, service: str) -> Any:
@@ -380,12 +388,11 @@ class RecoveryCoordinator:
             headers={"Authorization": f"Bearer {self.recovery_token}"},
             method="GET",
         )
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{destination.name}.",
-            suffix=".part",
-            dir=destination.parent,
-        )
-        temporary = Path(temporary_name)
+        temporary = destination.parent / (".recovery-" + uuid.uuid4().hex + ".part")
+        # 부모가 경로를 전달받은 뒤에만 파일을 만든다. 생성 직후 강제 종료되는 틈도 정리한다.
+        if self._temporary_callback is not None:
+            self._temporary_callback(temporary)
+        descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         try:
             digest = hashlib.sha256()
             total = 0
@@ -448,6 +455,8 @@ class RecoveryCoordinator:
                     os.close(directory_descriptor)
         finally:
             temporary.unlink(missing_ok=True)
+            if self._temporary_callback is not None:
+                self._temporary_callback(None)
 
     # 검증된 복구 파일을 MPEG-TS 녹화로 등록하고 재실행에도 같은 멱등 키를 보낸다.
     def _index(self, item: ManifestItem, central_relative_path: str) -> Any:
@@ -604,8 +613,14 @@ LOGGER = logging.getLogger("ai_cctv.data")
 
 # 장애 구간을 24시간씩 나누어 처리하고 원래 revision에 대해서만 완료 또는 지수 재시도를 기록한다.
 def execute_recovery(
-    job: dict[str, Any], repository: DataRepository, settings: Settings
+    job: dict[str, Any],
+    repository: DataRepository,
+    settings: Settings,
+    *,
+    stop_event: threading.Event | None = None,
 ) -> None:
+    from .recovery_execution import run_recovery_job
+
     job_id = int(job["id"])
     revision = int(job.get("revision", 0))
 
@@ -618,44 +633,9 @@ def execute_recovery(
             )
 
     try:
-        if not job.get("recovery_url"):
-            raise RecoveryError("Edge recovery URL is not configured")
-        interval_start = parse_utc(str(job["outage_started_at"]))
-        interval_end = parse_utc(str(job["outage_ended_at"]))
-        aggregate = {
-            "camera_id": str(job["camera_id"]),
-            "selected": 0,
-            "downloaded": 0,
-            "reused": 0,
-            "indexed": 0,
-            "idempotent_replays": 0,
-            "chunks": 0,
-        }
-        chunk_start = interval_start
-        while chunk_start < interval_end:
-            chunk_end = min(chunk_start + timedelta(hours=24), interval_end)
-            coordinator = RecoveryCoordinator(
-                edge_base_url=str(job["recovery_url"]),
-                camera_id=str(job["camera_id"]),
-                recovery_token=str(job["auth_token"]),
-                data_base_url=settings.recovery_data_base_url,
-                internal_token=(settings.data_api_tokens()["recovery"]),
-                recordings_root=settings.storage_root,
-                timeout_seconds=settings.recovery_timeout_seconds,
-                progress_callback=progress,
-            )
-            summary = coordinator.recover(chunk_start, chunk_end)
-            summary_values = asdict(summary)
-            for key in (
-                "selected",
-                "downloaded",
-                "reused",
-                "indexed",
-                "idempotent_replays",
-            ):
-                aggregate[key] += int(summary_values[key])
-            aggregate["chunks"] += 1
-            chunk_start = chunk_end
+        aggregate = run_recovery_job(job, settings, progress, stop_event=stop_event)
+    except RecoveryProcessDidNotStop:
+        raise
     except RecoveryError as exc:
         attempt = int(job["attempt_count"])
         retry_at = None
@@ -679,17 +659,50 @@ def execute_recovery(
 
 
 # DB에서 작업을 하나씩 가져와 블로킹 복구를 스레드로 실행하고 예기치 않은 실패도 재예약한다.
-async def recover_outages(repository: DataRepository, settings: Settings) -> None:
+async def recover_outages(
+    repository: DataRepository, settings: Settings, state: WorkerStatus | None = None
+) -> None:
     # 복구 결과는 자체 내부 API로 등록한다. 시작 직후에는 HTTP 서버가 열릴 시간을 준다.
     await asyncio.sleep(settings.recovery_poll_interval_seconds)
     while True:
-        job = await asyncio.to_thread(repository.claim_due_recovery_job)
+        try:
+            job = await asyncio.to_thread(repository.claim_due_recovery_job)
+        except Exception as exc:
+            if state is not None:
+                state.failed(exc)
+            LOGGER.exception("automatic Edge recovery claim failed; retrying")
+            await asyncio.sleep(settings.recovery_poll_interval_seconds)
+            continue
         if job is None:
+            if state is not None:
+                state.succeeded()
             await asyncio.sleep(settings.recovery_poll_interval_seconds)
             continue
         try:
-            await asyncio.to_thread(execute_recovery, job, repository, settings)
+            stop = threading.Event()
+            execution = asyncio.create_task(
+                asyncio.to_thread(
+                    execute_recovery, job, repository, settings, stop_event=stop
+                )
+            )
+            try:
+                await asyncio.shield(execution)
+            except asyncio.CancelledError:
+                stop.set()
+                await asyncio.gather(execution, return_exceptions=True)
+                raise
+        except RecoveryProcessDidNotStop as exc:
+            if state is not None:
+                state.failed(exc)
+                state.last_error = "RECOVERY_PROCESS_DID_NOT_STOP"
+            LOGGER.critical(
+                "recovery child could not be stopped; further claims are blocked"
+            )
+            # 살아 있는 이전 자식과 후속 작업이 같은 파일을 쓰지 않게 운영자 복구까지 멈춘다.
+            await asyncio.Event().wait()
         except Exception as exc:
+            if state is not None:
+                state.failed(exc)
             LOGGER.exception("automatic Edge recovery failed unexpectedly")
             attempt = int(job["attempt_count"])
             retry_at = None
@@ -698,13 +711,26 @@ async def recover_outages(repository: DataRepository, settings: Settings) -> Non
                     2 ** max(0, attempt - 1)
                 )
                 retry_at = format_utc(utc_now() + timedelta(seconds=delay))
-            repository.update_recovery_job(
-                int(job["id"]),
-                status="failed",
-                last_error=str(exc)[:1024],
-                next_retry_at=retry_at,
-                expected_revision=int(job.get("revision", 0)),
-            )
+            # 실패 상태를 저장하지 못하면 다음 작업을 가져가지 않는다. DB가 회복될 때까지
+            # 같은 revision의 실패 기록을 재시도하여 downloading 상태가 영구히 남지 않게 한다.
+            while True:
+                try:
+                    await asyncio.to_thread(
+                        repository.update_recovery_job,
+                        int(job["id"]),
+                        status="failed",
+                        last_error="RECOVERY_WORKER_ERROR",
+                        next_retry_at=retry_at,
+                        expected_revision=int(job.get("revision", 0)),
+                    )
+                    break
+                except Exception as record_error:
+                    if state is not None:
+                        state.failed(record_error)
+                    LOGGER.exception("could not persist recovery failure; retrying")
+                    await asyncio.sleep(settings.recovery_poll_interval_seconds)
+        if state is not None:
+            state.succeeded()
 
 
 if __name__ == "__main__":

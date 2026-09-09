@@ -2,6 +2,7 @@
 import configparser
 import json
 import os
+import time
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -137,9 +138,7 @@ def test_edge_publish_credential_handoff_checks_camera_identity_and_mode(tmp_pat
 
 
 # 잘못된 전달 파일은 기존 실행 설정을 보존하고 새 비밀 파일·완료 표식을 남기지 않아야 한다.
-def test_setup_rejects_credentials_before_replacing_live_config(
-    tmp_path, monkeypatch
-):
+def test_setup_rejects_credentials_before_replacing_live_config(tmp_path, monkeypatch):
     config_path = tmp_path / "config.toml"
     config_path.write_text("existing-live-config\n", encoding="utf-8")
     state_root = tmp_path / "state"
@@ -296,8 +295,7 @@ def test_recovery_manifest_and_file_require_token(tmp_path):
     assert downloaded.content == b"mpeg-ts"
     assert (
         client.get(
-            "/v1/recovery/files/2026/08/22/"
-            "20260822T080000.000000Z_000001.ts",
+            "/v1/recovery/files/2026/08/22/20260822T080000.000000Z_000001.ts",
             headers={"Authorization": f"Bearer {'r' * 48}"},
         ).status_code
         == 409
@@ -633,6 +631,57 @@ def test_management_status_does_not_reuse_stopped_or_stale_capture_values(
     assert stale["central_connection_status"] == "unknown"
 
 
+@pytest.mark.parametrize(
+    "failure", ["none", "hung", "reused_pid", "unlocked", "missing_clock"]
+)
+def test_capture_status_requires_fresh_heartbeat_and_current_lock_owner(
+    tmp_path, failure
+):
+    import ai_cctv_edge.control as control
+
+    client, token = _management_client(tmp_path, FakeProfileRuntime())
+    runtime_root = tmp_path / "run"
+    runtime_root.mkdir(exist_ok=True)
+    instance_id = "current-instance-123456"
+    snapshot = {
+        "state": "running",
+        "runner_pid": os.getpid(),
+        "runner_instance_id": instance_id,
+        "camera_input": "online",
+        "central_connection_status": "online",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "updated_monotonic": time.monotonic(),
+    }
+    if failure == "hung":
+        snapshot["updated_monotonic"] -= 20
+    elif failure == "missing_clock":
+        del snapshot["updated_monotonic"]
+    owner = {"pid": os.getpid(), "runner_instance_id": instance_id}
+    if failure == "reused_pid":
+        owner["runner_instance_id"] = "different-instance-1234"
+    lock_path = runtime_root / "cam-001.lock"
+    if failure == "unlocked" and control.fcntl is None:
+        # Linux 파일 잠금 검사는 Linux에서 실행하고, 다른 플랫폼은 소유자 불일치로 차단한다.
+        owner["runner_instance_id"] = "not-an-active-owner"
+    with lock_path.open("w+", encoding="utf-8") as handle:
+        json.dump(owner, handle)
+        handle.flush()
+        if control.fcntl is not None and failure != "unlocked":
+            control.fcntl.flock(handle, control.fcntl.LOCK_EX | control.fcntl.LOCK_NB)
+        RuntimeStatusStore(tmp_path / "state").write(snapshot)
+        status = client.get(
+            "/internal/v1/status", headers={"Authorization": f"Bearer {token}"}
+        ).json()
+    if failure == "none":
+        assert status["capture_state"] == "running"
+        assert status["camera_input"] == "online"
+    else:
+        assert status["capture_state"] == "stale"
+        assert status["camera_input"] == "offline"
+        assert status["central_connection_status"] == "unknown"
+        assert status["last_error_code"] == "CAPTURE_STATUS_STALE"
+
+
 # 지원하지 않는 품질은 활성화 요청을 만들기 전에 거부해야 한다.
 def test_profile_apply_rejects_unsupported_without_changing_pipeline(tmp_path):
     runtime = FakeProfileRuntime()
@@ -783,9 +832,7 @@ def test_runner_watchdog_uses_real_recording_activity_for_transitions(tmp_path):
     runner.active_backup_dir = tmp_path / "recordings-active"
     runner.active_backup_dir.mkdir()
     runner.active_segment_prefix = "20260822T080000.000000Z"
-    segment = runner.active_backup_dir / (
-        "20260822T080000.000000Z_000000.ts"
-    )
+    segment = runner.active_backup_dir / ("20260822T080000.000000Z_000000.ts")
     segment.write_bytes(b"first-frame")
 
     runner._monitor_camera_input()
@@ -920,10 +967,7 @@ def test_systemd_units_separate_capture_control_and_recovery_lifecycles():
         assert {"Unit", "Service", "Install"}.issubset(parser.sections())
         assert command_suffix in parser["Service"]["ExecStart"]
         assert "network-online.target" not in parser["Unit"].get("After", "")
-        assert (
-            parser["Unit"]["ConditionPathExists"]
-            == "/etc/ai-cctv-edge/.configured"
-        )
+        assert parser["Unit"]["ConditionPathExists"] == "/etc/ai-cctv-edge/.configured"
 
     runner_source = (edge_root / "src/ai_cctv_edge/runner.py").read_text(
         encoding="utf-8"
@@ -953,9 +997,7 @@ def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
     assert "Architecture: arm64" in control
     assert "rpicam-apps" in control
 
-    build_script = (edge_root / "packaging/build_deb.sh").read_text(
-        encoding="utf-8"
-    )
+    build_script = (edge_root / "packaging/build_deb.sh").read_text(encoding="utf-8")
     assert "SOURCE_DATE_EPOCH" in build_script
     assert "constraints.txt" in build_script
     assert "verify_deb.sh" in build_script
@@ -990,4 +1032,5 @@ def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
     assert all(position >= 0 for position in positions)
     assert positions == sorted(positions)
     assert "(docs/architecture.md)" in root_readme
-    assert "## 운영과 백업" in root_readme
+    assert "## 사용하기" in root_readme
+    assert "docs/guide.md" in root_readme

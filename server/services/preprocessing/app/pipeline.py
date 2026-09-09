@@ -13,9 +13,9 @@ from typing import Any, Callable
 
 from ai_cctv_core.identifiers import validate_camera_id
 from ai_cctv_core.time import format_utc, utc_now
-from ai_cctv_core.processing.plugins import load_factory
 
 from ..processors.detection.contracts import DetectionFrame, DetectionResult
+from ..processors.detection.isolation import IsolatedDetector
 
 from .data_client import DataClient
 from .event_state import TrackState
@@ -23,6 +23,7 @@ from .settings import Settings
 from .objects import clip_detections, save_observation, write_jpeg_atomic
 from .live_publisher import LivePublisher
 from .event_publisher import EventPublisher
+from .observation_buffer import ObservationBuffer
 
 LOGGER = logging.getLogger("ai_cctv.preprocessing")
 
@@ -41,6 +42,8 @@ class WorkerStatus:
     event_shutdown_losses: int = 0
     observation_error: str | None = None
     observation_persistence_failures: int = 0
+    model_timeouts: int = 0
+    last_inference_seconds: float | None = None
 
 
 # 카메라마다 독립 스레드·추적 세션을 두고 Data에는 상태와 관측 결과만 전달한다.
@@ -72,9 +75,20 @@ class CameraWorker(threading.Thread):
         self._last_status_attempt = 0.0
         self._created_monotonic = time.monotonic()
         self._last_frame_monotonic: float | None = None
+        self._tracker = None
+        self._observations = ObservationBuffer(
+            settings.observation_window_seconds, settings.observation_buffer_max_bytes
+        )
 
     def stop(self) -> None:
         self.stop_event.set()
+        self._release_tracker()
+
+    def _release_tracker(self):
+        tracker = self._tracker
+        if tracker is not None and callable(getattr(tracker, "close", None)):
+            tracker.close()
+        self._tracker = None
 
     def status_snapshot(self) -> dict[str, Any]:
         # 처리 스레드가 모델이나 저장소에서 멈춰도 API 스레드가 프레임 노후화를 계산한다.
@@ -87,6 +101,8 @@ class CameraWorker(threading.Thread):
         result["frame_stale"] = age >= max(
             30.0, self.settings.capture_timeout_seconds * 2
         )
+        result["observation_candidates"] = len(self._observations.pending)
+        result["observation_buffer_bytes"] = self._observations.bytes_used
         return result
 
     # 이벤트의 최상위 필드와 부가 메타데이터를 나누어 Data 입력 계약에 맞게 전송한다.
@@ -181,6 +197,7 @@ class CameraWorker(threading.Thread):
         # 녹화 복구 구간은 Edge 연결로 정하므로 여기서는 복구 작업을 변경하지 않는다.
         if self._failure_reported:
             return
+        self._flush_observations()
         self._status("offline")
         self._event("inference_stream_lost", reason=reason)
         self._failure_reported = True
@@ -275,12 +292,23 @@ class CameraWorker(threading.Thread):
             return None
         self._next_model_attempt = now + self.settings.model_retry_seconds
         try:
-            factory = self.tracker_factory or load_factory(
-                self.settings.detection_plugin
-            )
-            tracker = factory(
-                self.settings.model_path, self.settings.confidence, self.settings.device
-            )
+            if self.tracker_factory is not None:
+                tracker = self.tracker_factory(
+                    self.settings.model_path,
+                    self.settings.confidence,
+                    self.settings.device,
+                )
+            else:
+                tracker = IsolatedDetector(
+                    self.settings.detection_plugin,
+                    self.settings.model_path,
+                    self.settings.confidence,
+                    self.settings.device,
+                    timeout_seconds=self.settings.detection_timeout_seconds,
+                    startup_timeout_seconds=self.settings.detection_startup_seconds,
+                    stop_event=self.stop_event,
+                )
+            self._tracker = tracker
             if not callable(getattr(tracker, "process", None)) or not callable(
                 getattr(tracker, "reset", None)
             ):
@@ -289,6 +317,9 @@ class CameraWorker(threading.Thread):
                 )
             tracker.reset()
         except Exception as exc:
+            self._release_tracker()
+            if isinstance(exc, TimeoutError):
+                self.status.model_timeouts += 1
             self._next_model_attempt = (
                 time.monotonic() + self.settings.model_retry_seconds
             )
@@ -302,6 +333,15 @@ class CameraWorker(threading.Thread):
 
     # 영상 연결과 읽기에 같은 유한 제한 시간을 적용하고 모든 경로에서 캡처를 해제한다.
     def _run(self) -> None:
+        try:
+            self._run_stream()
+        finally:
+            try:
+                self._flush_observations()
+            finally:
+                self._release_tracker()
+
+    def _run_stream(self) -> None:
         import cv2
 
         tracker = None
@@ -330,12 +370,14 @@ class CameraWorker(threading.Thread):
                     self._inference_stream_lost("rtsp_open_failed")
                 else:
                     # 번호를 재사용하는 추적기를 새 세션으로 분리해 이전 관측과 섞지 않는다.
+                    self._flush_observations()
                     self.tracking_session_id = uuid.uuid4().hex
                     state = TrackState(self.settings.disappear_seconds)
                     if tracker is not None:
                         try:
                             tracker.reset()
                         except Exception as exc:
+                            self._release_tracker()
                             tracker = None
                             self.status.model_ready = False
                             self.status.last_error = (
@@ -371,6 +413,7 @@ class CameraWorker(threading.Thread):
                             tracker = self._prepare_tracker()
                             if tracker is not None:
                                 # 모델 재준비도 추적 ID가 초기화되므로 새로운 관측 세션이다.
+                                self._flush_observations()
                                 self.tracking_session_id = uuid.uuid4().hex
                                 state = TrackState(self.settings.disappear_seconds)
                                 last_analysis = last_publish = float("-inf")
@@ -382,6 +425,9 @@ class CameraWorker(threading.Thread):
                                 frame, tracker, state, now, last_publish, observed_at
                             )
                         except Exception as exc:
+                            self._release_tracker()
+                            if isinstance(exc, TimeoutError):
+                                self.status.model_timeouts += 1
                             tracker = None
                             self.status.model_ready = False
                             self.status.last_error = (
@@ -417,6 +463,7 @@ class CameraWorker(threading.Thread):
     ):
         height, width = frame.shape[:2]
         observed_at = observed_at or utc_now()
+        inference_started = time.monotonic()
         result = DetectionResult.model_validate(
             tracker.process(
                 DetectionFrame(
@@ -426,6 +473,9 @@ class CameraWorker(threading.Thread):
                     image=frame,
                 )
             )
+        )
+        self.status.last_inference_seconds = max(
+            0, time.monotonic() - inference_started
         )
         detections = clip_detections(
             [item.model_dump() for item in result.objects], width, height
@@ -443,26 +493,59 @@ class CameraWorker(threading.Thread):
                 }
             )
             last_publish = now
-        by_person = {d["person_id"]: d for d in detections}
-        for transition in state.update(detections, now):
+        transitions = state.update(detections, now)
+        candidates = self._observations.update(
+            frame, detections, transitions, now, observed_at
+        )
+        for index, candidate in enumerate(candidates):
+            if not self._publish_observation(candidate):
+                # 종료 중 첫 항목 저장이 실패하면 이미 버퍼에서 꺼낸 나머지도 RAM에만 있다.
+                # 추가 파일 생성을 멈추되 유실 수를 첫 한 건으로 축소 보고하지 않는다.
+                remaining = len(candidates) - index - 1
+                if self.stop_event.is_set() and remaining:
+                    self.status.event_shutdown_losses += remaining
+                    LOGGER.error(
+                        "worker stopped with unpersisted observation candidates",
+                        extra={
+                            "camera_id": self.camera_id,
+                            "error_code": "EVENT_SHUTDOWN_LOSS",
+                            "count": remaining,
+                        },
+                    )
+                break
+        for transition in transitions:
             if self.stop_event.is_set():
                 break
-            snapshot_path = None
-            observation = None
             if transition.event_type == "person_appeared":
-                # 첫 등장 때 잘라낸 사람 이미지와 관측 정보를 이벤트에 붙인다.
-                # Data는 이 정보를 저장한 뒤 식별·추가 분석 작업의 입력으로 사용한다.
-                snapshot_path = self._snapshot(frame, transition.person_id)
-                observation = self._observation(frame, by_person[transition.person_id])
-                if observation is None:
-                    break
+                continue
             if not self._event(
                 transition.event_type,
                 occurred_at=observed_at,
                 person_id=transition.person_id,
                 confidence=transition.confidence,
-                snapshot_path=snapshot_path,
-                object_observation=observation,
             ):
                 break
         return last_publish
+
+    def _publish_observation(self, candidate):
+        snapshot = self._snapshot(candidate.frame, candidate.person_id)
+        observation = self._observation(candidate.frame, candidate.detection)
+        if observation is None:
+            return False
+        return self._event(
+            "person_appeared",
+            occurred_at=candidate.occurred_at,
+            person_id=candidate.person_id,
+            confidence=candidate.detection.get("confidence"),
+            snapshot_path=snapshot,
+            object_observation=observation,
+            observation_selection={
+                "selected_at": format_utc(candidate.selected_at),
+                "quality": "usable" if candidate.score[0] else "insufficient",
+                "window_seconds": self.settings.observation_window_seconds,
+            },
+        )
+
+    def _flush_observations(self):
+        for candidate in self._observations.drain():
+            self._publish_observation(candidate)

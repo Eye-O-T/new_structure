@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import (
     APIRouter,
+    Path,
+    Query,
     Response,
     status,
 )
@@ -20,6 +22,25 @@ from ..schemas import (
 )
 
 router = APIRouter()
+
+
+@router.get("/tokens/families/{family_id}")
+def get_token_family(
+    family_id: Annotated[str, Path(min_length=1, max_length=256)],
+    user_id: Annotated[int, Query(ge=1)],
+    repository: Repo,
+) -> dict[str, bool]:
+    return {"active": repository.token_family_is_active(user_id, family_id)}
+
+
+@router.delete("/tokens/families/{family_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_token_family(
+    family_id: Annotated[str, Path(min_length=1, max_length=256)],
+    user_id: Annotated[int, Query(ge=1)],
+    repository: Repo,
+) -> Response:
+    repository.revoke_token_family(user_id, family_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # 교체할 토큰의 부재와 이미 소모된 토큰의 충돌을 구분해 갱신 실패를 전달한다.

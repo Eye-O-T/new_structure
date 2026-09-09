@@ -148,10 +148,16 @@ def test_full_diagnostics_retain_schema_storage_services_and_camera_checks(
         else:
             payload = json.dumps(
                 {
+                    "status": "degraded",
+                    "data_ready": True,
                     "workers": {
-                        "cam-001": {"state": "online"},
+                        "cam-001": {
+                            "state": "online",
+                            "model_ready": True,
+                            "frame_stale": False,
+                        },
                         "cam-002": {"state": "offline"},
-                    }
+                    },
                 }
             )
         return SimpleNamespace(returncode=0, stdout=payload, stderr="")
@@ -167,6 +173,42 @@ def test_full_diagnostics_retain_schema_storage_services_and_camera_checks(
     assert statuses["Camera cam-001"] == "OK"
     assert statuses["Camera cam-002"] == "WARN"
     assert [call[0] for call in calls] == ["config", "ps", "exec"]
+
+
+def test_ready_http_does_not_hide_model_frame_identity_or_outbox_failure():
+    payload = {
+        "status": "degraded",
+        "data_ready": True,
+        "workers": {
+            "model-failed": {
+                "state": "online",
+                "model_ready": False,
+                "frame_stale": False,
+            },
+            "stale": {"state": "online", "model_ready": True, "frame_stale": True},
+        },
+        "identity": {
+            "ready": True,
+            "model_ready": True,
+            "stalled": True,
+            "last_error": "do-not-display-private-value",
+        },
+        "event_delivery": {
+            "pending": 4,
+            "rejected": 1,
+            "last_error": "do-not-display-private-value",
+        },
+    }
+    results = doctor._preprocessing_checks(payload)
+    assert all(result.status == "WARN" for result in results)
+    assert "pending=4, rejected=1" in results[-1].message
+    assert "do-not-display-private-value" not in str(results)
+    payload.update(status="ready", workers={})
+    payload["identity"] = {"ready": True, "model_ready": True, "stalled": False}
+    payload["event_delivery"] = {"pending": 0, "rejected": 0}
+    assert all(
+        result.status == "OK" for result in doctor._preprocessing_checks(payload)
+    )
 
 
 # Compose 구성이 유효하지 않으면 그 구성으로 ps나 내부 상태 조회를 실행하지 않아야 한다.

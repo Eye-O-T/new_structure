@@ -1,4 +1,4 @@
-"""실제 JPEG·기본 CPU 플러그인·객체 작업자·Data HTTP를 연결한 통합 검증이다."""
+"""명시적으로 선택한 이전 HSV 식별기와 CPU 분석기를 실제 JPEG·작업자·Data HTTP로 검증한다."""
 
 from contextlib import AsyncExitStack, asynccontextmanager
 import json
@@ -121,7 +121,7 @@ def _assert_colors(event, upper, lower):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("order", [("identity", "analysis"), ("analysis", "identity")])
-async def test_default_processors_merge_pixel_results_in_either_completion_order(
+async def test_legacy_identity_and_analyzer_merge_pixel_results_in_either_completion_order(
     objects, order
 ):
     client, repo, settings = objects

@@ -214,6 +214,9 @@ class EventPageResponse(PublicResponse):
     items: list[EventResponse]
     limit: int | None = Field(default=None, ge=1)
     offset: int | None = Field(default=None, ge=0)
+    snapshot_max_id: int | None = Field(default=None, ge=0)
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class RecoveryJobResponse(PublicResponse):
@@ -255,8 +258,12 @@ class ServiceStatusResponse(PublicResponse):
 
 
 class SystemStatusResponse(PublicResponse):
+    status: Literal["ready", "degraded"]
     external: ServiceStatusResponse
     data: dict[str, Any]
+    preprocessing: dict[str, Any]
+    media: dict[str, Any]
+    push: dict[str, Any]
 
 
 class UserCreate(StrictModel):

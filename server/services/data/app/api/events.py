@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import json
 from datetime import datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -22,6 +26,29 @@ from ..schemas import (
 from ..storage.paths import normalize_relative_path
 
 router = APIRouter()
+
+
+def _event_cursor(query: str, maximum: int, event: dict[str, Any]) -> str:
+    payload = {"query": query, "max_id": maximum, "time": event["occurred_at"], "id": int(event["id"])}
+    return base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
+
+
+def _read_event_cursor(cursor: str, query: str) -> tuple[int, str, int]:
+    try:
+        payload = json.loads(base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True))
+        if not isinstance(payload, dict) or set(payload) != {"query", "max_id", "time", "id"}:
+            raise ValueError
+        maximum, event_id = payload["max_id"], payload["id"]
+        if (
+            payload["query"] != query or type(maximum) is not int or type(event_id) is not int
+            or not 1 <= event_id <= maximum <= 2**63 - 1
+            or not isinstance(payload["time"], str)
+        ):
+            raise ValueError
+        timestamp = format_utc(parse_utc(payload["time"]))
+        return maximum, timestamp, event_id
+    except (ValueError, TypeError, KeyError, binascii.Error, OverflowError) as exc:
+        raise ApiError(422, "INVALID_EVENT_CURSOR", "이벤트 커서가 잘못되었거나 조회 조건이 변경되었습니다.") from exc
 
 
 # 이벤트 전후 녹화 구간과 안전한 스냅샷 경로를 만들고 객체 분석의 초기 상태를 채운다.
@@ -81,6 +108,8 @@ def create_event(
         occurred_at=values["occurred_at"],
         max_attempts=settings.recovery_max_attempts,
         settle_seconds=settings.recovery_settle_seconds,
+        origin_edge_device_id=event["metadata"].get("recovery_edge_device_id"),
+        origin_recorded=True,
     )
     return event
 
@@ -95,20 +124,42 @@ def search_events(
     to_time: Annotated[datetime | None, Query(alias="to")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    cursor: Annotated[str | None, Query(min_length=1, max_length=1024)] = None,
+    order: Literal["asc", "desc"] = "asc",
 ) -> dict[str, Any]:
     start = parse_utc(from_time) if from_time is not None else None
     end = parse_utc(to_time) if to_time is not None else None
     if start is not None and end is not None and end <= start:
         raise ApiError(422, "INVALID_TIME_RANGE", "to는 from보다 뒤여야 합니다.")
+    query = hashlib.sha256(json.dumps(
+        [camera_id, event_type, format_utc(start) if start else None,
+         format_utc(end) if end else None, order], separators=(",", ":")
+    ).encode()).hexdigest()
+    after_time = after_id = None
+    if cursor is not None:
+        if offset:
+            raise ApiError(422, "INVALID_EVENT_CURSOR", "커서 조회에는 offset을 함께 지정할 수 없습니다.")
+        maximum, after_time, after_id = _read_event_cursor(cursor, query)
+    else:
+        maximum = repository.event_snapshot_max_id()
     items = repository.search_events(
         camera_id=camera_id,
         event_type=event_type,
         start_time=format_utc(start) if start else None,
         end_time=format_utc(end) if end else None,
-        limit=limit,
+        limit=limit + 1,
         offset=offset,
+        snapshot_max_id=maximum,
+        after_time=after_time,
+        after_id=after_id,
+        descending=order == "desc",
     )
-    return _page(items, limit, offset)
+    has_more = len(items) > limit
+    items = items[:limit]
+    return {
+        **_page(items, limit, offset), "snapshot_max_id": maximum, "has_more": has_more,
+        "next_cursor": _event_cursor(query, maximum, items[-1]) if has_more else None,
+    }
 
 
 @router.get("/events/{event_id}")

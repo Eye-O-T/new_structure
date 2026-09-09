@@ -24,6 +24,7 @@ from ..clients.edge import EdgeControlError, EdgeHttpClient
 from ..clients.mediamtx import MediaMtxClient
 from ..config import CAMERA_ID_PATTERN, Settings
 from ..dependencies import (
+    camera_admission_lock,
     camera_lifecycle_lock,
     get_data_client,
     get_settings_dependency,
@@ -238,7 +239,10 @@ async def create_camera(
         "enabled": False,
         "status": "disabled",
     }
-    async with camera_lifecycle_lock(request, payload.camera_id):
+    async with (
+        camera_lifecycle_lock(request, payload.camera_id),
+        camera_admission_lock(request, payload.camera_id),
+    ):
         camera = await data.create_camera(create_body)
         publish_password = secrets.token_urlsafe(32)
         try:
@@ -294,7 +298,10 @@ async def update_camera(
         raise HTTPException(status_code=400, detail="stream_path must match camera_id")
     if "enabled" in body:
         body["status"] = "offline" if body["enabled"] else "disabled"
-    async with camera_lifecycle_lock(request, camera_id):
+    async with (
+        camera_lifecycle_lock(request, camera_id),
+        camera_admission_lock(request, camera_id),
+    ):
         updated = await data.update_camera(camera_id, body)
         if "enabled" in body:
             await data.put_camera_runtime_status(
@@ -324,7 +331,10 @@ async def delete_camera(
 ) -> Response:
     if not CAMERA_ID_PATTERN.fullmatch(camera_id):
         raise HTTPException(status_code=400, detail="Invalid camera ID")
-    async with camera_lifecycle_lock(request, camera_id):
+    async with (
+        camera_lifecycle_lock(request, camera_id),
+        camera_admission_lock(request, camera_id),
+    ):
         deletion_status = await data.get_camera_deletion_status(camera_id)
         if not bool(deletion_status.get("deletable")):
             raise DataConflict(
@@ -388,7 +398,10 @@ async def rotate_camera_publish_credentials(
 
     if not CAMERA_ID_PATTERN.fullmatch(camera_id):
         raise HTTPException(status_code=400, detail="Invalid camera ID")
-    async with camera_lifecycle_lock(request, camera_id):
+    async with (
+        camera_lifecycle_lock(request, camera_id),
+        camera_admission_lock(request, camera_id),
+    ):
         camera = await data.get_camera(camera_id, user_id=principal.user_id)
         was_enabled = bool(camera.get("enabled", True))
 

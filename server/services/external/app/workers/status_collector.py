@@ -300,7 +300,8 @@ class StatusCollector:
     ) -> None:
         occurred_at = str(current["last_seen_at"])
         transitions: list[tuple[str, dict[str, Any]]] = []
-        capture_running = current.get("_capture_state") == "running"
+        capture_state = current.get("_capture_state")
+        capture_running = capture_state == "running"
         previous_input = stored.get(
             "camera_input", stored.get("previous_camera_input", "unknown")
         )
@@ -317,7 +318,7 @@ class StatusCollector:
                 )
             )
         elif (
-            capture_running
+            capture_state in {"running", "stale", "error"}
             and previous_input == "online"
             and current_input in {"offline", "lost"}
         ):

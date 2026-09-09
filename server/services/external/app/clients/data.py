@@ -37,6 +37,10 @@ class DataConflict(DataServiceError):
     status_code = 409
 
 
+class DataInvalidRequest(DataServiceError):
+    status_code = 422
+
+
 # 인증 헤더·연결 풀·오류 변환을 공유하는 Data 내부 API 접근 경계이다.
 class DataClient:
     def __init__(
@@ -112,6 +116,16 @@ class DataClient:
             raise DataConflict(message, code=code)
         if response.status_code >= 500:
             raise DataServiceUnavailable("data service unavailable")
+        if response.status_code == 422:
+            try:
+                code = response.json().get("error", {}).get("code")
+            except (AttributeError, ValueError):
+                code = None
+            if code == "INVALID_EVENT_CURSOR":
+                raise DataInvalidRequest(
+                    "The event cursor is invalid or its search filters changed.",
+                    code=code,
+                )
         if response.status_code >= 400:
             raise DataServiceError("data service rejected the request")
         if response.status_code == 204 or not response.content:
@@ -124,6 +138,39 @@ class DataClient:
 
     async def health(self) -> Any:
         return await self._request("GET", self.health_url)
+
+    async def is_session_family_active(self, family_id: str, user_id: str) -> bool:
+        result = await self._request(
+            "GET",
+            f"tokens/families/{quote(family_id, safe='')}",
+            params={"user_id": user_id},
+        )
+        if not isinstance(result, dict) or not isinstance(result.get("active"), bool):
+            raise DataServiceError("invalid session status response")
+        return result["active"]
+
+    async def revoke_session_family(self, family_id: str, user_id: str) -> None:
+        await self._request(
+            "DELETE",
+            f"tokens/families/{quote(family_id, safe='')}",
+            params={"user_id": user_id},
+        )
+
+    async def health_status(self) -> dict[str, Any]:
+        # 운영 상태 조회는 worker 기능저하의 503 본문도 보존한다. readiness 판정과는 별개다.
+        try:
+            response = await self._client.get(self.health_url)
+            if response.status_code not in {200, 503}:
+                raise DataServiceUnavailable("data health unavailable")
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("status") not in {
+                "ready",
+                "degraded",
+            }:
+                raise DataServiceUnavailable("invalid data health response")
+            return payload
+        except (httpx.RequestError, ValueError) as exc:
+            raise DataServiceUnavailable("data health unavailable") from exc
 
     async def put_mobile_device(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._request("PUT", "mobile-devices", json=payload)
@@ -402,6 +449,8 @@ class DataClient:
                 "to": params.get("end"),
                 "limit": params.get("limit"),
                 "offset": params.get("offset"),
+                "cursor": params.get("cursor"),
+                "order": params.get("order"),
             },
         )
 

@@ -62,6 +62,12 @@ def camera_lifecycle_lock(request: Request, camera_id: str) -> asyncio.Lock:
     return request.app.state.camera_lifecycle_lock_factory(camera_id)
 
 
+def camera_admission_lock(request: Request, camera_id: str) -> asyncio.Lock:
+    # 화질 변경은 송출 재인증을 기다리므로 작업 직렬화 잠금과 분리한다.
+    # 등록·비활성화·삭제·인증값 교체는 lifecycle → admission 순으로 두 잠금을 잡는다.
+    return request.app.state.camera_admission_lock_factory(camera_id)
+
+
 # 요청 처리 동안 카메라 잠금을 유지하고 의존성 종료 시 자동으로 해제한다.
 async def hold_camera_lifecycle_lock(
     camera_id: str, request: Request

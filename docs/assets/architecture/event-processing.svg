@@ -52,9 +52,9 @@
 <text x="560" y="286" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">사라짐 등은 이벤트만</text>
 <rect x="30" y="565" width="310" height="120" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" stroke-dasharray="7 5"/>
 <text x="185.0" y="592.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="19" font-weight="700" text-anchor="middle" fill="#172b4d">Preprocessing / identity</text>
-<text x="185.0" y="621.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">작업을 가져와 동일 인물 연결</text>
-<text x="185.0" y="648.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">외관 특징 반환 → Data에서 ID 연결</text>
-<text x="185.0" y="675.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">기본 CPU 특징 / 선택 ONNX</text>
+<text x="185.0" y="621.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">crop 1장 → OSNet 특징 추출</text>
+<text x="185.0" y="648.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">512차원 반환 → Data에서 ID 연결</text>
+<text x="185.0" y="675.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">준비한 OSNet ONNX / CPU 실행</text>
 <rect x="405" y="565" width="310" height="120" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2" stroke-dasharray="7 5"/>
 <text x="560.0" y="592.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Analysis</text>
 <text x="560.0" y="621.0" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">작업을 가져와 부가 정보 분석</text>
@@ -88,6 +88,6 @@
 <polygon points="935,805 930.0,794.0 940.0,794.0" fill="#2563eb"/>
 <rect x="878.5" y="734" width="113.0" height="23" rx="4" fill="#ffffff"/>
 <text x="935" y="752" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="16" font-weight="400" text-anchor="middle" fill="#2563eb">Firebase 경유</text>
-<text x="32" y="947" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">점선 상자는 기본 CPU 구현을 제공하며 교체 가능하다. 외관 유사도와 대표색은 확정 신원·의복 분할 결과가 아니다.</text>
+<text x="32" y="947" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">점선 상자는 교체 가능한 처리기다. OSNet은 사전 준비가 필요하며, 인물 연결 점수는 동일인 확률이 아니다.</text>
 <text x="32" y="974" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="start" fill="#475569">작업은 5분 동안 임대하고 최대 5회 시도한다. 늦은 완료는 거부하며, 후속 결과 갱신은 추가 푸시를 만들지 않는다.</text>
 </svg>

@@ -56,6 +56,8 @@ async def get_current_principal(
     # 서명이 맞아도 로그아웃·계정 정지·권한 변경이 있었을 수 있어 현재 DB 상태를 다시 확인한다.
     if await data.is_access_token_revoked(claims.jti):
         raise _unauthorized("Access token revoked")
+    if not await data.is_session_family_active(claims.session_id, claims.sub):
+        raise _unauthorized("Login session revoked")
 
     try:
         user = await data.get_user(claims.sub)
