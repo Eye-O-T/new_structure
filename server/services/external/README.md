@@ -30,13 +30,13 @@ Edge를 수동으로 추가할 때는 [Edge 수동 연결](../../../edge/README.
 | `tools/export_openapi.py` | 공개 API 명세 생성과 `docs/openapi.yaml` 일치 검사 |
 | `tests/` | API·인증·영상 권한·동시 실행 검증 |
 
-모바일을 새로 구현할 때는 [OpenAPI](../../../docs/openapi.yaml)를 기준으로 한다. 실행 중인 서버에서는 공개 HTTPS 주소 뒤에 `/api/v1/docs`를 붙이면 요청·응답을 확인할 수 있다. 공개 API를 변경하면 [서버 자동 테스트](../../../docs/guide.md#서버-자동-테스트)의 OpenAPI 검증·갱신 절차도 수행한다.
+모바일을 새로 구현할 때는 [OpenAPI](../../../docs/openapi.yaml)를 기준으로 한다. 실행 중인 서버에서는 공개 HTTPS 주소 뒤에 `/api/v1/docs`를 붙이면 요청·응답을 확인할 수 있다. 공개 API를 변경하면 [서버 자동 테스트](../../../docs/deployment-guide.md#서버-자동-테스트)의 OpenAPI 검증·갱신 절차도 수행한다.
 
-첫 관리자 생성 도구는 저장소 루트에서 `python server/services/external/tools/bootstrap_admin.py --username admin`으로 실행한다. 기본 `server/.env` 또는 `--server-dir` 아래 `.env`를 사용하며 설치 도우미의 `compose.env`를 자동 선택하지 않는다. 기존 계정의 비밀번호를 변경하는 명령은 아니다. 설정 도우미 설치의 초기 관리자 준비와 구분하여 [소스 배포](../../../docs/guide.md#소스-배포)에 사용한다.
+첫 관리자 생성 도구는 저장소 루트에서 `python server/services/external/tools/bootstrap_admin.py --username admin`으로 실행한다. 기본 `server/.env` 또는 `--server-dir` 아래 `.env`를 사용하며 설치 도우미의 `compose.env`를 자동 선택하지 않는다. 기존 계정의 비밀번호를 변경하는 명령은 아니다. 설정 도우미 설치의 초기 관리자 준비와 구분하여 [소스 배포](../../../docs/deployment-guide.md#소스-배포)에 사용한다.
 
 ## 실행과 검증
 
-[개발 환경](../../../docs/guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
+[개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```powershell
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec external python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/external/tests -q
@@ -58,6 +58,6 @@ docker compose --env-file server/.env -f server/compose.yml -f server/compose.de
 - Nginx·MediaMTX는 `app/api/media_auth.py`를 통해 영상 접근 권한을 확인한다. 카메라 변경·인증이 동시에 실행되어도 비활성 카메라의 새 송출·실시간 열람이 허용되지 않도록 기존 순서 제어를 유지한다. 비활성 카메라의 과거 녹화는 사용자 권한에 따라 조회할 수 있다.
 - 송출 인증값이 없는 카메라는 빈 값으로도 인증하지 않으며 `PUBLISH_CREDENTIAL_MISSING`을 로그에 남긴다. 관리자가 게시 계정을 발급하고 해당 Edge에 적용해야 한다. 화질 변경은 작업 잠금만 유지하여 Edge의 송출 재인증을 허용하고, 등록·비활성화·삭제·키 교체는 작업 잠금 뒤 입장 인증 잠금을 잡아 순서를 보장한다. 두 잠금 순서를 뒤집지 않는다.
 - 이벤트·푸시 대기열·재시도 상태는 Data가 저장한다. External은 대기 작업을 받아 발송하고 결과를 보고한다.
-- FCM 발송은 별도 설정이 필요하다. 서버 기동만으로 푸시가 활성화되지는 않는다. 설정과 실제 단말 확인은 [모바일과 푸시](../../../docs/guide.md#모바일과-푸시)를 따른다.
+- FCM 발송은 별도 설정이 필요하다. 서버 기동만으로 푸시가 활성화되지는 않는다. 설정과 실제 단말 확인은 [모바일과 푸시](../../../docs/deployment-guide.md#모바일과-푸시)를 따른다.
 
-전체 통신 흐름은 [구조 문서](../../../docs/architecture.md), 서비스 간 검증은 [서버 자동 테스트](../../../docs/guide.md#서버-자동-테스트)를 따른다.
+전체 통신 흐름은 [구조 문서](../../../docs/architecture.md), 서비스 간 검증은 [서버 자동 테스트](../../../docs/deployment-guide.md#서버-자동-테스트)를 따른다.

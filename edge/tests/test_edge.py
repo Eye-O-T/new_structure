@@ -1033,4 +1033,4 @@ def test_edge_package_metadata_and_reproducible_build_contract_are_consistent():
     assert positions == sorted(positions)
     assert "(docs/architecture.md)" in root_readme
     assert "## 사용하기" in root_readme
-    assert "docs/guide.md" in root_readme
+    assert "docs/deployment-guide.md" in root_readme

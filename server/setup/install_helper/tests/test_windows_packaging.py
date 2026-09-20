@@ -52,7 +52,7 @@ def test_inno_installer_packages_gui_cli_and_required_compose_context():
     assert 'Parameters: """{app}\\README.md"""' in installer
     for document in (
         "README.md",
-        "guide.md",
+        "deployment-guide.md",
         "operations.md",
         "architecture.md",
         "openapi.yaml",

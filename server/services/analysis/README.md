@@ -35,7 +35,7 @@ Data에서 작업과 사람 영역 이미지(크롭)의 경로를 받아 추가 
 
 중앙 Compose로 실행한다. 플러그인 선택은 `server/.env`의 `ANALYSIS_PLUGIN`, Data 인증키는 `server/secrets/analysis.env`의 `DATA_ANALYSIS_TOKEN`이 기본 위치다. 이 토큰은 32자 이상이며 Data에 설정한 같은 이름의 토큰과 일치해야 한다. 모델 의존성은 이 서비스의 `requirements.txt`에 추가하고 이미지를 다시 빌드한다. 모델은 `MODELS_DIR`에서 컨테이너의 `/models`에 읽기 전용으로 연결되며, 사용할 파일은 플러그인이 선택한다.
 
-[개발 환경](../../../docs/guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
+[개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```powershell
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec analysis python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/analysis/tests -q
@@ -43,7 +43,7 @@ docker compose --env-file server/.env -f server/compose.yml -f server/compose.de
 
 플러그인 초기화·호출은 별도 `spawn` 자식 프로세스에서 실행한다. `OBJECT_MODEL_TIMEOUT_SECONDS`는 기본 120초(`0 < 값 ≤ 240`), `OBJECT_STARTUP_TIMEOUT_SECONDS`는 기본 30초(`0 < 값 ≤ 120`)다. 시간 초과한 자식은 종료한 뒤 재생성하며 초기화 오류는 30초 후 재시도한다. 완료 HTTP 응답이 유실되면 보관한 동일 lease·본문을 재전송해 같은 프로세스 안에서 모델을 다시 실행하지 않는다. 프로세스 전체가 중단되면 Data의 임대 만료 후 재처리될 수 있다.
 
-`/health/live`는 프로세스 생존 여부, `/health/ready`는 작업 처리 통로의 상태다. `backend`·`model_ready`·`last_error`·`last_outcome`을 실제 결과와 함께 확인한다. 명시적으로 선택한 블랙박스는 `unconfigured`이며 HTTP 200이 모델 성능 검증을 뜻하지 않는다. 세부 응답은 [상태 확인](../../../docs/architecture.md#상태-확인)을 따른다.
+`/health/live`는 프로세스 생존 여부, `/health/ready`는 작업 처리 통로의 상태다. `backend`·`model_ready`·`last_error`·`last_outcome`을 실제 결과와 함께 확인한다. 명시적으로 선택한 블랙박스는 `unconfigured`이며 HTTP 200이 모델 성능 검증을 뜻하지 않는다. 세부 응답은 [상태 확인](../../../docs/operations.md#상태-확인)을 따른다.
 
 [기본 분석기 테스트](tests/test_local_appearance.py)는 실제 합성 JPEG로 상·하체 색 분리, 배경 억제, 흑백·다색·노출 상태, 크기 제한과 손상 입력 거부를 확인한다. 로컬 Python 환경에서 다음으로 재현할 수 있다.
 
@@ -51,4 +51,4 @@ docker compose --env-file server/.env -f server/compose.yml -f server/compose.de
 python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/analysis/tests -q
 ```
 
-이는 카메라·Docker 없이 수행하는 코드 및 JPEG 처리 검증이다. 실제 CCTV 의복 정답률과 운영 컨테이너 기동·처리시간은 검증하지 않았다. 개발 Compose에서 실제 크롭을 등록하고 `metadata.analysis.result`의 영역·RGB·비율을 원본과 비교하는 절차는 [Analysis 인수 문서](../../../docs/SRS_interface_analysis.md#5-인수-검증)를 따른다.
+이는 카메라·Docker 없이 수행하는 코드 및 JPEG 처리 검증이다. 실제 CCTV 의복 정답률과 운영 컨테이너 기동·처리시간은 검증하지 않았다. 개발 Compose에서 실제 크롭을 등록하고 `metadata.analysis.result`의 영역·RGB·비율을 원본과 비교하는 절차는 [Analysis 인수 문서](../../../docs/tmp/analysis-interface.md#교체와-인수)를 따른다.

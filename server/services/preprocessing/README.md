@@ -40,7 +40,7 @@ OpenCV DNN CPU로 실행하며, 입력은 RGB `float32` NCHW `1×3×256×128`이
 
 ## 실행과 검증
 
-중앙 Compose로 실행한다. 감지 설정은 `server/config/config.yaml`의 `inference`, 모델·플러그인 선택은 `server/.env`, 인증키는 `server/secrets/preprocessing.env`가 기본 위치다. 설정 준비는 [소스 배포](../../../docs/guide.md#소스-배포)를 따른다.
+중앙 Compose로 실행한다. 감지 설정은 `server/config/config.yaml`의 `inference`, 모델·플러그인 선택은 `server/.env`, 인증키는 `server/secrets/preprocessing.env`가 기본 위치다. 설정 준비는 [소스 배포](../../../docs/deployment-guide.md#소스-배포)를 따른다.
 
 Compose는 `MODELS_DIR`를 `/models`에 읽기 전용으로 연결하고, `MODEL_FILE`로 감지기의 `/models/<파일명>` 경로를 설정한다. 환경변수가 YAML보다 우선하므로 이 구성에서는 `inference.model_path`만 바꿔도 감지 모델 파일이 바뀌지 않는다. 인물 연결은 별도의 `IDENTITY_MODEL_PATH`를 사용한다. `inference.enabled: false`는 감지만 끄며 OSNet 모델 준비를 대신하지 않는다.
 
@@ -56,13 +56,13 @@ python server/tools/prepare_osnet.py
 
 `unconfigured`로 종료된 인물 연결 작업은 모델 교체·재시작만으로 다시 처리하지 않는다. 모델을 연결하고 크롭 파일이 남아 있는지 확인한 뒤 내부 네트워크에서 `POST http://nginx:8080/internal/data/v1/object-jobs/identity/requeue-unconfigured`를 호출한다. 본문은 없고 `X-Internal-Token`에는 `DATA_IDENTITY_TOKEN`을 사용한다. 응답 `{"requeued": 수량}`만큼 최대 100건씩 다시 대기하므로 남은 작업이 있으면 반복한다. 만료된 임대·재시도·재등록 규칙은 [Data 작업 저장소](../data/app/database/repositories/objects.py)와 [권한 검사](../data/app/security.py)를 따른다.
 
-[개발 환경](../../../docs/guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
+[개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```powershell
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec preprocessing python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/preprocessing/tests -q
 ```
 
-`/health/ready`는 Data 연결에 성공하면 HTTP 200이면서 본문은 `degraded`일 수 있다. 실제 감지 상태는 카메라별 `workers`, 인물 연결 상태는 `identity`의 `ready`·`stalled`·`last_error`·`last_outcome`을 함께 확인한다. 모델·영상 오류와 블랙박스 상태의 해석은 [상태 확인](../../../docs/architecture.md#상태-확인)을 따른다.
+`/health/ready`는 Data 연결에 성공하면 HTTP 200이면서 본문은 `degraded`일 수 있다. 실제 감지 상태는 카메라별 `workers`, 인물 연결 상태는 `identity`의 `ready`·`stalled`·`last_error`·`last_outcome`을 함께 확인한다. 모델·영상 오류와 블랙박스 상태의 해석은 [상태 확인](../../../docs/operations.md#상태-확인)을 따른다.
 
 감지가 켜진 카메라의 offline·stopped·모델 미준비, 이벤트 보존 오류·거부 큐, 오래된 프레임은 `degraded`로 표시한다. `frame_age_seconds`는 마지막 수신 후 단조 시계 경과 시간이며 아직 수신하지 않았으면 `null`이다. 상태 조회에서 `max(30초, RTSP_TIMEOUT_SECONDS×2)` 이상 프레임이 없으면 `frame_stale=true`가 된다. 첫 프레임 전에는 카메라 작업자 생성부터 같은 유예시간을 적용한다.
 
@@ -93,4 +93,4 @@ docker compose --env-file server/.env -f server/compose.yml exec preprocessing p
 python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/preprocessing/tests -q
 ```
 
-공식 가중치로 ONNX를 실제 생성하고 PyTorch 2.8.0 CPU와 OpenCV 4.11의 세 입력 출력을 비교했다. 변환 기록 `.onnx.json`에는 해시·버전·검증 수치가 남는다. 자세한 재현 방법은 [모델 준비 도구 안내](../../tools/README.md)를 따른다. 이 확인은 변환·실행 호환성의 근거이며 CCTV 재식별 정확도를 보증하지 않는다. Docker·실제 카메라에서의 정확도·처리량·전체 기동은 별도 검증이 필요하다. 준비한 YOLO와 OSNet을 읽기 전용 모델 폴더에 두고 [Preprocessing 인수 문서](../../../docs/SRS_interface_preprocessing.md)의 실제 프레임·등장 이벤트·crop·전역 연결·장애 복구 절차를 수행한다.
+공식 가중치로 ONNX를 실제 생성하고 PyTorch 2.8.0 CPU와 OpenCV 4.11의 세 입력 출력을 비교했다. 변환 기록 `.onnx.json`에는 해시·버전·검증 수치가 남는다. 자세한 재현 방법은 [모델 준비 도구 안내](../../tools/README.md)를 따른다. 이 확인은 변환·실행 호환성의 근거이며 CCTV 재식별 정확도를 보증하지 않는다. Docker·실제 카메라에서의 정확도·처리량·전체 기동은 별도 검증이 필요하다. 준비한 YOLO와 OSNet을 읽기 전용 모델 폴더에 두고 [Preprocessing 인수 문서](../../../docs/tmp/preprocessing-interface.md)의 실제 프레임·등장 이벤트·crop·전역 연결·장애 복구 절차를 수행한다.

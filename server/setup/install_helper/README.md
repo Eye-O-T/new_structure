@@ -1,6 +1,6 @@
 # 서버 설치 도우미
 
-Windows에서 서버 설치와 최초 Edge 연결을 돕는 GUI·CLI다. 설정 생성과 공통 검증은 상위 `server/setup/`을 호출하며, 창을 닫아도 서버 컨테이너는 계속 동작한다. 설치 파일 사용자는 [설치 안내](../../../docs/guide.md#windows-설치)를 따른다.
+Windows에서 서버 설치와 최초 Edge 연결을 돕는 GUI·CLI다. 설정 생성과 공통 검증은 상위 `server/setup/`을 호출하며, 창을 닫아도 서버 컨테이너는 계속 동작한다. 설치 파일 사용자는 [설치 안내](../../../docs/deployment-guide.md#windows-설치)를 따른다.
 
 | 위치 | 역할 |
 |---|---|
@@ -100,7 +100,7 @@ AI_CCTV_CLI.exe doctor 'C:\ProgramData\AI_CCTV\config\config.yaml' --env-file 'C
 
 CLI가 기본 선택하는 env는 `AI_CCTV_COMPOSE_ENV_FILE` 환경변수, 설치 저장소의 `config\compose.env`, 소스의 `server/.env` 순서다. 설치 EXE는 설치 저장소의 경로를 사용하며, 소스 CLI도 설치 저장소에 env가 이미 있으면 이를 우선한다. **개발 배포는 서비스 명령에 `--env-file`을 명시한다.** 기본 저장소는 `AI_CCTV_DATA_ROOT`로 지정할 수 있다.
 
-선택한 env와 같은 폴더의 `push.env`에서 FCM을 활성화하면 도우미는 시작·상태·로그·중지에 푸시 구성을 함께 적용한다. 파일 준비는 [모바일과 푸시](../../../docs/guide.md#모바일과-푸시), 백업·복원은 [운영과 백업](../../../docs/guide.md#운영과-백업)을 따른다.
+선택한 env와 같은 폴더의 `push.env`에서 FCM을 활성화하면 도우미는 시작·상태·로그·중지에 푸시 구성을 함께 적용한다. 파일 준비는 [모바일과 푸시](../../../docs/deployment-guide.md#모바일과-푸시), 백업·복원은 [운영과 백업](../../../docs/operations.md#운영과-백업)을 따른다.
 
 배포 env와 `push.env`는 같은 파서로 읽는다. 공백이 있는 경로나 `PUSH_ENABLED="true"` 같은 큰따옴표 값도 지원한다. 값 안에 `$`가 있는 비밀값은 Compose 치환을 피하도록 작은따옴표를 사용한다.
 

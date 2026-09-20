@@ -36,7 +36,7 @@
 
 운영체제가 종료·강제 종료 요청 후에도 자식을 살아 있는 상태로 보고하면 복구 worker는 `RECOVERY_PROCESS_DID_NOT_STOP` 오류와 readiness 503을 유지하며 후속 작업 claim을 중단한다. 실행 중 파일과 작업 상태를 보존해 중복 쓰기를 막는다. 운영자는 해당 프로세스와 저장장치 상태를 확인하여 종료한 뒤 Data 서비스를 재시작해야 한다.
 
-Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/guide.md#운영과-백업)을 따른다. 온라인 DB 백업 도구는 Data 서비스가 소유하며 저장소 루트에서 `python server/services/data/tools/backup_database.py`로 실행한다. 기본 `server/.env` 또는 `--server-dir` 아래 `.env`를 사용하고 결과는 `DATABASE_DIR/backups`에 저장한다. 설치 도우미의 `config/compose.env`를 자동으로 선택하지 않으며 영상·설정·비밀 파일은 이 백업에 포함하지 않는다.
+Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/operations.md#운영과-백업)을 따른다. 온라인 DB 백업 도구는 Data 서비스가 소유하며 저장소 루트에서 `python server/services/data/tools/backup_database.py`로 실행한다. 기본 `server/.env` 또는 `--server-dir` 아래 `.env`를 사용하고 결과는 `DATABASE_DIR/backups`에 저장한다. 설치 도우미의 `config/compose.env`를 자동으로 선택하지 않으며 영상·설정·비밀 파일은 이 백업에 포함하지 않는다.
 
 ## 보관과 조회
 
@@ -48,10 +48,10 @@ Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/g
 
 ## 검증
 
-[개발 환경](../../../docs/guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
+[개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```powershell
 docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec data python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/data/tests -q
 ```
 
-서비스 간 연동·복구·푸시·객체 처리 검증은 [서버 자동 테스트](../../../docs/guide.md#서버-자동-테스트)를 따른다.
+서비스 간 연동·복구·푸시·객체 처리 검증은 [서버 자동 테스트](../../../docs/deployment-guide.md#서버-자동-테스트)를 따른다.
