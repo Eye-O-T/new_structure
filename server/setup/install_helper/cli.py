@@ -70,7 +70,9 @@ def _init(args: argparse.Namespace) -> int:
             public_http_port=args.http_port,
             public_https_port=args.https_port,
             public_bind_address=args.public_bind,
-            public_base_url=args.public_base_url,
+            public_base_url=args.public_base_url or f"{args.public_scheme}://127.0.0.1",
+            public_scheme=args.public_scheme,
+            allow_insecure_http=args.allow_insecure_http,
             rtsp_bind_address=args.rtsp_bind,
             rtsp_port=args.rtsp_port,
             recording_segment_seconds=args.recording_segment_seconds,
@@ -104,7 +106,7 @@ def _init(args: argparse.Namespace) -> int:
     if result.tls_certificate_path.is_file():
         print(f"TLS certificate: {result.tls_certificate_path}")
         print(f"TLS private key: {result.tls_private_key_path}")
-    else:
+    elif args.public_scheme == "https":
         print(
             "[WARN] TLS certificate/key are not installed. Provide --tls-certificate "
             "and --tls-private-key before starting services."
@@ -143,7 +145,8 @@ def _install(args: argparse.Namespace) -> int:
     supplied_pair = (
         args.tls_certificate is not None and args.tls_private_key is not None
     )
-    if not supplied_pair and not (certificate.is_file() and private_key.is_file()):
+    https_selected = args.public_scheme == "https"
+    if https_selected and not supplied_pair and not (certificate.is_file() and private_key.is_file()):
         print(
             "[ERROR] TLS_REQUIRED: install requires --tls-certificate and "
             "--tls-private-key (or an existing pair in the data root)."
@@ -299,11 +302,22 @@ def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--camera", action="append", type=_camera, default=[])
     parser.add_argument("--http-port", type=int, default=80)
     parser.add_argument("--https-port", type=int, default=443)
+    parser.add_argument(
+        "--public-scheme",
+        choices=("http", "https"),
+        default="https",
+        help="public transport scheme; HTTPS requires a certificate/key pair",
+    )
+    parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="explicitly allow HTTP mode without TLS (required with --public-scheme http)",
+    )
     parser.add_argument("--public-bind", default="127.0.0.1")
     parser.add_argument(
         "--public-base-url",
-        default="https://127.0.0.1",
-        help="public HTTPS origin returned in Live and Playback URLs",
+        default=None,
+        help="public HTTP/HTTPS origin returned in Live and Playback URLs",
     )
     parser.add_argument(
         "--rtsp-bind",

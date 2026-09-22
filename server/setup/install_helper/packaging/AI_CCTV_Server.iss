@@ -64,6 +64,7 @@ Source: "..\..\..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\mobile\README.md"; DestDir: "{app}\mobile"; Flags: ignoreversion
 Source: "..\..\..\..\server\setup\install_helper\README.md"; DestDir: "{app}\server\setup\install_helper"; Flags: ignoreversion
+Source: "..\..\..\..\server\setup\install_helper\desktop\README.md"; DestDir: "{app}\server\setup\install_helper\desktop"; Flags: ignoreversion
 Source: "..\..\..\..\edge\README.md"; DestDir: "{app}\edge"; Flags: ignoreversion
 Source: "..\..\..\..\tests\mock_edge\README.md"; DestDir: "{app}\tests\mock_edge"; Flags: ignoreversion
 Source: "..\..\..\..\docs\README.md"; DestDir: "{app}\docs"; Flags: ignoreversion

@@ -198,14 +198,14 @@ def test_dotenv_quotes_dollar_values_without_compose_interpolation():
         _dotenv("first\nsecond")
 
 
-def test_public_base_url_accepts_only_an_https_origin():
+def test_public_base_url_accepts_http_and_https_origins():
     assert _validate_public_base_url("") == ""
     assert (
         _validate_public_base_url(" https://cctv.example.com:8443/ ")
         == "https://cctv.example.com:8443"
     )
+    assert _validate_public_base_url("http://cctv.example.com:8080") == "http://cctv.example.com:8080"
     for invalid in (
-        "http://cctv.example.com",
         "https://admin:secret@cctv.example.com",
         "https://cctv.example.com/api",
         "https://cctv.example.com?token=secret",

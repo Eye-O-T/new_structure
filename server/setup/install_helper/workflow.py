@@ -40,6 +40,7 @@ class Installation:
     rtsp_host: str
     rtsp_port: int
     admin_username: str
+    allow_insecure_http: bool = False
 
 
 _MARKER = ".installation-in-progress"
@@ -123,13 +124,18 @@ def inspect_installation(data_root: Path, server_dir: Path) -> Installation | No
         if not re.fullmatch(r"[A-Za-z0-9_.@-]{3,64}", admin_username):
             raise ValueError(_RECOVERY_MESSAGE)
         public_url = _validate_public_base_url(values.get("PUBLIC_BASE_URL", ""))
+        scheme = values.get("PUBLIC_SCHEME", urlsplit(public_url).scheme or "https").lower()
+        allow_insecure_http = values.get("ALLOW_INSECURE_HTTP", "false").lower() == "true"
+        if scheme not in {"http", "https"} or (scheme == "http" and not allow_insecure_http):
+            raise ValueError(_RECOVERY_MESSAGE)
         bind = values.get("PUBLIC_BIND_ADDRESS", "127.0.0.1")
         ip_address(bind)
         if not public_url:
             host = "localhost" if bind in {"0.0.0.0", "::"} else bind
             authority = f"[{host}]" if ":" in host else host
-            port = config.server.public_https_port
-            public_url = f"https://{authority}" + (f":{port}" if port != 443 else "")
+            port = config.server.public_http_port if scheme == "http" else config.server.public_https_port
+            default_port = 80 if scheme == "http" else 443
+            public_url = f"{scheme}://{authority}" + (f":{port}" if port != default_port else "")
         rtsp_host = config.server.rtsp_bind_address
         if rtsp_host in {"0.0.0.0", "::"}:
             rtsp_host = urlsplit(public_url).hostname or "localhost"
@@ -141,6 +147,7 @@ def inspect_installation(data_root: Path, server_dir: Path) -> Installation | No
             rtsp_host=rtsp_host,
             rtsp_port=config.server.rtsp_port,
             admin_username=admin_username,
+            allow_insecure_http=allow_insecure_http,
         )
     except (OSError, UnicodeError, ValueError, yaml.YAMLError):
         # YAML/Pydantic 오류에는 입력값이 들어갈 수 있으므로 화면에는 원문을 전달하지 않는다.
@@ -154,6 +161,8 @@ def preflight(
     private_key_path: Path | None,
     identity_model_path: Path | None = None,
     data_root: Path | None = None,
+    public_scheme: str = "https",
+    allow_insecure_http: bool = False,
 ) -> list[Prerequisite]:
     """파일을 쓰지 않고 Docker와 사용자가 준비한 모델·TLS를 검사한다."""
 
@@ -242,9 +251,9 @@ def preflight(
             )
         )
 
-    tls_ok = False
-    tls_message = "HTTPS 인증서와 암호화되지 않은 개인키 파일을 모두 선택하세요."
-    if certificate_path is not None and private_key_path is not None:
+    tls_ok = public_scheme == "http" and allow_insecure_http
+    tls_message = "HTTP 모드가 명시적으로 허용되었습니다." if tls_ok else "HTTPS 인증서와 암호화되지 않은 개인키 파일을 모두 선택하세요."
+    if public_scheme == "https" and certificate_path is not None and private_key_path is not None:
         try:
             _validate_tls_files(certificate_path, private_key_path)
             tls_ok = True
@@ -266,7 +275,7 @@ def _validate_install_input(
     request: InstallRequest, *, require_tls: bool = True
 ) -> None:
     try:
-        if require_tls and (
+        if require_tls and request.public_scheme == "https" and (
             request.tls_certificate_path is None or request.tls_private_key_path is None
         ):
             raise ValueError("TLS files are required for installation")
@@ -332,6 +341,8 @@ def install_new(
             request.tls_private_key_path,
             request.identity_model_path,
             request.data_root,
+            request.public_scheme,
+            request.allow_insecure_http,
         )
         failures = [item.message for item in prerequisites if not item.ok]
         if failures:

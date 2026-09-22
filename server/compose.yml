@@ -223,7 +223,7 @@ services:
       - "8080"
     volumes:
       - type: bind
-        source: ./services/nginx/nginx.conf
+        source: ${NGINX_CONFIG_FILE:-./services/nginx/nginx.conf}
         target: /etc/nginx/nginx.conf
         read_only: true
         bind:

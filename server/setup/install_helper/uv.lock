@@ -33,6 +33,7 @@ source = { editable = "." }
 dependencies = [
     { name = "ai-cctv-core" },
     { name = "ai-cctv-server-setup" },
+    { name = "av" },
     { name = "pyqt5" },
 ]
 
@@ -49,6 +50,7 @@ test = [
 requires-dist = [
     { name = "ai-cctv-core", editable = "../../../lib" },
     { name = "ai-cctv-server-setup", editable = "../" },
+    { name = "av", specifier = "==14.0.1" },
     { name = "pyinstaller", marker = "extra == 'build'", specifier = "==6.11.1" },
     { name = "pyqt5", specifier = "==5.15.11" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==8.3.4" },
@@ -124,6 +126,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ae/70/7eb3fe7bf00103cbbb569c51aef150661f22b734a782673a600ff0f52309/argon2_cffi_bindings-26.1.0-pp311-pypy311_pp73-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:49d525938467d52c923a890153c99087c9d5a937d1f6b585dbdba34ec82e397a", size = 24869, upload-time = "2026-08-20T07:33:20.671Z" },
     { url = "https://files.pythonhosted.org/packages/5b/4b/9d5919c6cb1f15df7406af0f99b048bd93936f112e3e8f4c8077bc2a9110/argon2_cffi_bindings-26.1.0-pp311-pypy311_pp73-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1b0bcac4d490a237e18cf91f57352920c29f77f2fa39efd0813fb81298bf17ba", size = 24216, upload-time = "2026-08-20T07:33:21.653Z" },
     { url = "https://files.pythonhosted.org/packages/a3/34/32109943bace7729233cc4ee78530baa306d8cc3c6501a64ba8cb3b58129/argon2_cffi_bindings-26.1.0-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:0cc40f7b4050bb93eb67de95d2d759322fc7ce4930b9d645581ecf4913ec651e", size = 23584, upload-time = "2026-08-20T07:33:22.613Z" },
+]
+
+[[package]]
+name = "av"
+version = "14.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/6a/8461055082eee773b549b87519eb8519c2194af1157f6971e3a0722b308e/av-14.0.1.tar.gz", hash = "sha256:2b0a17301af469ddaea46b5c1c982df1b7b5de8bc6c94cdc98cad4a67178c82a", size = 3918806, upload-time = "2024-12-06T11:54:36.535Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/46/ad32d62c13369116ff9761c5e4eac248cfe9553abb6e4828f77a7adafaf6/av-14.0.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:b9cfdc671bb7e09824897164626d76a8ecdc009c13afef3decb7071de57f0c71", size = 19527044, upload-time = "2024-12-06T11:52:46.159Z" },
+    { url = "https://files.pythonhosted.org/packages/73/60/13024290b4c726a08ec83d4da4d8f46078479de9946df042456ea4688b47/av-14.0.1-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:9198ffaab74b8ac659d14b355c1821208e8b16f35138f4922721113bc6c7b7ab", size = 24331238, upload-time = "2024-12-06T11:52:49.401Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/9d/c230d1a035ce69d43637da592be5f18a0c9d37b1eca9a07e4ab92f464351/av-14.0.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e85d933bbcde2db01d114419283edda35330ca651b11f9f5d6a694ce0c1b26ee", size = 31990679, upload-time = "2024-12-06T11:52:52.864Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/61/ead56d9c2ced8c7770a84732d12ff33abab02c83629edf13232375a87f9f/av-14.0.1-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:f1f13b662e8f8a7736fb7bc34e17d6c5a4e57b7142bae6b0502d962173883b26", size = 31345454, upload-time = "2024-12-06T11:52:56.411Z" },
+    { url = "https://files.pythonhosted.org/packages/46/b0/6380e05f36ec78c4695df9cc6c6fc6c3dec976caf105bacee5328f83d198/av-14.0.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7e54203fccff31c8bc6563df6dceff8c236fd1e18fdb1771b1a56ed1525cd72b", size = 33811771, upload-time = "2024-12-06T11:52:59.086Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/4e/2e8c56f999bfecfca773a83faa06b79cb6d619ce5a6abffce02e7be3efba/av-14.0.1-cp311-cp311-win_amd64.whl", hash = "sha256:25d817747929babe8b4a2a8dc06ce0562cc5d64a09231faa4d3b2b0037f3d71b", size = 25843494, upload-time = "2024-12-06T11:53:02.615Z" },
 ]
 
 [[package]]

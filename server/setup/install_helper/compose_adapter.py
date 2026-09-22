@@ -223,12 +223,13 @@ class ComposeAdapter:
                 values, models_root
             )
         certificate_root = deployment_path("CERTS_DIR")
-        required_files["TLS certificate"] = (
-            certificate_root / "tls.crt" if certificate_root is not None else None
-        )
-        required_files["TLS private key"] = (
-            certificate_root / "tls.key" if certificate_root is not None else None
-        )
+        if values.get("PUBLIC_SCHEME", "https").lower() == "https":
+            required_files["TLS certificate"] = (
+                certificate_root / "tls.crt" if certificate_root is not None else None
+            )
+            required_files["TLS private key"] = (
+                certificate_root / "tls.key" if certificate_root is not None else None
+            )
         for name, path in required_files.items():
             present = path is not None and path.is_file()
             if present and name == "OSNet identity model":

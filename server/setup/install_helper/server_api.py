@@ -191,11 +191,12 @@ class ServerApiClient:
         *,
         timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS,
         opener: Callable[..., Any] | None = None,
+        allow_insecure_http: bool = False,
     ) -> None:
         parsed = urlsplit(base_url.strip())
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("server URL must be an absolute HTTP(S) URL")
-        if parsed.scheme != "https" and not _is_loopback(parsed.hostname):
+        if parsed.scheme != "https" and not (allow_insecure_http or _is_loopback(parsed.hostname)):
             raise ValueError("server URL must use HTTPS except on the local loopback")
         if parsed.username or parsed.password:
             raise ValueError("server URL must not contain credentials")

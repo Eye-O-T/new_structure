@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import os
-import webbrowser
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PyQt5.QtCore import QSettings, QTimer, Qt
+from PyQt5.QtCore import QSettings, QTimer, Qt, QUrl
+from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtNetwork import QAbstractSocket, QNetworkInterface
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -185,6 +186,15 @@ class InstallerWindow(QWidget):
         form.addRow(label, row)
         widget.textChanged.connect(self._invalidate_preflight)
 
+    @staticmethod
+    def _open_external_url(url: str) -> None:
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _link_button(self, label: str, url: str) -> QPushButton:
+        button = QPushButton(label)
+        button.clicked.connect(lambda: self._open_external_url(url))
+        return button
+
     # 모델·TLS 파일 선택과 Docker 준비 결과를 첫 단계에서 함께 확인하게 한다.
     def _build_prerequisites(self):
         layout = self._page(
@@ -195,7 +205,11 @@ class InstallerWindow(QWidget):
         self.identity_model = QLineEdit()
         self.tls_certificate = QLineEdit()
         self.tls_private_key = QLineEdit()
+        self.public_scheme = QComboBox()
+        self.public_scheme.addItem("HTTPS (recommended)", "https")
+        self.public_scheme.addItem("HTTP (explicit insecure mode)", "http")
         files = QFormLayout()
+        files.addRow("통신 방식", self.public_scheme)
         self._file_row(
             files, "사람 탐지 모델", self.model, "모델 파일 (*.pt *.onnx *.engine)"
         )
@@ -208,6 +222,17 @@ class InstallerWindow(QWidget):
         self._file_row(
             files, "인증서 개인키", self.tls_private_key, "개인키 (*.key *.pem)"
         )
+        links = QGridLayout()
+        link_items = (
+            ("Docker Desktop 설치", "https://docs.docker.com/desktop/setup/install/windows-install/"),
+            ("WSL 설치 안내", "https://learn.microsoft.com/windows/wsl/install"),
+            ("FFmpeg 다운로드", "https://ffmpeg.org/download.html"),
+            ("사람 감지 모델 안내", "https://docs.ultralytics.com/models/"),
+            ("OSNet 모델 안내", "https://github.com/KaiyangZhou/deep-person-reid/blob/master/docs/MODEL_ZOO.md"),
+        )
+        for index, (label, url) in enumerate(link_items):
+            links.addWidget(self._link_button(label, url), index // 3, index % 3)
+        layout.addLayout(links)
         layout.addLayout(files)
         hint = QLabel(
             "Docker Desktop을 설치하고 Linux 컨테이너 모드로 실행해 주세요. 모델과 HTTPS 인증서·개인키는 배포 담당자에게 받은 파일을 선택합니다. 인증서는 사용할 서버 주소와 일치하고 PC·휴대전화에서 신뢰되어야 합니다."
@@ -221,6 +246,14 @@ class InstallerWindow(QWidget):
         self.check_button = QPushButton("다시 검사")
         self.check_button.clicked.connect(self.check_prerequisites)
         layout.addWidget(self.check_button)
+        self.public_scheme.currentIndexChanged.connect(self._transport_changed)
+        self._transport_changed()
+
+    def _transport_changed(self):
+        https = self.public_scheme.currentData() == "https"
+        self.tls_certificate.setEnabled(https)
+        self.tls_private_key.setEnabled(https)
+        self._invalidate_preflight()
 
     @staticmethod
     def _spin(value, minimum, maximum):
@@ -296,7 +329,9 @@ class InstallerWindow(QWidget):
         layout.addWidget(self.advanced)
         layout.addStretch()
         self.network.currentIndexChanged.connect(self._network_changed)
+        self.http.valueChanged.connect(self._suggest_url)
         self.https.valueChanged.connect(self._suggest_url)
+        self.public_scheme.currentIndexChanged.connect(self._suggest_url)
         self._network_changed()
 
     # 검증된 요청의 공개 설정을 설치 전에 확인할 읽기 전용 영역을 준비한다.
@@ -366,8 +401,10 @@ class InstallerWindow(QWidget):
     # 이전 자동 제안값일 때만 주소를 갱신해 사용자가 입력한 인증서 호스트 이름을 보존한다.
     def _suggest_url(self):
         host = self.network.currentData() or "127.0.0.1"
-        port = self.https.value()
-        suggestion = f"https://{host}" + (f":{port}" if port != 443 else "")
+        scheme = self.public_scheme.currentData()
+        port = self.http.value() if scheme == "http" else self.https.value()
+        default_port = 80 if scheme == "http" else 443
+        suggestion = f"{scheme}://{host}" + (f":{port}" if port != default_port else "")
         if (
             not self.public_base_url.text()
             or self.public_base_url.text() == self._last_suggested_url
@@ -500,7 +537,7 @@ class InstallerWindow(QWidget):
             )
 
         self._start_task(
-            lambda progress: preflight(*args),
+            lambda progress: preflight(*args, self.public_scheme.currentData(), self.public_scheme.currentData() == "http"),
             completed,
             "필수 프로그램과 파일을 검사하고 있습니다…",
         )
@@ -564,10 +601,12 @@ class InstallerWindow(QWidget):
             raise ValueError("비밀번호와 비밀번호 확인이 일치하지 않습니다.")
         if len(self.password.text()) < 12:
             raise ValueError("관리자 비밀번호를 12자 이상 입력해 주세요.")
+        scheme = self.public_scheme.currentData()
         url = _validate_public_base_url(self.public_base_url.text())
         if not url:
             raise ValueError("휴대전화에서 접속할 서버 주소를 입력해 주세요.")
-        if (urlsplit(url).port or 443) != self.https.value():
+        expected_port = self.http.value() if scheme == "http" else self.https.value()
+        if (urlsplit(url).port or (80 if scheme == "http" else 443)) != expected_port:
             raise ValueError(
                 "접속 주소의 포트와 고급 설정의 HTTPS 포트를 같게 지정해 주세요."
             )
@@ -583,9 +622,11 @@ class InstallerWindow(QWidget):
             model_path=Path(self.model.text()),
             identity_model_path=self._path_or_none(self.identity_model),
             cameras=cameras,
-            tls_certificate_path=Path(self.tls_certificate.text()),
-            tls_private_key_path=Path(self.tls_private_key.text()),
+            tls_certificate_path=self._path_or_none(self.tls_certificate) if scheme == "https" else None,
+            tls_private_key_path=self._path_or_none(self.tls_private_key) if scheme == "https" else None,
             public_base_url=url,
+            public_scheme=scheme,
+            allow_insecure_http=scheme == "http",
             public_bind_address=self.public_bind.text().strip(),
             rtsp_bind_address=self.rtsp_bind.text().strip(),
             public_http_port=self.http.value(),
@@ -750,7 +791,25 @@ class InstallerWindow(QWidget):
 
     def open_admin(self):
         if self.installation and self.installation.public_url:
-            webbrowser.open(self.installation.public_url.rstrip("/") + "/admin/")
+            from .desktop.application import CCTVMainWindow
+
+            window = getattr(self, "_admin_window", None)
+            if window is not None and window.isVisible():
+                window.raise_()
+                window.activateWindow()
+                return
+            self._admin_window = CCTVMainWindow(
+                self.installation.public_url,
+                username=self.installation.admin_username,
+                storage_path=self.installation.data_root,
+                ca_file=(
+                    self.installation.data_root / "certs" / "tls.crt"
+                    if (self.installation.data_root / "certs" / "tls.crt").is_file()
+                    else None
+                ),
+                allow_insecure_http=self.installation.allow_insecure_http,
+            )
+            self._admin_window.show()
 
     # 설치 또는 Edge 작업 중에는 창 종료를 보류해 작업 객체가 실행 도중 파괴되지 않게 한다.
     def closeEvent(self, event):

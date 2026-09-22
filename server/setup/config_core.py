@@ -56,6 +56,8 @@ class InstallRequest:
     public_https_port: int = 443
     public_bind_address: str = "127.0.0.1"
     public_base_url: str = ""
+    public_scheme: str = "https"
+    allow_insecure_http: bool = False
     rtsp_bind_address: str = "127.0.0.1"
     rtsp_port: int = 8554
     recording_segment_seconds: int = 60
@@ -167,8 +169,8 @@ def _validate_public_base_url(value: str) -> str:
     if not text:
         return ""
     parsed = urlsplit(text)
-    if parsed.scheme.lower() != "https":
-        raise ValueError("public base URL must use HTTPS")
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("public base URL must use HTTP or HTTPS")
     if not parsed.hostname:
         raise ValueError("public base URL must include a host")
     if parsed.username is not None or parsed.password is not None:
@@ -181,7 +183,7 @@ def _validate_public_base_url(value: str) -> str:
         parsed.port
     except ValueError as exc:
         raise ValueError("public base URL contains an invalid port") from exc
-    return f"https://{parsed.netloc}"
+    return f"{parsed.scheme.lower()}://{parsed.netloc}"
 
 
 # TLS 라이브러리로 인증서와 키를 함께 로드해 PEM 헤더 검사만으로 놓치는 불일치를 잡는다.
@@ -242,6 +244,14 @@ def _validate_tls_pair(request: InstallRequest) -> tuple[Path, Path] | None:
 
 # 관리자·포트·녹화·추론 설정과 파일을 검증하고 파일 생성 전에 사용할 모델 경로를 확정한다.
 def _validate_request(request: InstallRequest) -> Path:
+    if request.public_scheme not in {"http", "https"}:
+        raise ValueError("public scheme must be http or https")
+    if request.public_scheme == "http" and not request.allow_insecure_http:
+        raise ValueError("insecure HTTP requires explicit opt-in")
+    if request.public_base_url:
+        parsed_scheme = urlsplit(request.public_base_url).scheme.lower()
+        if parsed_scheme != request.public_scheme:
+            raise ValueError("public base URL scheme does not match public_scheme")
     if not re.fullmatch(r"[A-Za-z0-9_.@-]{3,64}", request.admin_username):
         raise ValueError("administrator username contains unsupported characters")
     if len(request.admin_password) < 12:
@@ -271,7 +281,9 @@ def _validate_request(request: InstallRequest) -> Path:
     ip_address(request.rtsp_bind_address)
     model_source = request.model_path.expanduser()
     validate_custom_model(model_source)
-    _validate_tls_pair(request)
+    tls_pair = _validate_tls_pair(request)
+    if request.public_scheme == "http" and tls_pair is not None:
+        raise ValueError("TLS files must be omitted when public scheme is HTTP")
     identity_source = resolve_identity_model(
         request.identity_model_path, request.data_root, request.server_dir
     )
@@ -291,6 +303,8 @@ def initialize(request: InstallRequest) -> InstallResult:
         request.identity_model_path, request.data_root, request.server_dir
     )
     public_base_url = _validate_public_base_url(request.public_base_url)
+    if public_base_url and not public_base_url.startswith(f"{request.public_scheme}://"):
+        raise ValueError("public base URL scheme does not match public_scheme")
     root = request.data_root.expanduser().resolve()
     compose_env_path = (
         request.compose_env_path.expanduser().resolve()
@@ -362,7 +376,11 @@ def initialize(request: InstallRequest) -> InstallResult:
     certificate_path = directories["certs"] / "tls.crt"
     private_key_path = directories["certs"] / "tls.key"
     tls_pair = _validate_tls_pair(request)
-    if tls_pair is None and (certificate_path.exists() or private_key_path.exists()):
+    # HTTP 모드에서는 TLS 파일을 사용하지 않는다. 기존 파일이 일부만 남아
+    # 있어도 HTTP 설치를 막지 않으며, 파일 자체는 삭제하지 않고 보존한다.
+    if request.public_scheme == "https" and tls_pair is None and (
+        certificate_path.exists() or private_key_path.exists()
+    ):
         if not (certificate_path.is_file() and private_key_path.is_file()):
             raise ValueError(
                 "persistent TLS certificate/private key are incomplete; select both"
@@ -551,6 +569,12 @@ def initialize(request: InstallRequest) -> InstallResult:
         "PUBLIC_HTTPS_PORT": request.public_https_port,
         "PUBLIC_BIND_ADDRESS": request.public_bind_address,
         "PUBLIC_BASE_URL": public_base_url,
+        "PUBLIC_SCHEME": request.public_scheme,
+        "ALLOW_INSECURE_HTTP": str(request.allow_insecure_http).lower(),
+        "NGINX_CONFIG_FILE": request.server_dir.resolve() / "services" / "nginx" / (
+            "nginx.http.conf" if request.public_scheme == "http" else "nginx.conf"
+        ),
+        "COOKIE_SECURE": str(request.public_scheme == "https").lower(),
         "RTSP_BIND_ADDRESS": request.rtsp_bind_address,
         "RTSP_PORT": request.rtsp_port,
         "RECORDING_SEGMENT_SECONDS": request.recording_segment_seconds,
