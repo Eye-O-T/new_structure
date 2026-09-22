@@ -8,9 +8,9 @@ Windows에서 서버 설치와 최초 Edge 연결을 돕는 GUI·CLI다. 설정 
 | `server/setup/` | 저장 경로·관리자·모델·TLS·녹화 정책 검증, 운영 설정·인증 파일 생성 |
 | `server/setup/validation.py` | 설치 도우미·소스 도구가 공유하는 배포 파일·인증 설정 검증 API |
 | `server/setup/tools/` | 저장 폴더·비밀 파일·개발 인증서 생성, 객체 처리 설정 전환 |
-| 서버 `/admin/` | 운영 중 Edge 등록·변경, 게시 계정 재발급, HD/FHD 변경, 장치·서버 상태 조회 |
+| PyQt 관리자 화면 | 운영 중 Edge 등록·변경, 게시 계정 재발급, HD/FHD 변경, 장치·서버 상태 조회 |
 
-서버가 꺼지면 웹 화면도 사용할 수 없으므로 시작·중지·장애 진단은 호스트 도우미에서 실행한다. 설치 완료 후에는 관리 화면의 **서버 관리자 화면 열기**로 공개 HTTPS 주소에 접속한다. LAN 검색·자동 Pairing은 관리 화면의 **카메라 연결**에서 진행한다.
+서버가 꺼지면 관리자 화면도 사용할 수 없으므로 시작·중지·장애 진단은 호스트 도우미에서 실행한다. 설치 완료 후에는 관리 화면의 **서버 관리자 화면 열기**로 설정한 HTTP(S) 주소에 접속한다. LAN 검색·자동 Pairing은 관리 화면의 **카메라 연결**에서 진행한다.
 
 ## 처음 설치
 
@@ -23,7 +23,7 @@ Windows에서 서버 설치와 최초 Edge 연결을 돕는 GUI·CLI다. 설정 
 | 인물 식별 모델(OSNet) | OSNet x0.25 재식별 ONNX 파일. [모델 준비 도구](../../tools/README.md)로 준비하거나 배포 담당자에게 받음 |
 | TLS 인증서·개인키 | 사용할 HTTPS 이름의 인증서와 암호화되지 않은 PEM 개인키 |
 | 관리자 비밀번호 | 기본 계정 `admin`의 비밀번호를 직접 입력. 12자 이상 |
-| 휴대전화 접속 주소 | `https://cctv.example.com`처럼 실제 서버 주소와 필요 시 포트. 인증서의 서버 이름과 일치해야 함 |
+| 휴대전화 접속 주소 | `http://cctv.example.com` 또는 `https://cctv.example.com`처럼 실제 서버 주소와 필요 시 포트. HTTPS에서 인증서의 서버 이름과 일치해야 함 |
 
 모델·TLS 파일은 선택 저장소의 `models/`·`certs/tls.crt`·`certs/tls.key`, 서버 패키지의 `runtime/models/`·`runtime/certificates/`에서 후보를 찾는다. PC 전체를 검색하지 않으며 다른 위치의 파일은 직접 선택한다. 모델·인증서를 자동 다운로드하거나 자체 인증서를 만들어 신뢰 검사를 우회하지 않는다.
 
@@ -109,13 +109,14 @@ CLI가 기본 선택하는 env는 `AI_CCTV_COMPOSE_ENV_FILE` 환경변수, 설�
 Windows에서 Python 3.11·uv를 준비하고 저장소 루트의 PowerShell에서 실행한다.
 
 ```powershell
-uv sync --project server/setup/install_helper --locked --extra test
+uv sync --project server/setup/install_helper --locked
 uv run --project server/setup/install_helper --locked python -m server.setup.install_helper
 ```
 
-GUI를 종료한 뒤 테스트와 정적 검사를 실행한다.
+GUI를 종료한 뒤 필요에 따라 Python 컴파일 검사를 실행한다.
 
 ```powershell
+python -m compileall -q server/setup/install_helper server/setup/config_core.py
 ```
 
 가상환경은 `server/setup/install_helper/.venv`다. 이 폴더의 `uv.lock`은 도우미와 로컬 `server/setup/`·`lib/` 의존성을 함께 고정한다. 상위 setup 패키지는 GUI 의존성 없이 설치할 수 있으며, GUI·CLI와 해당 개발 의존성은 하위 install_helper 프로젝트에서 관리한다.

@@ -279,7 +279,7 @@ class InstallerWindow(QWidget):
         for label, value in local_networks():
             self.network.addItem(label, value)
         self.public_base_url = QLineEdit()
-        self.public_base_url.setPlaceholderText("예: https://cctv.example.com")
+        self.public_base_url.setPlaceholderText("예: http://cctv.example.com")
         form.addRow("관리자 계정", self.username)
         form.addRow("비밀번호", self.password)
         form.addRow("비밀번호 확인", self.confirm_password)
@@ -595,7 +595,7 @@ class InstallerWindow(QWidget):
             self.pages.setCurrentIndex(self.pages.currentIndex() - 1)
             self._update_navigation()
 
-    # 암호 확인과 HTTPS 주소·포트 일치를 검증하고 현재 화면 값을 공통 설치 요청으로 변환한다.
+    # 암호 확인과 HTTP(S) 주소·포트 일치를 검증하고 현재 화면 값을 공통 설치 요청으로 변환한다.
     def _make_request(self):
         if self.password.text() != self.confirm_password.text():
             raise ValueError("비밀번호와 비밀번호 확인이 일치하지 않습니다.")
@@ -808,6 +808,8 @@ class InstallerWindow(QWidget):
                     else None
                 ),
                 allow_insecure_http=self.installation.allow_insecure_http,
+                rtsp_host=self.installation.rtsp_host,
+                rtsp_port=self.installation.rtsp_port,
             )
             self._admin_window.show()
 

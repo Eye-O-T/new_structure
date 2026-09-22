@@ -16,7 +16,7 @@ MediaMTX 영상에서 사람을 감지·추적한다. 사람 영역 이미지는
 
 ## 현행 입출력과 구현 기준
 
-감지기는 `reset()`과 `process(DetectionFrame) -> DetectionResult`를 제공한다. 입력 영상은 H×W×3 형태의 `uint8` BGR 배열이며 입력 프레임을 변경하지 않는다. 결과에는 카메라·추적 세션 안의 인물 ID, 픽셀 단위 `(x1, y1, x2, y2)` 박스와 신뢰도를 담는다. 프레임 형식·좌표 범위·최대 객체 수는 [감지 계약 코드](processors/detection/contracts.py), 동작 예시는 [감지기 계약 테스트](tests/test_processor_contract.py)에서 확인한다.
+감지기는 `reset()`과 `process(DetectionFrame) -> DetectionResult`를 제공한다. 입력 영상은 H×W×3 형태의 `uint8` BGR 배열이며 입력 프레임을 변경하지 않는다. 결과에는 카메라·추적 세션 안의 인물 ID, 픽셀 단위 `(x1, y1, x2, y2)` 박스와 신뢰도를 담는다. 프레임 형식·좌표 범위·최대 객체 수는 [감지 계약 코드](processors/detection/contracts.py)에서 확인한다.
 
 인물 연결 플러그인은 `process(job: dict, crop_path: Path) -> dict`를 제공한다. `job`은 Data에서 임대한 객체 작업이며 `crop_path`는 검증된 로컬 크롭 경로다. 반환값은 `lease_id`를 제외한 `ObjectJobCompletion` 필드이고 공통 실행기가 임대 ID를 붙여 Data에 완료 결과를 보고한다. `outcome`은 `complete`·`retry`·`failed`·`unconfigured` 중 하나다. 기본 구현은 `complete`와 `identity_descriptor`를 반환하며 `global_person_id`를 만들지 않는다. 교체 플러그인은 완료 때 명시 ID 또는 descriptor 중 하나만 제출할 수 있다. 기본 구현은 공용 JPEG 로더로 8 MiB·1,600만 픽셀 상한과 bbox 치수 일치를 검사하며, 교체 구현도 같은 검증을 유지해야 한다.
 
@@ -36,7 +36,7 @@ OpenCV DNN CPU로 실행하며, 입력은 RGB `float32` NCHW `1×3×256×128`이
 
 현재 입력은 **등장 뒤 짧은 창에서 고른 crop 한 장**이다. 배포 기본 `OBSERVATION_WINDOW_SECONDS=1` 동안 정보가 있는 영역·선명도·크기를 비교하며 특징 평균은 하지 않는다. 카메라별 후보 메모리는 `OBSERVATION_BUFFER_MAX_BYTES=33554432`로 제한하며 상한 초과·퇴장·재접속·정상 종료 때 남은 후보를 확정한다. 0초로 설정하면 즉시 저장한다. 최초 등장 시각을 유지하고 선택 시각·`usable|insufficient` 품질은 이벤트의 `observation_selection`에 기록한다. 확정 이후 입력은 교체하지 않는다. 누락·손상·16픽셀 미만·상수 영상은 OSNet이 실패 처리한다. 유사한 옷·조명·자세·가림으로 오연결·분리가 가능하며, 실명이나 확정 신원 확인에 사용하지 않는다.
 
-유지할 기준은 [객체 스키마](../../../lib/ai_cctv_core/contracts/objects.py), [플러그인 프로토콜](../../../lib/ai_cctv_core/processing/plugins.py), [공통 실행기](../../../lib/ai_cctv_core/processing/worker.py), [Data 작업 API](../data/app/api/objects.py)와 [객체 처리 통합 테스트](../../../tests/automated/test_object_processing.py)다. [인물 식별자 테스트](../../../tests/automated/test_person_identifiers.py)는 카메라·세션별 ID 구분을 검증한다.
+유지할 기준은 [객체 스키마](../../../lib/ai_cctv_core/contracts/objects.py), [플러그인 프로토콜](../../../lib/ai_cctv_core/processing/plugins.py), [공통 실행기](../../../lib/ai_cctv_core/processing/worker.py), [Data 작업 API](../data/app/api/objects.py)다.
 
 ## 실행과 검증
 
@@ -56,10 +56,7 @@ python server/tools/prepare_osnet.py
 
 `unconfigured`로 종료된 인물 연결 작업은 모델 교체·재시작만으로 다시 처리하지 않는다. 모델을 연결하고 크롭 파일이 남아 있는지 확인한 뒤 내부 네트워크에서 `POST http://nginx:8080/internal/data/v1/object-jobs/identity/requeue-unconfigured`를 호출한다. 본문은 없고 `X-Internal-Token`에는 `DATA_IDENTITY_TOKEN`을 사용한다. 응답 `{"requeued": 수량}`만큼 최대 100건씩 다시 대기하므로 남은 작업이 있으면 반복한다. 만료된 임대·재시도·재등록 규칙은 [Data 작업 저장소](../data/app/database/repositories/objects.py)와 [권한 검사](../data/app/security.py)를 따른다.
 
-[개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
-
-```powershell
-```
+중앙 Compose로 실행하며 배포 파일·인증·모델 준비는 [배포 안내](../../../docs/deployment-guide.md)를 따른다.
 
 `/health/ready`는 Data 연결에 성공하면 HTTP 200이면서 본문은 `degraded`일 수 있다. 실제 감지 상태는 카메라별 `workers`, 인물 연결 상태는 `identity`의 `ready`·`stalled`·`last_error`·`last_outcome`을 함께 확인한다. 모델·영상 오류와 블랙박스 상태의 해석은 [상태 확인](../../../docs/operations.md#상태-확인)을 따른다.
 
@@ -86,9 +83,6 @@ docker compose --env-file server/.env -f server/compose.yml exec preprocessing p
 docker compose --env-file server/.env -f server/compose.yml exec preprocessing python -m server.services.preprocessing.app.outbox_admin retry --sequence 1
 ```
 
-서비스 테스트는 [OSNet 입력·출력 계약](tests/test_osnet_identity.py), 손상·상수 크롭 거부, 작업 처리와 이전 [외관 특징 호환 테스트](tests/test_local_identity.py)를 포함한다. 모델 대역 테스트와 실제 가중치 추론은 구분한다. 로컬 개발 Python 환경에서는 다음으로 재현한다.
-
-```powershell
-```
+서비스는 OSNet 입력·출력 계약, 손상·상수 크롭 거부, 작업 처리와 외관 특징 호환을 유지한다. 모델 대역 동작과 실제 가중치 추론은 구분한다.
 
 공식 가중치로 ONNX를 실제 생성하고 PyTorch 2.8.0 CPU와 OpenCV 4.11의 세 입력 출력을 비교했다. 변환 기록 `.onnx.json`에는 해시·버전·검증 수치가 남는다. 자세한 재현 방법은 [모델 준비 도구 안내](../../tools/README.md)를 따른다. 이 확인은 변환·실행 호환성의 근거이며 CCTV 재식별 정확도를 보증하지 않는다. Docker·실제 카메라에서의 정확도·처리량·전체 기동은 별도 검증이 필요하다. 준비한 YOLO와 OSNet을 읽기 전용 모델 폴더에 두고 [Preprocessing 인수 문서](../../../docs/tmp/preprocessing-interface.md)의 실제 프레임·등장 이벤트·crop·전역 연결·장애 복구 절차를 수행한다.

@@ -42,9 +42,9 @@ python server/setup/tools/generate_dev_cert.py
 
 OSNet 준비는 [모델 도구](../server/tools/README.md)를 따른다. 서비스는 모델을 자동 다운로드하지 않는다. `.env`의 상대 경로는 `server/` 기준이며, Linux에서는 저장소 권한을 `AI_CCTV_UID/GID`와 맞춘다.
 
-`PUBLIC_BASE_URL`은 `https://서버주소[:포트]`로 지정한다. `PUBLIC_BIND_ADDRESS`·`RTSP_BIND_ADDRESS`의 기본값 `127.0.0.1`을 원격 장치가 접근할 서버 IP로 바꾼다. 개발 인증서는 localhost용이므로 원격 앱에는 실제 서버 이름과 일치하고 단말이 신뢰하는 인증서가 필요하다. 사용자 지정 HTTPS 포트는 주소에 직접 포함한다.
+`PUBLIC_BASE_URL`은 `http://` 또는 `https://서버주소[:포트]`로 지정한다. HTTP는 암호화되지 않으므로 신뢰할 수 있는 LAN에서만 사용한다. `PUBLIC_BIND_ADDRESS`·`RTSP_BIND_ADDRESS`의 기본값 `127.0.0.1`을 원격 장치가 접근할 서버 IP로 바꾼다. HTTPS를 사용할 때는 실제 서버 이름과 일치하고 단말이 신뢰하는 인증서가 필요하다. 사용자 지정 포트는 주소에 직접 포함한다.
 
-HTTPS는 기본 443, Edge 송출은 신뢰 LAN의 RTSP 8554를 사용한다. 내부 서비스 포트는 외부에 공개하지 않는다.
+HTTPS는 기본 443, HTTP는 기본 80, Edge 송출은 신뢰 LAN의 RTSP 8554를 사용한다. 내부 서비스 포트는 외부에 공개하지 않는다.
 
 ```powershell
 python -m server.setup.install_helper.doctor --env-file server/.env --skip-runtime
@@ -73,29 +73,6 @@ docker compose --env-file C:/path/to/compose.env --env-file C:/path/to/push.env 
 
 ## 개발과 검증
 
-### 서버 코드 개발
-
-프로젝트 이름·포트·DB·영상·인증 파일을 운영과 분리한 개발용 `server/.env`를 준비한다.
-
-```powershell
-```
-
-서비스 코드 변경은 자동 반영되며 의존성 변경은 재빌드한다. 다른 서비스는 위 명령의 `data`와 테스트 경로를 바꾼다.
-
-### 서버 자동 테스트
-
-
-```powershell
-```
-
-Data·External HTTP 통합 검증:
-
-```powershell
-```
-
-API 변경 후 명세 갱신:
-
-```powershell
-```
+서비스 코드 변경 후에는 의존성 변경 여부에 따라 이미지를 재빌드하고, 설치 도우미의 `doctor --skip-runtime`으로 배포 파일·인증·Compose 설정을 점검한다. API 변경 시에는 `server/services/external/tools/export_openapi.py`로 OpenAPI 명세를 갱신한다.
 
 배포 후 관리·업데이트·백업은 [운영 안내](operations.md)를 따른다.

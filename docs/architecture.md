@@ -11,7 +11,7 @@ Edge가 보낸 영상을 중앙 서버가 녹화·분석하고 Android 앱이 �
 | 구성 요소 | 역할 |
 |---|---|
 | Nginx | HTTPS 진입점, API·영상 중계 |
-| External | 사용자 인증, 카메라 권한, 공개 API, 관리자 웹, 푸시 |
+| External | 사용자 인증, 카메라 권한, 공개 API, 관리자 API, 푸시 |
 | Data | 중앙 SQLite, 이벤트·작업·인물 연결 저장, 녹화 등록·복구·보관 |
 | MediaMTX | RTSP 수신, 중앙 녹화, HLS·녹화 재생 |
 | Preprocessing | 사람 감지·추적, 대표 이미지·좌표 생성, 인물 특징 추출 |

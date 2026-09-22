@@ -96,7 +96,7 @@ Data는 `metadata.analysis`에 `status`, `updated_at`, `result`를 저장한다.
 ## 교체와 인수
 
 1. `server/services/analysis/`의 구현·Dockerfile과 Compose의 빌드·실행·healthcheck를 맞춘다. Python 없는 이미지라면 기존 Python healthcheck도 바꾼다.
-2. [분리된 개발 배포](../deployment-guide.md#서버-코드-개발)에서 새 이미지를 빌드·재생성한다. 개발 Compose의 Python 실행 명령도 새 구현에 맞춘다.
+2. [배포 안내](../deployment-guide.md)에서 이미지를 빌드·재생성한다.
 3. 실제 공유 크롭을 처리하여 기존 이벤트의 `metadata.analysis.result`와 기대 결과를 대조한다.
 4. 입력 오류, 단계 독립성, Data 장애, 임대 만료·중복 완료, 모델 시간 초과·재시작을 확인한다.
 

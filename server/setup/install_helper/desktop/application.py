@@ -11,9 +11,10 @@ from ..qt_tasks import BackgroundTask
 
 
 class CCTVMainWindow(ReferenceWindow):
-    def __init__(self, server_url="https://localhost", username="admin", storage_path="", ca_file=None, allow_insecure_http=False):
+    def __init__(self, server_url="https://localhost", username="admin", storage_path="", ca_file=None, allow_insecure_http=False, rtsp_host="127.0.0.1", rtsp_port=8554):
         self.server_url, self.username, self.ca_file = server_url, username, ca_file
         self.allow_insecure_http = allow_insecure_http
+        self.rtsp_host, self.rtsp_port = rtsp_host, rtsp_port
         self.api = None
         self.cameras = []
         self._closing = False

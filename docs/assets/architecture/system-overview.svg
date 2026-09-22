@@ -17,7 +17,7 @@
 <text x="132.5" y="200.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Android 앱</text>
 <text x="132.5" y="229.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">영상 · 이벤트 조회</text>
 <rect x="30" y="289" width="205" height="85" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
-<text x="132.5" y="325.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">관리자 브라우저</text>
+<text x="132.5" y="325.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="20" font-weight="700" text-anchor="middle" fill="#172b4d">PyQt 관리자 화면</text>
 <text x="132.5" y="354.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" font-weight="400" text-anchor="middle" fill="#475569">장치 등록 · 상태 확인</text>
 <rect x="30" y="425" width="205" height="100" rx="12" fill="#f0fdfa" stroke="#0f766e" stroke-width="2"/>
 <text x="132.5" y="455.5" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="21" font-weight="700" text-anchor="middle" fill="#172b4d">Raspberry Pi</text>

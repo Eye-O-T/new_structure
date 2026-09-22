@@ -14,7 +14,6 @@
 | `app/storage/` | 저장 경로 검증, 녹화 인덱싱·정합성 점검·보관 기간 정리 |
 | `app/workers/` | 주기적 저장소 관리와 Edge 녹화 복구 |
 | `tools/backup_database.py` | 호스트에서 Data 백업 API를 호출하는 온라인 DB 백업 도구 |
-| `tests/` | Data API와 저장 동작 테스트 |
 
 이벤트와 관련 작업은 하나의 트랜잭션으로 저장한다. 중간에 실패하면 함께 취소하여 이벤트만 저장되거나 알림 작업만 남는 일을 막는다. 객체 작업의 공통 요청·응답 계약은 [`lib/ai_cctv_core/contracts/objects.py`](../../../lib/ai_cctv_core/contracts/objects.py)에 있다. DB 구조 변경은 `app/database/migrations/`에 새 버전을 추가한다. 시작할 때 미적용 SQL 파일만 실행하므로 이미 적용한 마이그레이션 파일을 수정해도 기존 DB에는 반영되지 않는다.
 
@@ -48,9 +47,6 @@ Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/o
 
 ## 검증
 
-[개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
+중앙 Compose로 실행하며 배포 파일·인증·저장소 준비는 [배포 안내](../../../docs/deployment-guide.md)를 따른다.
 
-```powershell
-```
-
-서비스 간 연동·복구·푸시·객체 처리 검증은 [서버 자동 테스트](../../../docs/deployment-guide.md#서버-자동-테스트)를 따른다.
+서비스 간 연동·복구·푸시·객체 처리는 [운영 안내](../../../docs/operations.md)를 기준으로 점검한다.

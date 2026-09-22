@@ -24,7 +24,7 @@ from server.services.external.app.security.permissions import require_admin  # n
 
 
 DESCRIPTION = """모바일 등 외부 클라이언트를 교체할 때 유지해야 할 공개 HTTP API이다.
-앱은 중앙 서버의 HTTPS 주소(도메인과 포트)에 접속한다. API 경로는 /api/v1로 시작하고,
+앱은 중앙 서버의 HTTP(S) 주소(도메인과 포트)에 접속한다. API 경로는 /api/v1로 시작하고,
 실시간·중앙 녹화 영상은 /hls·/playback을 사용한다. Data·Edge·MediaMTX의 내부 포트에는
 직접 연결하지 않는다. 이 파일을 OpenAPI 3.1을 지원하는 뷰어에서 열면 요청·응답 형식을 볼 수 있다.
 
@@ -370,7 +370,7 @@ def build_document() -> dict[str, Any]:
     document["servers"] = [
         {
             "url": "/",
-            "description": "배포된 중앙 HTTPS origin. /api/v1은 각 path에 포함된다.",
+            "description": "배포된 중앙 HTTP(S) origin. /api/v1은 각 path에 포함된다.",
         }
     ]
     document["paths"] = {

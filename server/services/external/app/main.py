@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .api import (
-    admin_ui,
     auth,
     cameras,
     events,
@@ -100,7 +99,6 @@ def create_app(
     application.state.camera_admission_lock_factory = CameraLifecycleLocks()
     register_exception_handlers(application)
     for router in (
-        admin_ui.router,
         notifications.router,
         health.router,
         auth.router,

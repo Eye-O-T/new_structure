@@ -50,7 +50,7 @@ _SERVICES = {
     "preprocessing": "영상 분석",
     "analysis": "이벤트 처리",
     "mediamtx": "영상 수신·녹화",
-    "nginx": "HTTPS 접속",
+    "nginx": "HTTP(S) 접속",
     "push": "알림 전송",
 }
 _STATES = {

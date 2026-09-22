@@ -4,7 +4,7 @@
 
 ## 서버 관리자 화면
 
-`https://서버주소/admin/`에서 Edge·카메라 등록, 게시 계정 재발급, 화질 변경과 상태 확인을 수행한다. 최초 검색·Pairing과 서버 시작·중지는 설치 도우미를 사용한다. 게시 계정을 재발급하면 내려받은 JSON을 [Edge에 적용](../edge/README.md#수동-연결)한다.
+Windows 서버 PC의 PyQt 관리자 화면에서 Edge·카메라 등록, 게시 계정 재발급, 화질 변경과 상태 확인을 수행한다. 최초 검색·Pairing과 서버 시작·중지는 설치 도우미를 사용한다. 게시 계정을 재발급하면 내려받은 JSON을 [Edge에 적용](../edge/README.md#수동-연결)한다.
 
 초기 설정에 Edge 주소·토큰을 넣었다면 장치 변경 시 해당 설정도 갱신한다. 재시작 때 적용되는 조건은 [Data README](../server/services/data/README.md)를 따른다.
 
@@ -15,7 +15,7 @@ docker compose --env-file C:/path/to/compose.env -f server/compose.yml ps
 docker compose --env-file C:/path/to/compose.env -f server/compose.yml logs --tail 100
 ```
 
-관리자 웹·`GET /api/v1/system/status`에서 상태를 확인한다. Analysis 직접 검사는 포함하지 않으므로 해당 컨테이너의 상태·로그를 확인한다.
+PyQt 관리자 화면 또는 `GET /api/v1/system/status`에서 상태를 확인한다. Analysis 직접 검사는 포함하지 않으므로 해당 컨테이너의 상태·로그를 확인한다.
 
 | 내부 검사 | 의미 |
 |---|---|

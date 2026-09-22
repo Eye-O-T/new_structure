@@ -203,7 +203,7 @@ class Settings:
         if self.public_base_url is not None:
             parsed = urlsplit(self.public_base_url)
             if (
-                parsed.scheme != "https"
+                parsed.scheme not in {"http", "https"}
                 or not parsed.hostname
                 or parsed.username is not None
                 or parsed.password is not None
@@ -212,7 +212,11 @@ class Settings:
                 or parsed.path not in {"", "/"}
             ):
                 raise RuntimeError(
-                    "PUBLIC_BASE_URL must be a credential-free HTTPS origin"
+                    "PUBLIC_BASE_URL must be a credential-free HTTP(S) origin"
+                )
+            if parsed.scheme == "http" and self.cookie_secure:
+                raise RuntimeError(
+                    "COOKIE_SECURE must be false when PUBLIC_BASE_URL uses HTTP"
                 )
             object.__setattr__(
                 self, "public_base_url", self.public_base_url.rstrip("/")

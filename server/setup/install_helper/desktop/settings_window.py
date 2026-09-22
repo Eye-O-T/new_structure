@@ -2,7 +2,7 @@
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QFileDialog, QSpinBox,
+    QPushButton, QComboBox, QFileDialog,
 )
 
 from .api import DesktopApi
@@ -56,8 +56,9 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         devices = list_camera_devices() or ["Integrated Camera"]
         self.local_camera_name.addItems(devices)
         self.local_camera_id = QLineEdit("local-camera")
-        self.local_rtsp_host = QLineEdit("127.0.0.1")
-        self.local_rtsp_port = QLineEdit("8554")
+        owner = self.parent()
+        self.local_rtsp_host = QLineEdit(getattr(owner, "rtsp_host", "127.0.0.1"))
+        self.local_rtsp_port = QLineEdit(str(getattr(owner, "rtsp_port", 8554)))
         local.addRow("노트북 카메라 장치명", self.local_camera_name)
         local.addRow("로컬 카메라 ID", self.local_camera_id)
         local.addRow("RTSP 서버 주소", self.local_rtsp_host)

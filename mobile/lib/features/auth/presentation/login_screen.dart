@@ -71,7 +71,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   autocorrect: false,
                   decoration: const InputDecoration(
                     labelText: '중앙 서버 주소',
-                    hintText: 'https://cctv.example.com',
+                    hintText: 'http://cctv.example.com',
                   ),
                 ),
                 const SizedBox(height: 16),
