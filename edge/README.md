@@ -75,7 +75,6 @@ Python 3.11 가상환경을 활성화하고 저장소 루트에서 실행한다.
 
 ```bash
 python -m pip install -e './edge[test]'
-python -m pytest -c edge/pyproject.toml edge/tests -q
 ```
 
 서버와의 프로토콜 연동은 서버 테스트 컨테이너에서도 확인한다. `pip install`은 OS 패키지와 자동 실행 서비스를 설치하지 않으므로 실제 장치 설치에는 `.deb`를 사용한다.

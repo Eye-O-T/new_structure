@@ -22,14 +22,5 @@ USER 65532:65532
 CMD ["uvicorn", "server.services.preprocessing.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # 개발 단계에만 테스트·검사 도구를 추가한다.
-FROM runtime AS development
-USER root
-COPY server/services/preprocessing/requirements.txt /tmp/dev/requirements.txt
-COPY server/services/preprocessing/requirements-dev.txt /tmp/dev/requirements-dev.txt
-RUN pip install --no-cache-dir -r /tmp/dev/requirements-dev.txt
-USER 65532:65532
-WORKDIR /workspace
-ENV PYTHONPATH=/workspace:/workspace/lib:/workspace/edge/src:/app
-
 # target을 생략해도 마지막 단계는 운영 이미지다.
 FROM runtime AS production

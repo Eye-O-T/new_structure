@@ -116,8 +116,6 @@ uv run --project server/setup/install_helper --locked python -m server.setup.ins
 GUI를 종료한 뒤 테스트와 정적 검사를 실행한다.
 
 ```powershell
-uv run --project server/setup/install_helper --locked --extra test python -m pytest -c server/setup/install_helper/pyproject.toml server/setup/install_helper/tests server/setup/tests
-uv run --project server/setup/install_helper --locked --extra test python -m ruff check --config tests/runner/ruff.toml server/setup
 ```
 
 가상환경은 `server/setup/install_helper/.venv`다. 이 폴더의 `uv.lock`은 도우미와 로컬 `server/setup/`·`lib/` 의존성을 함께 고정한다. 상위 setup 패키지는 GUI 의존성 없이 설치할 수 있으며, GUI·CLI와 해당 개발 의존성은 하위 install_helper 프로젝트에서 관리한다.

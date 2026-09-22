@@ -26,14 +26,5 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers"]
 
 # 개발 단계에만 테스트·검사 도구를 추가한다.
-FROM runtime AS development
-USER root
-COPY server/services/external/requirements.txt /tmp/dev/requirements.txt
-COPY server/services/external/requirements-dev.txt /tmp/dev/requirements-dev.txt
-RUN pip install --no-cache-dir -r /tmp/dev/requirements-dev.txt
-USER app
-WORKDIR /workspace
-ENV PYTHONPATH=/workspace:/workspace/lib:/workspace/edge/src:/app
-
 # target을 생략해도 마지막 단계는 운영 이미지다.
 FROM runtime AS production

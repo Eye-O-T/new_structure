@@ -41,10 +41,6 @@ dependencies = [
 build = [
     { name = "pyinstaller" },
 ]
-test = [
-    { name = "pytest" },
-    { name = "ruff" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -53,10 +49,8 @@ requires-dist = [
     { name = "av", specifier = "==14.0.1" },
     { name = "pyinstaller", marker = "extra == 'build'", specifier = "==6.11.1" },
     { name = "pyqt5", specifier = "==5.15.11" },
-    { name = "pytest", marker = "extra == 'test'", specifier = "==8.3.4" },
-    { name = "ruff", marker = "extra == 'test'", specifier = "==0.9.5" },
 ]
-provides-extras = ["test", "build"]
+provides-extras = ["build"]
 
 [[package]]
 name = "ai-cctv-server-setup"
@@ -363,21 +357,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/37/10/14d06676c8d4a31a6e1b6270ff64c2900bfe000d59cd3302a4091f0d11ee/pyqt5_sip-12.19.0-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.whl", hash = "sha256:40ed8341b7c6681d102708b65acbccf0c26908189bfa2e05e180a3b515296a87", size = 276024, upload-time = "2026-08-02T12:03:43.916Z" },
     { url = "https://files.pythonhosted.org/packages/f5/d4/7656a7f67ed9c3fbb7949fb06aebb7ea97f7799eebecfe641f26a13b67a4/pyqt5_sip-12.19.0-cp311-cp311-win32.whl", hash = "sha256:3d8a08fad1bc89e083d712378af4fddee9f6102cd4254e6a5c0ad7055a09670a", size = 49103, upload-time = "2026-08-02T12:03:46.084Z" },
     { url = "https://files.pythonhosted.org/packages/ff/4d/18a1df8e6f71f5f4f9d280b9eebef04004b5c762d379c30ac948e38a3a37/pyqt5_sip-12.19.0-cp311-cp311-win_amd64.whl", hash = "sha256:f01cd36afef40bd0d81d0d98ff125112ce0df725b936d9eee3f1be1cc7e96e91", size = 58615, upload-time = "2026-08-02T12:03:45.173Z" },
-]
-
-[[package]]
-name = "pytest"
-version = "8.3.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "iniconfig" },
-    { name = "packaging" },
-    { name = "pluggy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/05/35/30e0d83068951d90a01852cb1cef56e5d8a09d20c7f511634cc2f7e0372a/pytest-8.3.4.tar.gz", hash = "sha256:965370d062bce11e73868e0335abac31b4d3de0e82f4007408d242b4f8610761", size = 1445919, upload-time = "2024-12-01T12:54:25.98Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/92/76a1c94d3afee238333bc0a42b82935dd8f9cf8ce9e336ff87ee14d9e1cf/pytest-8.3.4-py3-none-any.whl", hash = "sha256:50e16d954148559c9a74109af1eaf0c945ba2d8f30f0a3d3335edde19788b6f6", size = 343083, upload-time = "2024-12-01T12:54:19.735Z" },
 ]
 
 [[package]]

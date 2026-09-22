@@ -39,7 +39,6 @@ Edge를 수동으로 추가할 때는 [Edge 수동 연결](../../../edge/README.
 [개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```powershell
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec external python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/external/tests -q
 ```
 
 기본 비밀 설정 파일은 `server/secrets/external.env`다. `/health/live`는 프로세스 상태, `/health/ready`는 Data 통신 상태다. 공개 `/api/v1/system/status`와 `/api/v1/admin/system/status`는 관리자 인증 후 External·Data 작업자/대기열/저장소·전처리 감지/식별/이벤트 전송·MediaMTX 송출·푸시 상태를 반환한다. 하나의 서비스 조회가 실패해도 나머지 결과와 `status: degraded`를 HTTP 200으로 반환한다. Data 자체가 중단되어 사용자 인증도 불가능하면 설치 도우미의 로컬 진단을 사용한다.

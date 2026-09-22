@@ -51,7 +51,6 @@ Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/o
 [개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```powershell
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec data python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/data/tests -q
 ```
 
 서비스 간 연동·복구·푸시·객체 처리 검증은 [서버 자동 테스트](../../../docs/deployment-guide.md#서버-자동-테스트)를 따른다.

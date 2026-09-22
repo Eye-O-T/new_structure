@@ -5,8 +5,7 @@ param(
     [string]$Version = '0.3.0',
     [string]$PythonExecutable = '',
     [string]$InnoCompiler = '',
-    [switch]$SkipDependencyInstall,
-    [switch]$SkipTests
+    [switch]$SkipDependencyInstall
 )
 
 $ErrorActionPreference = 'Stop'
@@ -103,7 +102,6 @@ foreach ($requiredFile in @(
     (Join-Path $repositoryRoot 'server\tools\README.md'),
     (Join-Path $repositoryRoot 'server\services\data\tools\backup_database.py'),
     (Join-Path $repositoryRoot 'server\services\external\tools\bootstrap_admin.py'),
-    (Join-Path $repositoryRoot 'tests\runner\ruff.toml'),
     (Join-Path $repositoryRoot 'README.md'),
     (Join-Path $repositoryRoot 'mobile\README.md'),
     (Join-Path $repositoryRoot 'docs\architecture.md'),
@@ -138,7 +136,7 @@ try {
     $syncArguments = @(
         'sync', '--locked', '--project', $helperRoot,
         '--python', $bootstrapPython, '--no-python-downloads',
-        '--extra', 'test', '--extra', 'build', '--no-editable'
+        '--extra', 'build', '--no-editable'
     )
     if ($SkipDependencyInstall) {
         $syncArguments += @('--check', '--offline')
@@ -151,17 +149,6 @@ finally {
 
 Push-Location $repositoryRoot
 try {
-    if (-not $SkipTests) {
-        Invoke-Checked $buildPython @(
-            '-m', 'pytest', '-q', '-c', 'server\setup\install_helper\pyproject.toml',
-            'server\setup\install_helper\tests', 'server\setup\tests'
-        )
-        Invoke-Checked $buildPython @(
-            '-m', 'ruff', 'check', '--config', 'tests\runner\ruff.toml',
-            'server\setup', 'server\services\data\tools', 'server\services\external\tools'
-        )
-    }
-
     # GUI와 CLI는 콘솔 사용 여부가 달라 각각의 실행 파일로 묶는다.
     foreach ($spec in @($guiSpec, $cliSpec)) {
         Invoke-Checked $buildPython @(

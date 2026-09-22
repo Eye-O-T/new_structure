@@ -57,7 +57,7 @@ python server/services/external/tools/bootstrap_admin.py --username admin
 
 ## Edge 연결
 
-Pi 설치·Pairing은 [Edge README](../edge/README.md#설치와-연결), 수동 등록은 [수동 연결](../edge/README.md#수동-연결)을 따른다. 장비 없이 시험하려면 [Mock Edge](../tests/mock_edge/README.md)를 사용한다.
+Pi 설치·Pairing은 [Edge README](../edge/README.md#설치와-연결), 수동 등록은 [수동 연결](../edge/README.md#수동-연결)을 따른다.
 
 ## 모바일과 푸시
 
@@ -78,34 +78,24 @@ docker compose --env-file C:/path/to/compose.env --env-file C:/path/to/push.env 
 프로젝트 이름·포트·DB·영상·인증 파일을 운영과 분리한 개발용 `server/.env`를 준비한다.
 
 ```powershell
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml up -d --build
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec data python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/data/tests -q
 ```
 
 서비스 코드 변경은 자동 반영되며 의존성 변경은 재빌드한다. 다른 서비스는 위 명령의 `data`와 테스트 경로를 바꾼다.
 
 ### 서버 자동 테스트
 
-`compose.test.yml`은 운영 Compose와 합치지 않는 독립 테스트 환경이다.
 
 ```powershell
-docker compose -f server/compose.test.yml build tests
-docker compose -f server/compose.test.yml run --rm tests
-docker compose -f server/compose.test.yml run --rm tests python -m ruff check --config tests/runner/ruff.toml --no-cache lib server tests edge
-docker compose -f server/compose.test.yml run --rm tests python server/services/external/tools/export_openapi.py --check
 ```
 
 Data·External HTTP 통합 검증:
 
 ```powershell
-docker compose -f server/compose.test.yml --profile integration up --build --abort-on-container-exit --exit-code-from integration integration
-docker compose -f server/compose.test.yml --profile integration down
 ```
 
 API 변경 후 명세 갱신:
 
 ```powershell
-docker compose -f server/compose.test.yml run --rm --user 0:0 -v "${PWD}/docs:/workspace/docs" tests python server/services/external/tools/export_openapi.py
 ```
 
 배포 후 관리·업데이트·백업은 [운영 안내](operations.md)를 따른다.

@@ -38,7 +38,6 @@ Data에서 작업과 사람 영역 이미지(크롭)의 경로를 받아 추가 
 [개발 환경](../../../docs/deployment-guide.md#서버-코드-개발)을 준비하고 개발 Compose를 기동한 뒤, 저장소 루트에서 실행한다. 아래 `server/.env`는 개발 전용 설정이다.
 
 ```powershell
-docker compose --env-file server/.env -f server/compose.yml -f server/compose.dev.yml exec analysis python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/analysis/tests -q
 ```
 
 플러그인 초기화·호출은 별도 `spawn` 자식 프로세스에서 실행한다. `OBJECT_MODEL_TIMEOUT_SECONDS`는 기본 120초(`0 < 값 ≤ 240`), `OBJECT_STARTUP_TIMEOUT_SECONDS`는 기본 30초(`0 < 값 ≤ 120`)다. 시간 초과한 자식은 종료한 뒤 재생성하며 초기화 오류는 30초 후 재시도한다. 완료 HTTP 응답이 유실되면 보관한 동일 lease·본문을 재전송해 같은 프로세스 안에서 모델을 다시 실행하지 않는다. 프로세스 전체가 중단되면 Data의 임대 만료 후 재처리될 수 있다.
@@ -48,7 +47,6 @@ docker compose --env-file server/.env -f server/compose.yml -f server/compose.de
 [기본 분석기 테스트](tests/test_local_appearance.py)는 실제 합성 JPEG로 상·하체 색 분리, 배경 억제, 흑백·다색·노출 상태, 크기 제한과 손상 입력 거부를 확인한다. 로컬 Python 환경에서 다음으로 재현할 수 있다.
 
 ```powershell
-python -m pytest -c tests/runner/pytest.ini --rootdir=. server/services/analysis/tests -q
 ```
 
 이는 카메라·Docker 없이 수행하는 코드 및 JPEG 처리 검증이다. 실제 CCTV 의복 정답률과 운영 컨테이너 기동·처리시간은 검증하지 않았다. 개발 Compose에서 실제 크롭을 등록하고 `metadata.analysis.result`의 영역·RGB·비율을 원본과 비교하는 절차는 [Analysis 인수 문서](../../../docs/tmp/analysis-interface.md#교체와-인수)를 따른다.
