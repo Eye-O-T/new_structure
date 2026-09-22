@@ -333,7 +333,8 @@ services:
     env_file:
       - ${ANALYSIS_SECRETS_FILE:-./secrets/analysis.env}
     environment:
-      ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors:LocalAppearanceAnalyzer}
+      # ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors:LocalAppearanceAnalyzer}
+      ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN=server.services.analysis.processors.mock:MockRiskAnalyzer}
       OBJECT_MODEL_TIMEOUT_SECONDS: ${OBJECT_MODEL_TIMEOUT_SECONDS:-120}
       OBJECT_STARTUP_TIMEOUT_SECONDS: ${OBJECT_STARTUP_TIMEOUT_SECONDS:-30}
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
