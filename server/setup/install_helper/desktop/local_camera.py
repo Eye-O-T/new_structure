@@ -19,7 +19,10 @@ class LocalCameraPublisher(QObject):
         self.process = QProcess(self)
         self.process.finished.connect(self._finished)
         self.process.errorOccurred.connect(self._error)
+        self.process.readyReadStandardError.connect(self._read_error_output)
         self.camera_name = ""
+        self._error_output = ""
+        self.failure_message = ""
 
     @staticmethod
     def ffmpeg_path():
@@ -28,9 +31,11 @@ class LocalCameraPublisher(QObject):
             raise RuntimeError("FFmpeg가 설치되어 있지 않습니다. AI_CCTV_FFMPEG를 설정하거나 PATH에 ffmpeg를 추가하세요.")
         return value
 
-    def start(self, camera_name, stream_url, *, width=1280, height=720, fps=15):
+    def start(self, camera_name, stream_url, *, width=1280, height=720, fps=30):
         self.stop()
         self.camera_name = camera_name
+        self._error_output = ""
+        self.failure_message = ""
         ffmpeg = self.ffmpeg_path()
         args = [
             "-hide_banner", "-loglevel", "warning", "-f", "dshow",
@@ -46,6 +51,22 @@ class LocalCameraPublisher(QObject):
         # Do not retain the credential-bearing URL after QProcess has received it.
         del stream_url
 
+    def _read_error_output(self):
+        output = bytes(self.process.readAllStandardError()).decode("utf-8", errors="replace")
+        self._error_output = (self._error_output + output)[-8000:]
+
+    def _failure_reason(self):
+        output = self._error_output.lower()
+        if "could not set video options" in output or "could not run graph" in output:
+            return "웹캠이 요청한 영상 설정을 지원하지 않습니다. 카메라 장치와 해상도를 확인하세요."
+        if "could not find video device" in output or "error opening input" in output:
+            return "웹캠을 열 수 없습니다. 다른 앱에서 카메라를 사용 중인지, 장치명이 맞는지 확인하세요."
+        if "401" in output or "403" in output or "unauthorized" in output or "authentication failed" in output:
+            return "RTSP 인증에 실패했습니다. 카메라를 다시 등록한 뒤 송출을 시작하세요."
+        if "connection refused" in output or "no route to host" in output or "failed to connect" in output:
+            return "RTSP 서버에 연결할 수 없습니다. 서버 주소와 포트 8554를 확인하세요."
+        return "FFmpeg 송출이 종료됐습니다. 웹캠, RTSP 서버, 송출 인증을 확인하세요."
+
     def stop(self):
         if self.process.state() != QProcess.NotRunning:
             self.process.terminate()
@@ -55,12 +76,16 @@ class LocalCameraPublisher(QObject):
         self.state_changed.emit("stopped")
 
     def _finished(self, exit_code, _status):
+        self._read_error_output()
         if exit_code:
+            self.failure_message = self._failure_reason()
             self.state_changed.emit("failed")
         else:
             self.state_changed.emit("stopped")
 
     def _error(self, _error):
+        self._read_error_output()
+        self.failure_message = self._failure_reason()
         self.state_changed.emit("failed")
 
     def close(self):

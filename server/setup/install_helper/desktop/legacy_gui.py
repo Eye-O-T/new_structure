@@ -363,11 +363,9 @@ class CCTVMainWindow(QMainWindow):
             "font-size: 28px; color: #334155; font-weight: bold;"
         )
 
-    def show_network_failure_screen(self):
+    def show_network_failure_screen(self, message="네트워크 연결 장애\n네트워크 연결 상태를 확인하세요."):
         self.video_label.clear()
-        self.video_label.setText(
-            "네트워크 연결 장애\n네트워크 연결 상태를 확인하세요."
-        )
+        self.video_label.setText(message)
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setStyleSheet(
             "background-color: #000000; border: 1px solid #ef4444; "
@@ -419,7 +417,7 @@ class CCTVMainWindow(QMainWindow):
                 "#facc15",
                 "#facc15"
             )
-            self.show_network_failure_screen()
+            self.show_network_failure_screen(desc)
         elif event_type == "network_recovered":
             desc = event.get("message", "장애 복구 영상 저장 완료")
             color = "#38bdf8"

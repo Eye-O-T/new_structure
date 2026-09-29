@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QProcess, QTimer, Qt
 from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox
 
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
@@ -120,6 +120,16 @@ class CCTVMainWindow(ReferenceWindow):
     def add_event(self, event):
         if self._stopping:
             return
+        if event.get("type") == "network_failure" and isinstance(self.video_source, tuple):
+            camera_id = self.video_source[1]
+            publisher = getattr(self, "local_publisher", None)
+            if camera_id == "local-camera" and (
+                publisher is None or publisher.process.state() == QProcess.NotRunning
+            ):
+                event = {
+                    **event,
+                    "message": "노트북 카메라 송출이 실행 중이 아닙니다. 설정에서 송출 시작을 확인하세요.",
+                }
         super().add_event(event)
         # Plain text prevents server-provided labels from becoming rich-text links.
         for label in self.event_list.itemAt(0).widget().findChildren(QLabel):
