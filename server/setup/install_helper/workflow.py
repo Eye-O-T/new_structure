@@ -237,11 +237,11 @@ def preflight(
                 "모델 파일을 읽을 수 없거나 형식·크기가 올바르지 않습니다. "
                 "비어 있지 않은 2 GiB 이하의 .pt, .onnx, .engine 파일을 선택하세요."
             )
-    results.append(Prerequisite(model_ok, "추론 모델", model_message))
+    results.append(Prerequisite(model_ok if model_path is not None else True, "추론 모델 (선택 사항)", model_message if model_path is not None else "AI 감지를 켤 때 준비하면 됩니다."))
     try:
         identity = resolve_identity_model(identity_model_path, data_root, server_dir)
     except (OSError, ValueError) as exc:
-        results.append(Prerequisite(False, "인물 식별 모델(OSNet)", str(exc)))
+        results.append(Prerequisite(identity_model_path is None, "인물 식별 모델(OSNet, 선택 사항)", "AI 감지를 켤 때 준비하면 됩니다." if identity_model_path is None else str(exc)))
     else:
         results.append(
             Prerequisite(
@@ -282,7 +282,7 @@ def _validate_install_input(
         model = _validate_request(request)
         _validate_public_base_url(request.public_base_url)
         # Compose env를 마지막에 쓸 때까지 잘못된 경로 문자열 검사를 미루지 않는다.
-        for value in (request.data_root, model.name, request.public_base_url):
+        for value in (request.data_root, model.name if model else "default.pt", request.public_base_url):
             _dotenv(value)
         # initialize에서는 복사 뒤 실행되는 스키마 검사를 미리 수행한다.
         AppConfig(
@@ -301,7 +301,7 @@ def _validate_install_input(
                 "warning_free_percent": request.storage_warning_free_percent,
             },
             inference={
-                "model_path": str(PurePosixPath("/models") / model.name),
+                "model_path": str(PurePosixPath("/models") / (model.name if model else "default.pt")),
                 "device": request.inference_device,
             },
             cameras=request.cameras,

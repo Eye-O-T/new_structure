@@ -1,6 +1,8 @@
 # External 실행 상태와 Data 연결 상태를 확인하고 사용자에게 시스템 상태를 제공한다.
 from __future__ import annotations
 
+import asyncio
+import httpx
 from typing import Any
 
 from fastapi import (
@@ -22,10 +24,37 @@ from ..diagnostics import system_diagnostics
 from ..schemas import (
     SystemStatusResponse,
 )
-from ..security.permissions import Principal, require_admin
+from ..security.permissions import Principal, get_current_principal, require_admin
 from ..version import SERVICE_VERSION
 
 router = APIRouter()
+
+
+@router.get("/api/v1/features/status")
+async def feature_status(
+    response: Response,
+    _: Principal = Depends(get_current_principal),
+    settings: Settings = Depends(get_settings_dependency),
+) -> dict[str, Any]:
+    """Authenticated, read-only state; all mutations remain on the server host."""
+    response.headers["Cache-Control"] = "no-store"
+
+    async def probe(url: str) -> str:
+        try:
+            async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
+                result = await client.get(url)
+            return "enabled" if result.status_code == 200 else "unavailable"
+        except httpx.RequestError:
+            return "unavailable"
+
+    preprocessing, analysis = await asyncio.gather(
+        probe(settings.preprocessing_health_url),
+        probe("http://analysis:8000/health/ready"),
+    )
+    return {
+        "preprocessing": {"status": preprocessing, "enabled": preprocessing == "enabled"},
+        "analysis": {"status": analysis, "enabled": analysis == "enabled"},
+    }
 
 
 @router.get("/health/live", include_in_schema=False)

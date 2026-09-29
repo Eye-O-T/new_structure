@@ -253,6 +253,7 @@ services:
 
   # 감지와 인물 연결은 같은 컨테이너 안에서 독립 실행하며 서로 다른 Data 토큰을 쓴다.
   preprocessing:
+    profiles: [ai]
     build:
       context: ..
       dockerfile: server/services/preprocessing/Dockerfile
@@ -323,6 +324,7 @@ services:
 
   # 기본 CPU 분석을 제공하며 플러그인으로 교체할 수 있다. 모델·스냅샷은 읽기 전용이다.
   analysis:
+    profiles: [ai]
     build:
       context: ..
       dockerfile: server/services/analysis/Dockerfile
@@ -333,8 +335,7 @@ services:
     env_file:
       - ${ANALYSIS_SECRETS_FILE:-./secrets/analysis.env}
     environment:
-      # ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors:LocalAppearanceAnalyzer}
-      ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN=server.services.analysis.processors.mock:MockRiskAnalyzer}
+      ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors:LocalAppearanceAnalyzer}
       OBJECT_MODEL_TIMEOUT_SECONDS: ${OBJECT_MODEL_TIMEOUT_SECONDS:-120}
       OBJECT_STARTUP_TIMEOUT_SECONDS: ${OBJECT_STARTUP_TIMEOUT_SECONDS:-30}
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1

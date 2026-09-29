@@ -34,12 +34,11 @@ Android SDK와 Java 17을 지원하는 JDK를 준비하고 `flutter doctor -v`�
 cd mobile
 flutter pub get
 flutter analyze
-flutter test
 flutter devices
 flutter run -d '<Android-기기-ID>' --dart-define=API_BASE_URL=https://cctv.example.com
 ```
 
-`<Android-기기-ID>`는 `flutter devices`에 표시된 값으로 바꾼다. `API_BASE_URL`은 로그인 화면 기본값이며 생략해도 화면에서 입력할 수 있다. HTTP와 로그인 서버의 호스트·포트가 다른 영상 URL은 거부하며 인증서 검증을 끄는 우회는 제공하지 않는다.
+`<Android-기기-ID>`는 `flutter devices`에 표시된 값으로 바꾼다. `API_BASE_URL`은 로그인 화면 기본값이며 생략해도 화면에서 입력할 수 있다. 앱은 HTTP와 HTTPS를 지원하며, 영상 URL은 로그인 서버와 같은 호스트·포트여야 한다. HTTP는 암호화되지 않으므로 신뢰할 수 있는 LAN에서만 사용한다. HTTPS 인증서 검증을 끄는 우회는 제공하지 않는다.
 
 Windows에서 사용하지 않는 데스크톱 템플릿 때문에 symlink 권한 오류가 나면,
 아래처럼 **현재 명령 세션에서만** desktop 생성을 끄고 다시 실행할 수 있다.
@@ -78,15 +77,4 @@ flutter build apk --release --dart-define=API_BASE_URL=https://cctv.example.com
 
 결과는 `mobile/build/app/outputs/flutter-apk/app-release.apk`다. 같은 앱의 업데이트는 기존 서명 키를 유지한다. 서명 설정이 없는 release 빌드는 중단하며 Firebase 파일·서명 파일·세션·키는 Git에 포함하지 않는다.
 
-## 검증 경계
-
-로그인·토큰 회전·이벤트 계약·URL 검증·알림 식별·화면 이동은 Flutter 자동 테스트로 검증한다.
-복원·로그인·갱신·로그아웃은 인증 응답과 보안 저장소 반영까지 순서대로 완료한다. 새 서버의
-주소·토큰·기기 식별자는 저장 성공 후 함께 바뀌며, 로그아웃 뒤 대기 중이던 이전 세션의
-갱신은 취소된다. 저장 지연 중 다른 서버로 로그인하거나 로그아웃하는 경합도 검사한다.
-영상 생성 실패는 오류 안내와 재연결 버튼을 복구한다. 네이티브 자원 정리는 화면 복구를
-막지 않으며 대기는 3초로 제한한다. 실제 네이티브 정리의 완료를 강제로 보장하는 것은
-아니므로 기기에서 반복 연결 후 디코더·메모리 회수도 확인해야 한다. 일시 정지 의도와
-앱 전경 복귀, 이전 초기화의 지연 완료, 생성·정리 실패는 플랫폼 대역으로 검사한다.
-실제 Android APK 빌드, HLS/복구 MPEG-TS의 기기별 재생, FCM 실제 도착은 Android SDK·실기기와
-Firebase 설정을 준비한 후 검증해야 한다. 자동 테스트 통과를 기기 수신 성공으로 간주하지 않는다.
+실제 Android 기기에서 로그인·토큰 갱신·로그아웃, 실시간 HLS와 복구 MPEG-TS 재생, 앱 복귀 후 재연결을 확인한다. 푸시 알림은 Firebase 설정과 단말 알림 권한을 준비한 뒤 실제 도착까지 확인한다.

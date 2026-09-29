@@ -67,17 +67,11 @@ sudo ai-cctv-edge status
 
 등록한 Device·Camera ID, `central_publish`(중앙으로 송출), 중앙 LAN IP, 지원 Profile(`hd`/`fhd`)과 백업 경로를 입력한다. 완료하면 서비스가 시작되고 재부팅 후에도 자동 실행된다. 중앙에서 영상·상태 조회를 확인한 뒤 양쪽 전달용 token·JSON은 지우고 `/etc/ai-cctv-edge/`의 운영 파일은 보존한다. 자동 등록 중 인증 파일 전달만 실패했다면 Pi의 `pair`를 종료하고 설치 도우미가 만든 JSON으로 3번부터 진행한다. 중앙에 이미 생성된 카메라를 다시 등록하지 않는다.
 
-## Edge 코드 검증
+## Edge 상태 동작
 
 캡처 상태는 PID 존재뿐 아니라 실행 잠금의 PID·인스턴스 ID와 단조 시계 heartbeat를 함께 확인한다. 갱신이 `max(15초, frame_timeout_seconds × 3)`를 넘거나 실행 소유자가 다르면 `capture_state=stale`, `camera_input=offline`, `last_error_code=CAPTURE_STATUS_STALE`로 응답한다. 중앙은 이전 입력이 정상이었고 Edge 일지에 손실 기록이 없을 때 입력 손실 이벤트를 보완한다. 업데이트 시 캡처·제어 서비스를 함께 재시작하여 새 heartbeat 형식을 적용한다.
 
-Python 3.11 가상환경을 활성화하고 저장소 루트에서 실행한다. 실제 카메라·GStreamer 검증은 Pi에서 따로 수행한다.
-
-```bash
-python -m pip install -e './edge[test]'
-```
-
-서버와의 프로토콜 연동은 서버 테스트 컨테이너에서도 확인한다. `pip install`은 OS 패키지와 자동 실행 서비스를 설치하지 않으므로 실제 장치 설치에는 `.deb`를 사용한다.
+실제 카메라 입력과 GStreamer 동작은 Raspberry Pi에서 확인한다. 소스 패키지를 `pip install`로 설치해도 OS 패키지와 자동 실행 서비스는 설치되지 않으므로 실제 장치 설치에는 `.deb`를 사용한다.
 
 ## 패키지 빌드
 

@@ -311,10 +311,13 @@ def run_service_action(
 ) -> str:
     """현재 Data의 마운트가 선택한 배포와 같을 때만 서버를 변경한다."""
 
-    if action not in {"start", "restart", "stop", "status"}:
+    optional = action in {
+        "preprocessing-on", "preprocessing-off", "analysis-on", "analysis-off"
+    }
+    if action not in {"start", "restart", "stop", "status"} and not optional:
         raise ValueError("지원하지 않는 서버 작업입니다.")
     deadline = time.monotonic() + (
-        START_TIMEOUT_SECONDS if action == "start" else ACTION_TIMEOUT_SECONDS
+        START_TIMEOUT_SECONDS if action == "start" or action.endswith("-on") else ACTION_TIMEOUT_SECONDS
     )
     adapter = ComposeAdapter(server_dir, installed.env_file)
     progress("저장된 설정과 현재 Docker 서버의 저장 위치를 확인하고 있습니다…")
@@ -328,6 +331,37 @@ def run_service_action(
         return "선택한 설정의 서버 컨테이너가 없습니다. ‘서버 시작’을 눌러 시작하세요."
     if action == "status":
         return _status(adapter, deadline)
+    if optional:
+        service, operation = action.rsplit("-", 1)
+        if operation == "on" and service in {"preprocessing", "analysis"}:
+            failures = [
+                item for item in adapter.deployment_prerequisites(require_ai_models=True)
+                if not item.ok
+            ]
+            if failures:
+                raise RuntimeError(
+                    "AI 처리를 켜려면 필요한 탐지 모델과 OSNet 모델 파일을 준비해야 합니다.\n"
+                    + "\n".join(item.message for item in failures)
+                )
+        progress(f"{service} {'시작' if operation == 'on' else '중지'} 중…")
+        commands = []
+        if action == "analysis-on":
+            commands.append(("up", "-d", "--build", "--wait", "preprocessing"))
+        if action == "preprocessing-off":
+            commands.append(("stop", "analysis"))
+        commands.append(
+            ("up", "-d", "--build", "--wait", service)
+            if operation == "on"
+            else ("stop", service)
+        )
+        for arguments in commands:
+            _run(
+                _command(adapter, *arguments),
+                directory=adapter.server_dir,
+                deadline=deadline,
+                capture=False,
+            )
+        return f"{service} {'활성화' if operation == 'on' else '비활성화'} 요청을 적용했습니다. 상태를 확인하세요."
     if action == "start":
         progress("모델·인증서와 Docker 실행 준비를 확인하고 있습니다…")
         try:

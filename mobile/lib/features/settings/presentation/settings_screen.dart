@@ -13,6 +13,16 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool busy = false;
+  Future<Map<String, dynamic>>? featureStatus;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    featureStatus ??= ref.read(apiClientProvider).request(
+      'GET',
+      '/api/v1/features/status',
+    );
+  }
 
   /// 설정 변경·재등록·로그아웃에 공통 대기 표시와 화면이 남아 있을 때의 오류 안내를 적용한다.
   Future<void> perform(Future<void> Function() action) async {
@@ -48,6 +58,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ListTile(
               title: const Text('중앙 서버'),
               subtitle: Text(api.origin.toString()),
+            ),
+            FutureBuilder<Map<String, dynamic>>(
+              future: featureStatus,
+              builder: (context, snapshot) {
+                final values = snapshot.data;
+                String label(String key, String title) {
+                  final state = values?[key] is Map
+                      ? (values![key] as Map)['status']
+                      : null;
+                  final text = switch (state) {
+                    'enabled' => '켜짐',
+                    'disabled' => '꺼짐',
+                    _ => '확인 불가',
+                  };
+                  return '$title: $text';
+                }
+
+                return ListTile(
+                  title: const Text('서버 AI 기능 상태'),
+                  subtitle: Text(snapshot.hasError
+                      ? '상태를 불러오지 못했습니다.'
+                      : snapshot.connectionState != ConnectionState.done
+                          ? '조회 중…'
+                          : '${label('preprocessing', '사람 감지·식별')}\n${label('analysis', '이벤트 분석')}'),
+                  trailing: IconButton(
+                    tooltip: '상태 새로고침',
+                    onPressed: () => setState(() {
+                      featureStatus = api.request('GET', '/api/v1/features/status');
+                    }),
+                    icon: const Icon(Icons.refresh),
+                  ),
+                );
+              },
             ),
             SwitchListTile(
               title: const Text('푸시 알림'),

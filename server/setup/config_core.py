@@ -50,7 +50,7 @@ class InstallRequest:
     server_dir: Path
     admin_username: str
     admin_password: str
-    model_path: Path
+    model_path: Path | None
     cameras: list[CameraBootstrap]
     public_http_port: int = 80
     public_https_port: int = 443
@@ -243,7 +243,7 @@ def _validate_tls_pair(request: InstallRequest) -> tuple[Path, Path] | None:
 
 
 # 관리자·포트·녹화·추론 설정과 파일을 검증하고 파일 생성 전에 사용할 모델 경로를 확정한다.
-def _validate_request(request: InstallRequest) -> Path:
+def _validate_request(request: InstallRequest) -> Path | None:
     if request.public_scheme not in {"http", "https"}:
         raise ValueError("public scheme must be http or https")
     if request.public_scheme == "http" and not request.allow_insecure_http:
@@ -279,29 +279,37 @@ def _validate_request(request: InstallRequest) -> Path:
         )
     ip_address(request.public_bind_address)
     ip_address(request.rtsp_bind_address)
-    model_source = request.model_path.expanduser()
-    validate_custom_model(model_source)
+    model_source = request.model_path.expanduser() if request.model_path else None
+    if model_source is not None:
+        validate_custom_model(model_source)
     tls_pair = _validate_tls_pair(request)
     if request.public_scheme == "http" and tls_pair is not None:
         raise ValueError("TLS files must be omitted when public scheme is HTTP")
-    identity_source = resolve_identity_model(
-        request.identity_model_path, request.data_root, request.server_dir
-    )
+    identity_source = None
+    if request.identity_model_path is not None:
+        identity_source = resolve_identity_model(
+            request.identity_model_path, request.data_root, request.server_dir
+        )
     # 두 모델은 같은 디렉터리에 복사하므로 Windows에서도 서로 다른 대상이어야 한다.
-    if identity_source.name.casefold() == model_source.name.casefold():
+    if identity_source is not None and model_source is not None and identity_source.name.casefold() == model_source.name.casefold():
         raise ValueError(
             "detection and identity models must use different filenames "
             "(case-insensitive)"
         )
-    return model_source.resolve()
+    return model_source.resolve() if model_source is not None else None
 
 
 # 입력 검증 → 운영 폴더·모델 준비 → 설정·인증 파일 생성 순서다. 기존 파일은 백업한다.
 def initialize(request: InstallRequest) -> InstallResult:
     model_source = _validate_request(request)
-    identity_source = resolve_identity_model(
-        request.identity_model_path, request.data_root, request.server_dir
-    )
+    try:
+        identity_source = resolve_identity_model(
+            request.identity_model_path, request.data_root, request.server_dir
+        )
+    except (OSError, ValueError):
+        if request.identity_model_path is not None:
+            raise
+        identity_source = None
     public_base_url = _validate_public_base_url(request.public_base_url)
     if public_base_url and not public_base_url.startswith(f"{request.public_scheme}://"):
         raise ValueError("public base URL scheme does not match public_scheme")
@@ -314,6 +322,8 @@ def initialize(request: InstallRequest) -> InstallResult:
     previous_environment = read_deployment_env(compose_env_path)
     identity_companions = []
     for suffix in (".onnx.json", ".LICENSE.txt"):
+        if identity_source is None:
+            break
         companion = identity_source.with_suffix(suffix)
         if companion.exists():
             if (
@@ -398,17 +408,30 @@ def initialize(request: InstallRequest) -> InstallResult:
             if sha256_file(target) != expected_digest:
                 raise OSError(f"installed TLS file verification failed: {target.name}")
 
-    installed_model = directories["models"] / model_source.name
-    _backup_existing(installed_model)
-    installed_model = install_local_model(model_source, directories["models"])
-    container_model_path = PurePosixPath("/models") / installed_model.name
-    _backup_existing(directories["models"] / identity_source.name)
-    installed_identity = install_local_model(
-        identity_source, directories["models"], max_bytes=MAX_IDENTITY_MODEL_BYTES
+    installed_model = None
+    if model_source is not None:
+        installed_model = directories["models"] / model_source.name
+        _backup_existing(installed_model)
+        installed_model = install_local_model(model_source, directories["models"])
+    container_model_path = (
+        PurePosixPath("/models") / installed_model.name
+        if installed_model is not None
+        else PurePosixPath("/models/default.pt")
     )
-    container_identity_path = PurePosixPath("/models") / installed_identity.name
+    installed_identity = None
+    if identity_source is not None:
+        _backup_existing(directories["models"] / identity_source.name)
+        installed_identity = install_local_model(
+            identity_source, directories["models"], max_bytes=MAX_IDENTITY_MODEL_BYTES
+        )
+    container_identity_path = (
+        PurePosixPath("/models") / installed_identity.name
+        if installed_identity is not None else PurePosixPath("/models/osnet_x0_25_msmt17.onnx")
+    )
     # 배포 출처와 라이선스를 ONNX와 함께 전달하되 모델 실행에는 ONNX만 필요하다.
     for companion, suffix in identity_companions:
+        if installed_identity is None:
+            break
         target = installed_identity.with_suffix(suffix)
         _backup_existing(target)
         _copy_atomic(companion, target)
@@ -450,15 +473,8 @@ def initialize(request: InstallRequest) -> InstallResult:
         "application_version": AI_CCTV_VERSION,
         "python_version": "3.11.9",
         "images": RELEASE_IMAGES,
-        "model": {
-            "filename": installed_model.name,
-            "sha256": sha256_file(installed_model),
-        },
-        "identity_model": {
-            "plugin": IDENTITY_PLUGIN,
-            "filename": installed_identity.name,
-            "sha256": sha256_file(installed_identity),
-        },
+        "model": ({"filename": installed_model.name, "sha256": sha256_file(installed_model)} if installed_model else None),
+        "identity_model": ({"plugin": IDENTITY_PLUGIN, "filename": installed_identity.name, "sha256": sha256_file(installed_identity)} if installed_identity else None),
     }
     _write_atomic(
         release_manifest_path,
@@ -554,7 +570,7 @@ def initialize(request: InstallRequest) -> InstallResult:
         "RECOVERED_DIR": directories["recovered"],
         "SNAPSHOTS_DIR": directories["snapshots"],
         "MODELS_DIR": directories["models"],
-        "MODEL_FILE": installed_model.name,
+        "MODEL_FILE": installed_model.name if installed_model else "default.pt",
         "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
         "IDENTITY_MODEL_PATH": str(container_identity_path),
         "IDENTITY_MATCH_THRESHOLD": previous_environment.get(

@@ -49,8 +49,9 @@ def _init(args: argparse.Namespace) -> int:
             password = args.admin_password or getpass.getpass(
                 "Administrator password: "
             )
-        model = args.model.resolve()
-        validate_custom_model(model)
+        model = args.model.resolve() if args.model else None
+        if model is not None:
+            validate_custom_model(model)
         compose_env_path = (
             args.compose_env.expanduser().resolve()
             if args.compose_env is not None
@@ -102,7 +103,8 @@ def _init(args: argparse.Namespace) -> int:
     print(f"Camera credentials: {result.camera_credentials_path}")
     print(f"Release manifest: {result.release_manifest_path}")
     print(f"Compose environment: {result.compose_env_path}")
-    print(f"Installed model: {args.data_root.resolve() / 'models' / model.name}")
+    if model is not None:
+        print(f"Installed model: {args.data_root.resolve() / 'models' / model.name}")
     if result.tls_certificate_path.is_file():
         print(f"TLS certificate: {result.tls_certificate_path}")
         print(f"TLS private key: {result.tls_private_key_path}")
@@ -275,8 +277,7 @@ def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--model",
         type=Path,
-        required=True,
-        help="path to an already-downloaded .pt, .onnx, or .engine model",
+        help="optional path to an already-downloaded .pt, .onnx, or .engine model",
     )
     parser.add_argument(
         "--identity-model",

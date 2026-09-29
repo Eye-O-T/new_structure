@@ -384,6 +384,31 @@ class InstallerWindow(QWidget):
         self.open_admin_button.clicked.connect(self.open_admin)
         controls_layout.addWidget(self.open_admin_button)
         self.management_tabs.addTab(controls, "서버 상태")
+        ai_controls = QWidget()
+        ai_layout = QVBoxLayout(ai_controls)
+        ai_layout.addWidget(QLabel(
+            "AI 영상 처리는 기본적으로 실행되지 않습니다. 이 PC에서만 켜고 끌 수 있으며, 휴대전화 앱은 현재 상태를 조회만 합니다."
+        ))
+        ai_row = QHBoxLayout()
+        self.ai_buttons = []
+        for label, action in (
+            ("사람 감지·식별 켜기", "preprocessing-on"),
+            ("사람 감지·식별 끄기", "preprocessing-off"),
+            ("이벤트 분석 켜기", "analysis-on"),
+            ("이벤트 분석 끄기", "analysis-off"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda _checked=False, selected=action: self.service_action(selected)
+            )
+            ai_row.addWidget(button)
+            self.ai_buttons.append(button)
+        ai_layout.addLayout(ai_row)
+        ai_layout.addWidget(QLabel(
+            "두 기능을 켜려면 탐지 모델과 OSNet 모델이 필요합니다. 이벤트 분석을 켜면 선행 기능인 사람 감지·식별도 함께 시작합니다. 사람 감지·식별을 끄면 이벤트 분석도 함께 중지됩니다."
+        ))
+        ai_layout.addStretch()
+        self.management_tabs.addTab(ai_controls, "AI 기능")
         self.edge_panel = EdgePanel()
         self.edge_panel.busy_changed.connect(self._edge_busy_changed)
         edge_scroll = QScrollArea()
@@ -619,7 +644,7 @@ class InstallerWindow(QWidget):
             server_dir=self.server_dir,
             admin_username=self.username.text().strip(),
             admin_password=self.password.text(),
-            model_path=Path(self.model.text()),
+            model_path=self._path_or_none(self.model),
             identity_model_path=self._path_or_none(self.identity_model),
             cameras=cameras,
             tls_certificate_path=self._path_or_none(self.tls_certificate) if scheme == "https" else None,
@@ -659,9 +684,9 @@ class InstallerWindow(QWidget):
                 f"접속 주소: {request.public_base_url}\n웹 수신 IP: {request.public_bind_address}\n"
                 f"카메라 영상 수신: {request.rtsp_bind_address}:{request.rtsp_port}\n"
                 f"녹화: {request.recording_segment_seconds}초 단위 / {request.retention_days}일 보관\n"
-                f"AI 모델: {request.model_path.name}\n추론 장치: {request.inference_device}\n\n"
+                f"AI 모델: {request.model_path.name if request.model_path else '나중에 설정'}\n추론 장치: {request.inference_device}\n\n"
                 f"인물 식별 모델: {request.identity_model_path.name if request.identity_model_path else IDENTITY_MODEL_NAME}\n\n"
-                "설정과 인증키 생성 → 모델·인증서 준비 → 서버 이미지 준비 → 서버 실행 순서로 진행합니다.\n"
+                "설정과 인증키 생성 → 인증서 준비 → 서버 이미지 준비 → 서버 실행 순서로 진행합니다. AI 모델은 기능을 켤 때 준비할 수 있습니다.\n"
                 "초기 실행 후 ‘카메라 연결’에서 Edge를 연결하세요. 실제 영상과 감지 동작은 카메라 연결 후 확인합니다."
             )
             self.pages.setCurrentIndex(2)
@@ -773,6 +798,10 @@ class InstallerWindow(QWidget):
             "restart": "저장된 서버를 재시작하고 있습니다…",
             "stop": "서버를 중지하고 있습니다…",
             "status": "서버 상태를 확인하고 있습니다…",
+            "preprocessing-on": "사람 감지·식별을 시작하고 있습니다…",
+            "preprocessing-off": "사람 감지·식별을 중지하고 있습니다…",
+            "analysis-on": "이벤트 분석을 시작하고 있습니다…",
+            "analysis-off": "이벤트 분석을 중지하고 있습니다…",
         }
 
         def operate(progress):

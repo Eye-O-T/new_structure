@@ -12,7 +12,7 @@ from pathlib import Path
 
 from server.setup.validation import read_deployment_env
 
-START_ARGUMENTS = ("up", "-d", "--build", "--wait", "--remove-orphans")
+START_ARGUMENTS = ("up", "-d", "--build", "--wait")
 
 
 # 소스 실행은 저장소의 server, 배포 실행 파일은 옆에 설치된 server 폴더를 기준으로 삼는다.
@@ -156,7 +156,7 @@ class ComposeAdapter:
         return [*command, *arguments]
 
     # 서비스를 띄우기 전에 설정·모델·인증서가 실제 파일인지 확인한다. 실행 성공까지 보장하는 검사는 아니다.
-    def deployment_prerequisites(self) -> list[Prerequisite]:
+    def deployment_prerequisites(self, *, require_ai_models: bool = False) -> list[Prerequisite]:
         results = installation_prerequisites(self.server_dir)
         if not self.env_file.is_file():
             results.append(
@@ -209,19 +209,22 @@ class ComposeAdapter:
             )
         models_root = deployment_path("MODELS_DIR")
         model_name = values.get("MODEL_FILE")
-        required_files["Inference model"] = (
-            models_root / model_name if models_root is not None and model_name else None
-        )
-        from server.setup.model_manager import (
-            IDENTITY_PLUGIN,
-            deployed_identity_model,
-            validate_identity_model,
-        )
-
-        if (values.get("IDENTITY_PLUGIN") or IDENTITY_PLUGIN) == IDENTITY_PLUGIN:
-            required_files["OSNet identity model"] = deployed_identity_model(
-                values, models_root
+        if require_ai_models:
+            required_files["Inference model"] = (
+                models_root / model_name if models_root is not None and model_name else None
             )
+            from server.setup.model_manager import (
+                IDENTITY_PLUGIN,
+                deployed_identity_model,
+                validate_identity_model,
+            )
+
+            if (values.get("IDENTITY_PLUGIN") or IDENTITY_PLUGIN) == IDENTITY_PLUGIN:
+                required_files["OSNet identity model"] = deployed_identity_model(
+                    values, models_root
+                )
+        else:
+            validate_identity_model = None
         certificate_root = deployment_path("CERTS_DIR")
         if values.get("PUBLIC_SCHEME", "https").lower() == "https":
             required_files["TLS certificate"] = (
@@ -232,7 +235,7 @@ class ComposeAdapter:
             )
         for name, path in required_files.items():
             present = path is not None and path.is_file()
-            if present and name == "OSNet identity model":
+            if present and name == "OSNet identity model" and validate_identity_model:
                 try:
                     validate_identity_model(path)
                 except (OSError, ValueError):
@@ -261,7 +264,7 @@ class ComposeAdapter:
         )
 
     def start(self) -> int:
-        # 이전 구성의 컨테이너가 남아 중복 이벤트를 만들지 않도록 제거한다.
+        # 프로파일로 관리되는 선택 AI 서비스는 기본 기동에서 건드리지 않는다.
         return self.run(*START_ARGUMENTS).returncode
 
     def stop(self) -> int:
@@ -270,3 +273,13 @@ class ComposeAdapter:
     def restart(self) -> int:
         result = self.run("restart")
         return result.returncode
+
+    def start_optional_service(self, service: str) -> int:
+        if service not in {"preprocessing", "analysis"}:
+            raise ValueError("unsupported optional service")
+        return self.run("up", "-d", "--build", "--wait", service).returncode
+
+    def stop_optional_service(self, service: str) -> int:
+        if service not in {"preprocessing", "analysis"}:
+            raise ValueError("unsupported optional service")
+        return self.run("stop", service).returncode

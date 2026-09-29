@@ -4,10 +4,10 @@
 
 ## Windows 설치
 
-Windows 10/11 x64, Linux 컨테이너 모드의 Docker Desktop·Compose v2, 사람 감지 모델, OSNet ONNX, 서버 주소에 맞는 TLS 인증서·PEM 개인키를 준비한다.
+Windows 10/11 x64, Linux 컨테이너 모드의 Docker Desktop·Compose v2를 준비한다. 기본 설치는 영상 송출·녹화만 시작하며 사람 감지 모델과 OSNet은 AI 기능을 켤 때 준비하면 된다. HTTPS를 선택할 때는 서버 주소에 맞는 TLS 인증서·PEM 개인키도 준비한다. HTTP는 설치 도우미에서 명시적으로 선택하거나 소스 배포에서 아래와 같이 설정할 수 있다.
 
 1. 배포받은 설치 EXE를 실행하고 서버 설치 도우미를 연다.
-2. 모델·인증서를 선택하고 관리자 비밀번호(12자 이상), 접속 주소, 저장소를 설정한다.
+2. 통신 방식을 선택하고 관리자 비밀번호(12자 이상), 접속 주소, 저장소를 설정한다. HTTPS일 때는 인증서도 지정한다. 모델 입력은 선택 사항이다.
 3. **설치 및 시작** 후 서버 상태를 확인한다.
 4. **카메라 연결**에서 Edge를 등록하고 앱을 연결한다.
 
@@ -15,7 +15,7 @@ Windows 10/11 x64, Linux 컨테이너 모드의 Docker Desktop·Compose v2, 사�
 
 ## 소스 배포
 
-Python 3.11, Docker·Compose v2, 개발 인증서 생성용 OpenSSL이 필요하다. 다음 초기화는 새 배포에 사용한다.
+Python 3.11, Docker·Compose v2가 필요하다. HTTPS용 개발 인증서를 만들 때는 OpenSSL도 준비한다. 다음 초기화는 새 배포에 사용한다.
 
 ```powershell
 Copy-Item server/.env.example server/.env
@@ -27,6 +27,11 @@ Pairing·관리자 화면에서 카메라를 등록할 경우 `config.yaml`의 �
 
 ```powershell
 python server/setup/tools/generate_secrets.py
+```
+
+HTTPS를 사용할 때만 개발용 인증서를 만들거나 운영 인증서를 `CERTS_DIR`에 준비한다.
+
+```powershell
 python server/setup/tools/generate_dev_cert.py
 ```
 
@@ -42,7 +47,17 @@ python server/setup/tools/generate_dev_cert.py
 
 OSNet 준비는 [모델 도구](../server/tools/README.md)를 따른다. 서비스는 모델을 자동 다운로드하지 않는다. `.env`의 상대 경로는 `server/` 기준이며, Linux에서는 저장소 권한을 `AI_CCTV_UID/GID`와 맞춘다.
 
-`PUBLIC_BASE_URL`은 `http://` 또는 `https://서버주소[:포트]`로 지정한다. HTTP는 암호화되지 않으므로 신뢰할 수 있는 LAN에서만 사용한다. `PUBLIC_BIND_ADDRESS`·`RTSP_BIND_ADDRESS`의 기본값 `127.0.0.1`을 원격 장치가 접근할 서버 IP로 바꾼다. HTTPS를 사용할 때는 실제 서버 이름과 일치하고 단말이 신뢰하는 인증서가 필요하다. 사용자 지정 포트는 주소에 직접 포함한다.
+`PUBLIC_BASE_URL`은 `http://` 또는 `https://서버주소[:포트]`로 지정한다. **HTTP를 선택했다면** `server/.env`에서 아래 값을 함께 설정한다. `COOKIE_SECURE=false`는 HTTP에서 쿠키가 전송되게 하고, HTTP 전용 Nginx 설정은 80번 포트에서 TLS 리다이렉트 없이 서비스한다. 설치 도우미는 통신 방식 선택에 따라 이 값들을 자동으로 기록한다. 수동 소스 배포에서 `ALLOW_INSECURE_HTTP=true`는 설치 검사에 HTTP 사용을 명시하는 설정이다.
+
+```dotenv
+PUBLIC_BASE_URL=http://cctv.example.com
+PUBLIC_SCHEME=http
+ALLOW_INSECURE_HTTP=true
+NGINX_CONFIG_FILE=./services/nginx/nginx.http.conf
+COOKIE_SECURE=false
+```
+
+HTTP 트래픽은 암호화되지 않으므로 신뢰할 수 있는 LAN에서만 사용한다. 이 구성의 공개 포트는 HTTP 80이며 HTTPS 인증서는 필요하지 않다. HTTPS를 쓸 때는 기본 Nginx 설정을 유지하고 실제 서버 이름과 일치하며 단말이 신뢰하는 인증서를 준비한다. `PUBLIC_BIND_ADDRESS`·`RTSP_BIND_ADDRESS`의 기본값 `127.0.0.1`은 원격 장치가 접근할 서버 IP로 바꾼다. 사용자 지정 포트는 주소에 직접 포함한다.
 
 HTTPS는 기본 443, HTTP는 기본 80, Edge 송출은 신뢰 LAN의 RTSP 8554를 사용한다. 내부 서비스 포트는 외부에 공개하지 않는다.
 
