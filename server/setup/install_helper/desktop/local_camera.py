@@ -37,11 +37,16 @@ class LocalCameraPublisher(QObject):
         self._error_output = ""
         self.failure_message = ""
         ffmpeg = self.ffmpeg_path()
+        # 2초 HLS 세그먼트와 맞춰 인코딩·재생 버스트를 줄인다.
+        gop = max(1, int(fps * 2))
         args = [
             "-hide_banner", "-loglevel", "warning", "-f", "dshow",
             "-video_size", f"{width}x{height}", "-framerate", str(fps),
             "-i", f"video={camera_name}", "-an", "-c:v", "libx264",
-            "-preset", "veryfast", "-tune", "zerolatency", "-pix_fmt", "yuv420p",
+            "-preset", "veryfast", "-tune", "zerolatency",
+            # 30fps 기준 2초마다 키프레임을 만들어 HLS 경계와 맞춘다.
+            "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0", "-bf", "0",
+            "-pix_fmt", "yuv420p",
             "-f", "rtsp", "-rtsp_transport", "tcp", stream_url,
         ]
         self.process.start(ffmpeg, args)
@@ -57,15 +62,19 @@ class LocalCameraPublisher(QObject):
 
     def _failure_reason(self):
         output = self._error_output.lower()
+        def with_output(message):
+            detail = self._error_output.strip()
+            return f"{message}\nFFmpeg stderr:\n{detail}" if detail else message
+
         if "could not set video options" in output or "could not run graph" in output:
-            return "웹캠이 요청한 영상 설정을 지원하지 않습니다. 카메라 장치와 해상도를 확인하세요."
+            return with_output("웹캠이 요청한 영상 설정을 지원하지 않습니다. 카메라 장치와 해상도를 확인하세요.")
         if "could not find video device" in output or "error opening input" in output:
-            return "웹캠을 열 수 없습니다. 다른 앱에서 카메라를 사용 중인지, 장치명이 맞는지 확인하세요."
+            return with_output("웹캠을 열 수 없습니다. 다른 앱에서 카메라를 사용 중인지, 장치명이 맞는지 확인하세요.")
         if "401" in output or "403" in output or "unauthorized" in output or "authentication failed" in output:
-            return "RTSP 인증에 실패했습니다. 카메라를 다시 등록한 뒤 송출을 시작하세요."
+            return with_output("RTSP 인증에 실패했습니다. 카메라를 다시 등록한 뒤 송출을 시작하세요.")
         if "connection refused" in output or "no route to host" in output or "failed to connect" in output:
-            return "RTSP 서버에 연결할 수 없습니다. 서버 주소와 포트 8554를 확인하세요."
-        return "FFmpeg 송출이 종료됐습니다. 웹캠, RTSP 서버, 송출 인증을 확인하세요."
+            return with_output("RTSP 서버에 연결할 수 없습니다. 서버 주소와 포트 8554를 확인하세요.")
+        return with_output("FFmpeg 송출이 종료됐습니다. 웹캠, RTSP 서버, 송출 인증을 확인하세요.")
 
     def stop(self):
         if self.process.state() != QProcess.NotRunning:
@@ -98,13 +107,16 @@ def list_camera_devices():
         ffmpeg = LocalCameraPublisher.ffmpeg_path()
         result = subprocess.run(
             [ffmpeg, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=False, timeout=5, check=False,
         )
     except (OSError, subprocess.SubprocessError, RuntimeError):
         return []
+    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
     devices = []
-    for line in (result.stderr or "").splitlines():
-        match = re.search(r'"([^"]+)"\s+\(video\)', line, re.IGNORECASE)
+    for line in stderr.splitlines():
+        # FFmpeg 9 may label DirectShow video devices as (none), while older
+        # versions use (video). Alternative-name lines are not device names.
+        match = re.search(r'"([^"]+)"\s+\((?:video|none)\)\s*$', line, re.IGNORECASE)
         if match and match.group(1) not in devices:
             devices.append(match.group(1))
     return devices

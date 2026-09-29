@@ -1,13 +1,18 @@
 """Reference main-window flow with server-backed operations and safe Qt lifetimes."""
 
 import argparse
+import logging
 import sys
+import time
 
 from PyQt5.QtCore import QProcess, QTimer, Qt
 from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox
 
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
 from ..qt_tasks import BackgroundTask
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class CCTVMainWindow(ReferenceWindow):
@@ -21,11 +26,14 @@ class CCTVMainWindow(ReferenceWindow):
         self._logout_task = None
         self._logout_done = False
         self._stopping = False
+        self._render_count = 0
+        self._render_total_ms = 0.0
+        self._last_render_log = time.monotonic()
         super().__init__()
         self.ai_cctv_path = self.storage_root_path = str(storage_path)
-        self.setMinimumSize(1100, 700)
-        self.video_label.setMinimumSize(480, 270)
-        self.storage_label.setText(f"서버 저장소\n{storage_path or '서버에서 관리'}\n\nSTOP·창 닫기는 모니터링만 종료합니다.\n서버 녹화는 계속됩니다.")
+        self.setMinimumSize(900, 600)
+        self.video_label.setMinimumSize(320, 180)
+        self.storage_label.setText(f"서버 저장소\n{storage_path or '서버에서 관리'}\n\n모니터링 중지는 화면 연결만 종료합니다.\n서버 녹화는 계속됩니다.")
         self.cam_status.setText("설정에서 로그인하세요.")
         self.cam_status.setWordWrap(True)
         for label in self.findChildren(QLabel):
@@ -33,7 +41,7 @@ class CCTVMainWindow(ReferenceWindow):
             if label.text() == "카메라\nRTSP / LAN / USB 입력 상태":
                 label.setText("카메라\n서버 연결 상태")
             if label.text() == "누적 추적":
-                label.setText("관측 추적 (이번 START)")
+                label.setText("관측 추적 (이번 시작)")
             if label.text() == "CAM-01 정문 · 실시간 분석 화면":
                 self.camera_title = label
                 label.setText("서버 카메라 · 실시간 영상")
@@ -78,7 +86,7 @@ class CCTVMainWindow(ReferenceWindow):
         self.btn_start.setEnabled(True)
         self.btn_setting.setEnabled(True)
         self.btn_stop.setEnabled(False)
-        self.cam_status.setText("모니터링 중지됨" if self._stopping else "영상 연결 종료 — START로 재시도")
+        self.cam_status.setText("모니터링 중지됨" if self._stopping else "영상 연결 종료 — 모니터링 시작으로 재시도")
         self.show_idle_screen()
         if self._closing:
             QTimer.singleShot(0, self.close)
@@ -86,11 +94,25 @@ class CCTVMainWindow(ReferenceWindow):
     def update_frame(self, frame):
         if self.worker is None:
             return
+        started = time.perf_counter()
         try:
             if not self._stopping:
                 super().update_frame(frame)
                 self.cam_status.setText(f"● {self.video_source[1]} · LIVE")
         finally:
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            self._render_count += 1
+            self._render_total_ms += elapsed_ms
+            now = time.monotonic()
+            if now - self._last_render_log >= 5:
+                average_ms = self._render_total_ms / max(1, self._render_count)
+                LOGGER.info(
+                    "video render diagnostics: frames=%d average_ms=%.2f last_ms=%.2f",
+                    self._render_count,
+                    average_ms,
+                    elapsed_ms,
+                )
+                self._last_render_log = now
             self.worker.acknowledge_frame()
 
     def open_settings(self):
@@ -106,7 +128,7 @@ class CCTVMainWindow(ReferenceWindow):
             camera_id = self.video_source[1]
             self.camera_title.setText(f"{camera_id} · 실시간 영상")
             self.cam_status.setText(f"● {camera_id} · 준비됨")
-        self.storage_label.setText(f"서버 저장소\n{self.ai_cctv_path or '서버에서 관리'}\n\nSTOP·창 닫기는 모니터링만 종료합니다.\n서버 녹화는 계속됩니다.")
+        self.storage_label.setText(f"서버 저장소\n{self.ai_cctv_path or '서버에서 관리'}\n\n모니터링 중지는 화면 연결만 종료합니다.\n서버 녹화는 계속됩니다.")
 
     def open_resource_monitor(self):
         if not self.api:
@@ -182,9 +204,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="AI CCTV PyQt 관리자")
     parser.add_argument("--server-url", default="https://localhost")
     parser.add_argument("--ca-file")
+    parser.add_argument("--allow-insecure-http", action="store_true")
     args = parser.parse_args(argv)
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    window = CCTVMainWindow(args.server_url, ca_file=args.ca_file)
+    window = CCTVMainWindow(
+        args.server_url,
+        ca_file=args.ca_file,
+        allow_insecure_http=args.allow_insecure_http,
+    )
     window.show()
     return app.exec_()
 

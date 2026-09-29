@@ -3,8 +3,12 @@
 import re
 import secrets
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import logging
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MediaBridge:
@@ -34,10 +38,11 @@ class MediaBridge:
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
                     self.wfile.write(content)
-                except Exception:
+                except Exception as exc:
+                    LOGGER.exception("HLS media request failed: %s", exc)
                     self.send_error(502, "Media unavailable")
 
-        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.1})
         self.url = f"http://127.0.0.1:{self.server.server_port}" + self.prefix + initial
 

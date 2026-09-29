@@ -25,7 +25,7 @@ class CCTVMainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Intelligent CCTV Control Center")
-        self.setGeometry(100, 100, 1600, 900)
+        self.setGeometry(100, 100, 1280, 720)
         self.setStyleSheet(
             "background-color: #0f172a; color: #f8fafc; font-family: Arial;"
         )
@@ -57,14 +57,14 @@ class CCTVMainWindow(QMainWindow):
         title_label = QLabel("Intelligent CCTV Control Center")
         title_label.setStyleSheet("font-size: 28px; font-weight: bold;")
 
-        self.btn_start = QPushButton("START")
+        self.btn_start = QPushButton("모니터링 시작")
         self.btn_start.setStyleSheet(
             "background-color: #166534; color: white; padding: 8px 20px; "
             "border-radius: 5px; font-size: 22px; font-weight: bold;"
         )
         self.btn_start.clicked.connect(self.start_video)
 
-        self.btn_stop = QPushButton("STOP")
+        self.btn_stop = QPushButton("모니터링 중지")
         self.btn_stop.setStyleSheet(
             "background-color: #7f1d1d; color: white; padding: 8px 20px; "
             "border-radius: 5px; font-size: 22px; font-weight: bold;"
@@ -98,7 +98,8 @@ class CCTVMainWindow(QMainWindow):
         main_layout.addLayout(body_layout)
 
         left_panel = QFrame()
-        left_panel.setFixedWidth(300)
+        left_panel.setMinimumWidth(180)
+        left_panel.setMaximumWidth(300)
         left_panel.setStyleSheet("background-color: #1e293b; border-radius: 10px;")
 
         left_layout = QVBoxLayout(left_panel)
@@ -131,7 +132,7 @@ class CCTVMainWindow(QMainWindow):
             "background-color: #0f172a; border-radius: 5px; "
             "font-size: 28px; color: #334155; font-weight: bold;"
         )
-        self.video_label.setMinimumSize(800, 450)
+        self.video_label.setMinimumSize(320, 180)
         center_layout.addWidget(self.video_label, stretch=1)
 
         metrics_layout = QHBoxLayout()
@@ -151,7 +152,8 @@ class CCTVMainWindow(QMainWindow):
         body_layout.addWidget(center_panel, stretch=1)
 
         right_panel = QFrame()
-        right_panel.setFixedWidth(350)
+        right_panel.setMinimumWidth(220)
+        right_panel.setMaximumWidth(350)
         right_panel.setStyleSheet("background-color: #1e293b; border-radius: 10px;")
 
         right_layout = QVBoxLayout(right_panel)

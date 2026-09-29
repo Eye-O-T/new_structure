@@ -43,6 +43,7 @@ hlsEncryption: no
 hlsAllowOrigin: ""
 hlsAlwaysRemux: no
 hlsVariant: fmp4
+# 안정적인 재생을 위해 2초 세그먼트와 충분한 재생목록을 유지한다.
 hlsSegmentCount: 7
 hlsSegmentDuration: 2s
 hlsPartDuration: 200ms

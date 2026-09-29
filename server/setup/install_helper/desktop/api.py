@@ -152,7 +152,9 @@ class DesktopApi(ServerApiClient):
 
 
 def safe_error(exc):
-    # Raw network errors may contain addresses; validation errors may contain secrets.
-    if isinstance(exc, ServerApiError) and exc.status_code in {401, 403}:
-        return "관리자 로그인이 필요하거나 접근 권한이 없습니다. 설정에서 다시 로그인하세요."
-    return "요청을 완료하지 못했습니다. 서버 연결·인증서·입력값을 확인하고 다시 시도하세요."
+    if isinstance(exc, ServerApiError):
+        status = f"HTTP {exc.status_code}" if exc.status_code is not None else "LOCAL"
+        message = exc.message or "(empty error message)"
+        details = f" details={exc.details!r}" if exc.details is not None else ""
+        return f"{status} [{exc.code}]: {message}{details}"
+    return str(exc) or exc.__class__.__name__

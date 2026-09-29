@@ -1,6 +1,9 @@
 """Preserve VideoWorker's constructor/signals/start/stop contract; inference stays on the server."""
 
 import threading
+import time
+import logging
+from queue import Empty, Full, Queue
 from datetime import datetime, timezone
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -8,6 +11,9 @@ from PyQt5.QtGui import QImage
 
 from .api import safe_error
 from .media import MediaBridge
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def legacy_event(event):
@@ -48,9 +54,34 @@ class VideoWorker(QThread):
         self.running = True
         self._stop = threading.Event()
         self._frame_pending = threading.Event()
+        self._decode_thread = None
+        self._stats_lock = threading.Lock()
+        self._decoded_frames = 0
+        self._displayed_frames = 0
+        self._dropped_frames = 0
+        self._last_stats_log = 0.0
 
     def acknowledge_frame(self):
         self._frame_pending.clear()
+        with self._stats_lock:
+            self._displayed_frames += 1
+
+    def _log_stats(self, queue_size=0, *, force=False):
+        now = time.monotonic()
+        if not force and now - self._last_stats_log < 5:
+            return
+        with self._stats_lock:
+            decoded = self._decoded_frames
+            displayed = self._displayed_frames
+            dropped = self._dropped_frames
+        LOGGER.info(
+            "video diagnostics: decoded=%d displayed=%d dropped=%d queue=%d",
+            decoded,
+            displayed,
+            dropped,
+            queue_size,
+        )
+        self._last_stats_log = now
 
     def stop(self):
         self.running = False
@@ -92,34 +123,94 @@ class VideoWorker(QThread):
         api, camera_id = self.source
         poller = threading.Thread(target=self.poll)
         poller.start()
+        frames = Queue(maxsize=120)
+        self._decode_thread = threading.Thread(
+            target=self._decode_loop, args=(frames,), daemon=True
+        )
+        self._decode_thread.start()
         try:
-            import av
-
+            first_pts = None
+            clock_start = None
             while not self._stop.is_set():
-                self.loading_ready.emit("서버 영상 연결 중...")
                 try:
-                    live = api.camera(camera_id, "/live")
-                    with MediaBridge(api, camera_id, live["hls_url"]) as bridge:
-                        with av.open(bridge.url, timeout=(8, 8), options={"protocol_whitelist": "http,tcp,crypto"}) as stream:
-                            for frame in stream.decode(video=0):
-                                if self._stop.is_set():
-                                    break
-                                if self._frame_pending.is_set():
-                                    continue
-                                rgb = frame.reformat(format="rgb24")
-                                image = QImage(bytes(rgb.planes[0]), rgb.width, rgb.height,
-                                               rgb.planes[0].line_size, QImage.Format_RGB888).copy()
-                                self._frame_pending.set()
-                                self.frame_ready.emit(image)
-                    if not self._stop.is_set():
-                        raise RuntimeError("Stream ended")
-                except Exception:
-                    if not self._stop.is_set():
-                        self.event_ready.emit({"type": "network_failure", "message": "영상 연결을 확인하고 재접속합니다."})
-                        self._stop.wait(3)
+                    image, pts = frames.get(timeout=0.2)
+                except Empty:
+                    continue
+                if pts is None or first_pts is None or pts < first_pts or pts - first_pts > 30:
+                    first_pts = pts
+                    clock_start = time.monotonic()
+                if pts is not None and clock_start is not None:
+                    target = clock_start + (pts - first_pts)
+                    delay = target - time.monotonic()
+                    if delay > 0:
+                        self._stop.wait(delay)
+                    elif delay < -0.5:
+                        with self._stats_lock:
+                            self._dropped_frames += 1
+                        continue
+                while self._frame_pending.is_set() and not self._stop.is_set():
+                    self._stop.wait(0.005)
+                if self._stop.is_set():
+                    break
+                self._frame_pending.set()
+                self.frame_ready.emit(image)
+                self._log_stats(frames.qsize())
         except Exception as exc:
             self.event_ready.emit({"type": "error", "message": safe_error(exc)})
         finally:
             self.running = False
             self._stop.set()
+            if self._decode_thread is not None:
+                self._decode_thread.join(timeout=2)
             poller.join()
+
+    def _decode_loop(self, frames):
+        api, camera_id = self.source
+        try:
+            import av
+        except Exception as exc:
+            self.event_ready.emit({"type": "error", "message": safe_error(exc)})
+            return
+        while not self._stop.is_set():
+            try:
+                self.loading_ready.emit("서버 영상 연결 중...")
+                live = api.camera(camera_id, "/live")
+                with MediaBridge(api, camera_id, live["hls_url"]) as bridge:
+                    with av.open(
+                        bridge.url,
+                        timeout=(8, 8),
+                        options={"protocol_whitelist": "http,tcp,crypto"},
+                    ) as stream:
+                        for frame in stream.decode(video=0):
+                            if self._stop.is_set():
+                                return
+                            rgb = frame.reformat(format="rgb24")
+                            image = QImage(
+                                bytes(rgb.planes[0]), rgb.width, rgb.height,
+                                rgb.planes[0].line_size, QImage.Format_RGB888
+                            ).copy()
+                            pts = frame.time
+                            item = (image, float(pts) if pts is not None else None)
+                            with self._stats_lock:
+                                self._decoded_frames += 1
+                            while not self._stop.is_set():
+                                try:
+                                    frames.put(item, timeout=0.1)
+                                    break
+                                except Full:
+                                    try:
+                                        frames.get_nowait()
+                                        with self._stats_lock:
+                                            self._dropped_frames += 1
+                                    except Empty:
+                                        pass
+                if not self._stop.is_set():
+                    raise RuntimeError("Stream ended")
+            except Exception as exc:
+                if not self._stop.is_set():
+                    self.event_ready.emit({
+                        "type": "network_failure",
+                        "message": f"영상 연결 오류: {safe_error(exc)}\n3초 후 재접속합니다.",
+                    })
+                self._stop.wait(3)
+        self._log_stats(frames.qsize(), force=True)

@@ -44,9 +44,14 @@ class SettingsWindow(QDialog):
 
         self.setWindowTitle("설정")
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
-        self.setFixedSize(1100, 650)
+        self.resize(800, 650)
+        self.setMinimumSize(640, 520)
         self.setStyleSheet(
             "background-color: #0f172a; color: #f8fafc; font-family: Arial;"
+            " QLineEdit, QComboBox { background-color: #111827;"
+            " border: 1px solid #64748b; border-radius: 5px;"
+            " color: #f8fafc; padding: 5px 8px; min-height: 26px; }"
+            " QLineEdit:focus, QComboBox:focus { border: 1px solid #60a5fa; }"
         )
 
         self.init_ui()
@@ -57,7 +62,8 @@ class SettingsWindow(QDialog):
         main_layout.setSpacing(20)
 
         menu_panel = QFrame()
-        menu_panel.setFixedWidth(200)
+        menu_panel.setMinimumWidth(140)
+        menu_panel.setMaximumWidth(200)
         menu_panel.setStyleSheet("background-color: #1e293b; border-radius: 10px;")
 
         menu_layout = QVBoxLayout(menu_panel)

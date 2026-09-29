@@ -40,31 +40,15 @@ from .server_api import (
 )
 
 
-# 서버 응답이나 예외 문자열을 그대로 보여 주지 않고 오류 종류별 고정 안내를 선택한다.
+# 개발 화면에서는 서버 응답과 예외의 원문을 확인할 수 있어야 한다.
 def _connection_error(error: Exception) -> str:
-    """Server responses and arbitrary exception text may contain credentials."""
+    """Return the original development error without status-based masking."""
 
     if isinstance(error, ServerApiError):
-        if error.status_code in {401, 403}:
-            return "관리자 계정과 암호, 관리자 권한을 확인한 뒤 다시 연결하세요."
-        if error.status_code == 409:
-            return (
-                "이미 등록된 카메라이거나 현재 등록할 수 없는 상태입니다. "
-                "서버 관리자 화면에서 등록 여부를 확인하세요."
-            )
-        if error.status_code in {400, 422}:
-            return "카메라 ID와 고급 설정의 장치 주소를 확인한 뒤 다시 연결하세요."
-        if error.status_code == 429:
-            return "요청이 많아 서버가 잠시 제한했습니다. 잠시 후 다시 시도하세요."
-        return (
-            "중앙 서버 응답을 확인하지 못했습니다. 서버 주소·인증서·연결을 확인하고, "
-            "다시 등록하기 전에 서버 관리자 화면에서 카메라 등록 여부를 확인하세요."
-        )
-    if isinstance(error, EdgePairingError):
-        return "Edge 응답을 확인하지 못했습니다. 장치의 연결 대기 상태와 LAN 연결을 확인하세요."
-    if isinstance(error, OSError):
-        return "네트워크 연결과 전달 파일 폴더의 쓰기 권한을 확인한 뒤 다시 시도하세요."
-    return "입력값과 연결 상태를 확인한 뒤 다시 시도하세요."
+        status = f"HTTP {error.status_code}" if error.status_code is not None else "LOCAL"
+        details = f" details={error.details!r}" if error.details is not None else ""
+        return f"{status} [{error.code}]: {error.message}{details}"
+    return str(error) or error.__class__.__name__
 
 
 # 서버 설치 이후의 장치 검색·응답 확인·첫 등록을 관리하며 작업 중 상태를 부모 화면에 알린다.

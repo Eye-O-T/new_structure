@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -162,7 +163,10 @@ class InstallerWindow(QWidget):
     def _page(self, title, description):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         content = QWidget()
+        content.setMinimumWidth(0)
+        content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout = QVBoxLayout(content)
         heading = QLabel(title)
         heading.setStyleSheet("font-size:17px;font-weight:600")
@@ -354,22 +358,32 @@ class InstallerWindow(QWidget):
         self.management_info.setWordWrap(True)
         layout.addWidget(self.management_info)
         self.management_tabs = QTabWidget()
+        self.management_tabs.setMinimumWidth(0)
+        self.management_tabs.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         layout.addWidget(self.management_tabs, 1)
         controls = QWidget()
+        controls.setMinimumWidth(0)
+        controls.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         controls_layout = QVBoxLayout(controls)
-        row = QHBoxLayout()
+        row = QGridLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setColumnStretch(0, 1)
+        row.setColumnStretch(1, 1)
+        row.setHorizontalSpacing(8)
+        row.setVerticalSpacing(8)
         self.service_buttons = []
         for label, action in (
-            ("서버 시작 / 업데이트 적용", "start"),
+            ("서버 빌드 및 시작", "start"),
             ("재시작", "restart"),
             ("중지", "stop"),
             ("상태 확인", "status"),
         ):
             button = QPushButton(label)
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             button.clicked.connect(
                 lambda _checked=False, selected=action: self.service_action(selected)
             )
-            row.addWidget(button)
+            row.addWidget(button, len(self.service_buttons) // 2, len(self.service_buttons) % 2)
             self.service_buttons.append(button)
         controls_layout.addLayout(row)
         hint = QLabel(
@@ -381,15 +395,23 @@ class InstallerWindow(QWidget):
         self.management_output.setReadOnly(True)
         controls_layout.addWidget(self.management_output, 1)
         self.open_admin_button = QPushButton("서버 관리자 화면 열기")
+        self.open_admin_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.open_admin_button.clicked.connect(self.open_admin)
         controls_layout.addWidget(self.open_admin_button)
         self.management_tabs.addTab(controls, "서버 상태")
         ai_controls = QWidget()
+        ai_controls.setMinimumWidth(0)
+        ai_controls.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         ai_layout = QVBoxLayout(ai_controls)
         ai_layout.addWidget(QLabel(
             "AI 영상 처리는 기본적으로 실행되지 않습니다. 이 PC에서만 켜고 끌 수 있으며, 휴대전화 앱은 현재 상태를 조회만 합니다."
         ))
-        ai_row = QHBoxLayout()
+        ai_row = QGridLayout()
+        ai_row.setContentsMargins(0, 0, 0, 0)
+        ai_row.setColumnStretch(0, 1)
+        ai_row.setColumnStretch(1, 1)
+        ai_row.setHorizontalSpacing(8)
+        ai_row.setVerticalSpacing(8)
         self.ai_buttons = []
         for label, action in (
             ("사람 감지·식별 켜기", "preprocessing-on"),
@@ -398,10 +420,11 @@ class InstallerWindow(QWidget):
             ("이벤트 분석 끄기", "analysis-off"),
         ):
             button = QPushButton(label)
+            button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             button.clicked.connect(
                 lambda _checked=False, selected=action: self.service_action(selected)
             )
-            ai_row.addWidget(button)
+            ai_row.addWidget(button, len(self.ai_buttons) // 2, len(self.ai_buttons) % 2)
             self.ai_buttons.append(button)
         ai_layout.addLayout(ai_row)
         ai_layout.addWidget(QLabel(
@@ -413,6 +436,8 @@ class InstallerWindow(QWidget):
         self.edge_panel.busy_changed.connect(self._edge_busy_changed)
         edge_scroll = QScrollArea()
         edge_scroll.setWidgetResizable(True)
+        edge_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        edge_scroll.setMinimumWidth(0)
         edge_scroll.setWidget(self.edge_panel)
         self.management_tabs.addTab(edge_scroll, "카메라 연결")
 
@@ -603,6 +628,8 @@ class InstallerWindow(QWidget):
         if managing and not self._busy:
             for button in self.service_buttons:
                 button.setEnabled(self.installation is not None)
+            for button in self.ai_buttons:
+                button.setEnabled(self.installation is not None)
             self.open_admin_button.setEnabled(
                 bool(self.installation and self.installation.public_url)
             )
@@ -614,6 +641,7 @@ class InstallerWindow(QWidget):
         self.choose_storage_button.setEnabled(not busy)
         self.close_button.setEnabled(not busy)
         self.management_tabs.setTabEnabled(0, not busy)
+        self.management_tabs.setTabEnabled(1, not busy)
 
     def go_back(self):
         if not self._busy and self.pages.currentIndex() in (1, 2):

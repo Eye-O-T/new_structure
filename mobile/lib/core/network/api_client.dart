@@ -165,17 +165,31 @@ class ApiClient extends ChangeNotifier {
     }
   }
 
-  /// 성공 응답은 JSON 객체로 해석하고 HTTP 오류는 응답 본문 대신 정해진 안내로 바꾼다.
+  /// 성공 응답은 JSON 객체로 해석하고 HTTP 오류는 서버 응답 메시지를 보존한다.
   Map<String, dynamic> _decode(http.Response response) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final message = switch (response.statusCode) {
-        401 => '로그인이 필요하거나 로그인 정보가 올바르지 않습니다.',
-        403 => '이 항목에 접근할 권한이 없습니다.',
-        404 => '항목을 찾을 수 없습니다.',
-        409 => '현재 상태에서는 요청을 적용할 수 없습니다.',
-        429 => '요청이 많습니다. 잠시 후 다시 시도하세요.',
-        _ => '요청을 처리하지 못했습니다. (${response.statusCode})',
-      };
+      final raw = utf8.decode(response.bodyBytes, allowMalformed: true);
+      String message = raw;
+      try {
+        final value = jsonDecode(raw);
+        if (value is Map<String, dynamic>) {
+          final error = value['error'];
+          final nested = error is Map<String, dynamic> ? error['message'] : null;
+          final detail = value['detail'];
+          if (nested is String && nested.isNotEmpty) {
+            message = nested;
+          } else if (detail is String && detail.isNotEmpty) {
+            message = detail;
+          } else if (detail != null) {
+            message = jsonEncode(detail);
+          } else {
+            message = jsonEncode(value);
+          }
+        }
+      } on FormatException {
+        // Keep the raw response body for non-JSON development responses.
+      }
+      if (message.isEmpty) message = 'HTTP ${response.statusCode}';
       throw ApiException(response.statusCode, message);
     }
     if (response.bodyBytes.isEmpty) return {};

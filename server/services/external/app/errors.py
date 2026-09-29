@@ -1,4 +1,4 @@
-# 다른 서비스의 실패를 공개 API 오류로 바꾸되 토큰이나 비밀값이 응답에 노출되지 않게 한다.
+# 개발 환경에서는 하위 서비스의 원래 오류를 호출자에게 전달한다.
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,22 +9,17 @@ from .clients.edge import EdgeControlError
 from .clients.mediamtx import MediaControlError
 
 
-# 허용한 카메라 충돌 정보만 공개하고 나머지 Data 오류의 내부 메시지는 숨긴다.
+# Data 서비스가 반환한 오류 코드·메시지·세부 정보를 그대로 전달한다.
 async def handle_data_error(_: Request, exc: DataServiceError) -> JSONResponse:
-    if exc.code in {"CAMERA_HAS_HISTORY", "CAMERA_LIMIT_REACHED", "INVALID_EVENT_CURSOR"}:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "error": {
-                    "code": exc.code,
-                    "message": exc.message,
-                    "details": {},
-                }
-            },
-        )
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": "Data service request failed"},
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+                "details": getattr(exc, "details", {}),
+            }
+        },
     )
 
 
@@ -72,11 +67,11 @@ async def handle_validation_error(
     return JSONResponse(status_code=422, content={"detail": safe_errors})
 
 
-# 설정 예외의 값이나 비밀 경로를 노출하지 않고 서비스 준비 실패로 알린다.
-async def handle_configuration_error(_: Request, __: RuntimeError) -> JSONResponse:
+# 개발 중에는 설정 예외의 원문을 확인할 수 있게 한다.
+async def handle_configuration_error(_: Request, exc: RuntimeError) -> JSONResponse:
     return JSONResponse(
         status_code=503,
-        content={"detail": "Service configuration is unavailable"},
+        content={"detail": str(exc)},
     )
 
 

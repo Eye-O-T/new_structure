@@ -28,6 +28,25 @@ class EdgePairingError(RuntimeError):
         return self.message
 
 
+def _http_error_message(prefix: str, error: HTTPError) -> str:
+    """Keep the Edge HTTP response message available during development."""
+    raw = error.read(65_537)
+    if len(raw) > 65_536:
+        return f"{prefix} HTTP {error.code}; response body is too large"
+    try:
+        payload = json.loads(raw.decode("utf-8")) if raw else None
+    except (UnicodeError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict):
+        nested = payload.get("error")
+        if isinstance(nested, dict) and nested.get("message"):
+            return f"{prefix} HTTP {error.code}: {nested['message']}"
+        if payload.get("detail"):
+            return f"{prefix} HTTP {error.code}: {payload['detail']}"
+    text = raw.decode("utf-8", errors="replace").strip()
+    return f"{prefix} HTTP {error.code}: {text}" if text else f"{prefix} HTTP {error.code}"
+
+
 def probe_edge_connection(
     edge: DiscoveredEdge, *, timeout: float = 5.0
 ) -> dict[str, Any]:
@@ -49,7 +68,7 @@ def probe_edge_connection(
                 )
             raw = response.read(65_537)
     except HTTPError as exc:
-        raise EdgePairingError(f"Edge health probe returned HTTP {exc.code}") from exc
+        raise EdgePairingError(_http_error_message("Edge health probe returned", exc)) from exc
     except (URLError, OSError, TimeoutError) as exc:
         raise EdgePairingError(f"Edge health probe failed: {exc}") from exc
     if len(raw) > 65_536:
@@ -178,7 +197,7 @@ def complete_edge_pairing(
                 raise EdgePairingError(f"Edge pairing returned HTTP {response.status}")
             raw = response.read(65_537)
     except HTTPError as exc:
-        raise EdgePairingError(f"Edge pairing returned HTTP {exc.code}") from exc
+        raise EdgePairingError(_http_error_message("Edge pairing returned", exc)) from exc
     except (URLError, OSError, TimeoutError) as exc:
         raise EdgePairingError(f"Edge pairing connection failed: {exc}") from exc
     if len(raw) > 65_536:
