@@ -5,3 +5,5 @@ pydantic==2.10.6
 PyYAML==6.0.2
 numpy==1.26.4
 opencv-python-headless==4.11.0.86
+# PersonAttributeAnalyzer용 torch/torchvision은 CPU 전용 인덱스에서 받아야 하므로
+# Dockerfile에서 따로 설치한다. PyPI 기본 배포판은 CUDA를 포함해 이미지가 수 GB가 된다.
