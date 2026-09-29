@@ -4,6 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
 WORKDIR /app
 COPY server/services/analysis/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+# PersonAttributeAnalyzer가 쓰는 학습 모델 의존성. CPU 전용 인덱스로 받아야 이미지가
+# 수 GB로 커지지 않는다. 코드보다 먼저 설치해 코드 수정 시 재설치를 피한다.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.13.0+cpu torchvision==0.28.0+cpu
 COPY lib /opt/ai-cctv-core
 RUN pip install --no-cache-dir '/opt/ai-cctv-core[processing]'
 COPY server/services/analysis/app /app/server/services/analysis/app
