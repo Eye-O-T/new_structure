@@ -37,14 +37,14 @@ class LocalCameraPublisher(QObject):
         self._error_output = ""
         self.failure_message = ""
         ffmpeg = self.ffmpeg_path()
-        # 2초 HLS 세그먼트와 맞춰 인코딩·재생 버스트를 줄인다.
-        gop = max(1, int(fps * 2))
+        # HLS는 키프레임에서 분할되므로 1초 세그먼트와 GOP를 맞춘다.
+        gop = max(1, int(fps))
         args = [
             "-hide_banner", "-loglevel", "warning", "-f", "dshow",
             "-video_size", f"{width}x{height}", "-framerate", str(fps),
             "-i", f"video={camera_name}", "-an", "-c:v", "libx264",
             "-preset", "veryfast", "-tune", "zerolatency",
-            # 30fps 기준 2초마다 키프레임을 만들어 HLS 경계와 맞춘다.
+            # 30fps 기준 1초마다 키프레임을 만들어 HLS 경계와 맞춘다.
             "-g", str(gop), "-keyint_min", str(gop), "-sc_threshold", "0", "-bf", "0",
             "-pix_fmt", "yuv420p",
             "-f", "rtsp", "-rtsp_transport", "tcp", stream_url,

@@ -43,9 +43,9 @@ hlsEncryption: no
 hlsAllowOrigin: ""
 hlsAlwaysRemux: no
 hlsVariant: fmp4
-# 안정적인 재생을 위해 2초 세그먼트와 충분한 재생목록을 유지한다.
+# 1초 GOP의 송출과 맞춰 완성된 HLS 조각을 기다리는 시간을 줄인다.
 hlsSegmentCount: 7
-hlsSegmentDuration: 2s
+hlsSegmentDuration: 1s
 hlsPartDuration: 200ms
 hlsSegmentMaxSize: 50M
 hlsDirectory: ""

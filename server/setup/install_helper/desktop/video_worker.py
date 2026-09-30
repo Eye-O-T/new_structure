@@ -14,6 +14,14 @@ from .media import MediaBridge
 
 
 LOGGER = logging.getLogger(__name__)
+LIVE_FRAME_QUEUE_SIZE = 30  # One complete HLS segment at the default 30 fps.
+LIVE_OPEN_OPTIONS = {
+    "protocol_whitelist": "http,tcp,crypto",
+    # FFmpeg defaults to -3: with 2s segments this starts about 6s behind live.
+    "live_start_index": "-1",
+    "analyzeduration": "100000",
+    "probesize": "262144",
+}
 
 
 def legacy_event(event):
@@ -123,7 +131,7 @@ class VideoWorker(QThread):
         api, camera_id = self.source
         poller = threading.Thread(target=self.poll)
         poller.start()
-        frames = Queue(maxsize=120)
+        frames = Queue(maxsize=LIVE_FRAME_QUEUE_SIZE)
         self._decode_thread = threading.Thread(
             target=self._decode_loop, args=(frames,), daemon=True
         )
@@ -131,25 +139,40 @@ class VideoWorker(QThread):
         try:
             first_pts = None
             clock_start = None
+            previous_pts = None
+            session = None
             while not self._stop.is_set():
-                try:
-                    image, pts = frames.get(timeout=0.2)
-                except Empty:
-                    continue
-                if pts is None or first_pts is None or pts < first_pts or pts - first_pts > 30:
-                    first_pts = pts
-                    clock_start = time.monotonic()
-                if pts is not None and clock_start is not None:
-                    target = clock_start + (pts - first_pts)
-                    delay = target - time.monotonic()
-                    if delay > 0:
-                        self._stop.wait(delay)
-                    elif delay < -0.5:
-                        with self._stats_lock:
-                            self._dropped_frames += 1
-                        continue
+                # Select a frame only after Qt is ready, so a stalled UI cannot
+                # hold an old frame outside the bounded queue.
                 while self._frame_pending.is_set() and not self._stop.is_set():
                     self._stop.wait(0.005)
+                if self._stop.is_set():
+                    break
+                try:
+                    image, pts, frame_session, decoded_at = frames.get(timeout=0.2)
+                except Empty:
+                    continue
+                now = time.monotonic()
+                if now - decoded_at > 1:
+                    with self._stats_lock:
+                        self._dropped_frames += 1
+                    continue
+                if (frame_session != session or pts is None or first_pts is None
+                        or previous_pts is None or pts < previous_pts
+                        or pts - previous_pts > 0.5):
+                    first_pts = pts
+                    clock_start = now
+                session = frame_session
+                previous_pts = pts
+                if pts is not None and clock_start is not None:
+                    target = clock_start + (pts - first_pts)
+                    delay = target - now
+                    if delay > 0.5 or delay < -0.5:
+                        # Re-anchor after queue drops, network stalls or PTS
+                        # jumps instead of preserving an obsolete live clock.
+                        first_pts, clock_start = pts, now
+                    elif delay > 0:
+                        self._stop.wait(delay)
                 if self._stop.is_set():
                     break
                 self._frame_pending.set()
@@ -173,13 +196,21 @@ class VideoWorker(QThread):
             return
         while not self._stop.is_set():
             try:
+                session = object()
+                while True:
+                    try:
+                        frames.get_nowait()
+                        with self._stats_lock:
+                            self._dropped_frames += 1
+                    except Empty:
+                        break
                 self.loading_ready.emit("서버 영상 연결 중...")
                 live = api.camera(camera_id, "/live")
                 with MediaBridge(api, camera_id, live["hls_url"]) as bridge:
                     with av.open(
                         bridge.url,
                         timeout=(8, 8),
-                        options={"protocol_whitelist": "http,tcp,crypto"},
+                        options=LIVE_OPEN_OPTIONS,
                     ) as stream:
                         for frame in stream.decode(video=0):
                             if self._stop.is_set():
@@ -190,12 +221,15 @@ class VideoWorker(QThread):
                                 rgb.planes[0].line_size, QImage.Format_RGB888
                             ).copy()
                             pts = frame.time
-                            item = (image, float(pts) if pts is not None else None)
+                            item = (image, float(pts) if pts is not None else None,
+                                    session, time.monotonic())
                             with self._stats_lock:
                                 self._decoded_frames += 1
                             while not self._stop.is_set():
                                 try:
-                                    frames.put(item, timeout=0.1)
+                                    # Never pace the decoder with the display:
+                                    # keep reading HLS and evict old RGB frames.
+                                    frames.put_nowait(item)
                                     break
                                 except Full:
                                     try:
