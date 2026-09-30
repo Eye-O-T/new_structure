@@ -54,6 +54,12 @@ class ApiClient extends ChangeNotifier {
   Future<void>? _refreshing;
   // 인증 응답과 저장소 변경을 같은 순서로 완료해 이전 저장이 새 세션을 덮지 않게 한다.
   Future<void>? _sessionOperations;
+  ApiCancellation _sessionCancellation = ApiCancellation();
+  Future<void>? _logoutCleanup;
+  bool _needsSessionCleanup = false;
+  bool _disposed = false;
+  String? sessionCleanupError;
+  bool get clearingSession => _logoutCleanup != null;
   bool restoring = true;
   // 비동기 요청을 시작한 로그인 세션이 아직 유효한지 판별하는 세대 번호다.
   int _generation = 0;
@@ -94,10 +100,12 @@ class ApiClient extends ChangeNotifier {
   Future<void> restore() => _serializeSession(_restore);
 
   Future<void> _restore() async {
+    final generation = _generation;
     try {
       final raw = await store
           .read('session')
           .timeout(const Duration(seconds: 5));
+      if (generation != _generation || _needsSessionCleanup) return;
       if (raw != null) {
         final session = jsonDecode(raw) as Map<String, dynamic>;
         origin = ApiConfig.parseOrigin(session['origin'] as String);
@@ -108,13 +116,17 @@ class ApiClient extends ChangeNotifier {
         _expires = DateTime.parse(session['expires_at'] as String);
       }
     } catch (_) {
-      _access = null;
-      _refresh = null;
-      user = null;
+      if (generation == _generation) {
+        _access = null;
+        _refresh = null;
+        user = null;
+      }
     } finally {
-      _generation++;
-      restoring = false;
-      notifyListeners();
+      if (generation == _generation) {
+        _generation++;
+        restoring = false;
+        if (!_disposed) notifyListeners();
+      }
     }
   }
 
@@ -129,6 +141,7 @@ class ApiClient extends ChangeNotifier {
     Uri? target,
     Duration timeout = const Duration(seconds: 20),
     ApiCancellation? cancellation,
+    bool sessionBound = true,
   }) async {
     cancellation?.check();
     final base = target ?? origin;
@@ -137,13 +150,17 @@ class ApiClient extends ChangeNotifier {
       throw ArgumentError('Expected a versioned API path');
     }
     final uri = base.resolve(path).replace(queryParameters: query);
+    final abort = ApiCancellation();
+    final signals = <Future<void>>[
+      if (sessionBound) _sessionCancellation.whenCancelled,
+      if (cancellation != null) cancellation.whenCancelled,
+    ];
+    if (signals.isNotEmpty) {
+      unawaited(Future.any(signals).then((_) => abort.cancel()));
+    }
     // 리다이렉트를 자동 추적하지 않아 인증 헤더를 다른 주소로 재전송하지 않는다.
     final request =
-        http.AbortableRequest(
-            method,
-            uri,
-            abortTrigger: cancellation?.whenCancelled,
-          )
+        http.AbortableRequest(method, uri, abortTrigger: abort.whenCancelled)
           ..followRedirects = false
           ..headers['Accept'] = 'application/json';
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
@@ -152,13 +169,17 @@ class ApiClient extends ChangeNotifier {
       request.body = jsonEncode(body);
     }
     try {
-      return await (() async {
-        final response = await _client.send(request);
-        return http.Response.fromStream(response);
-      })().timeout(timeout);
+      return await Future.any<http.Response>([
+        (() async {
+          final response = await _client.send(request);
+          return http.Response.fromStream(response);
+        })(),
+        abort.whenCancelled.then((_) => throw const ApiRequestCancelled()),
+      ]).timeout(timeout);
     } on http.RequestAbortedException {
       throw const ApiRequestCancelled();
     } on TimeoutException {
+      abort.cancel();
       throw const ApiException(0, '서버 응답 시간이 초과되었습니다. 다시 시도하세요.');
     } on http.ClientException {
       throw const ApiException(0, '서버 연결을 확인하세요.');
@@ -174,7 +195,9 @@ class ApiClient extends ChangeNotifier {
         final value = jsonDecode(raw);
         if (value is Map<String, dynamic>) {
           final error = value['error'];
-          final nested = error is Map<String, dynamic> ? error['message'] : null;
+          final nested = error is Map<String, dynamic>
+              ? error['message']
+              : null;
           final detail = value['detail'];
           if (nested is String && nested.isNotEmpty) {
             message = nested;
@@ -201,10 +224,26 @@ class ApiClient extends ChangeNotifier {
   }
 
   /// 검증한 서버에서 인증받은 뒤 토큰과 사용자 정보를 저장하고 화면 전환을 알린다.
-  Future<void> login(String server, String username, String password) =>
-      _serializeSession(() => _login(server, username, password));
+  Future<void> login(String server, String username, String password) {
+    if (_needsSessionCleanup) {
+      return Future.error(
+        const ApiException(0, '저장된 로그인 정보 삭제를 완료한 뒤 다시 로그인하세요.'),
+      );
+    }
+    final generation = _generation;
+    return _serializeSession(() {
+      if (_needsSessionCleanup) {
+        throw const ApiException(0, '저장된 로그인 정보 삭제를 완료한 뒤 다시 로그인하세요.');
+      }
+      if (generation != _generation) {
+        throw const ApiException(401, '세션이 변경되었습니다.');
+      }
+      return _login(server, username, password);
+    });
+  }
 
   Future<void> _login(String server, String username, String password) async {
+    final generation = _generation;
     final target = ApiConfig.parseOrigin(server);
     final result = _decode(
       await _raw(
@@ -214,6 +253,9 @@ class ApiClient extends ChangeNotifier {
         body: {'username': username.trim(), 'password': password},
       ),
     );
+    if (generation != _generation) {
+      throw const ApiException(401, '세션이 변경되었습니다.');
+    }
     await _setSession(
       result,
       target: target,
@@ -231,6 +273,7 @@ class ApiClient extends ChangeNotifier {
     required String device,
     bool newLogin = false,
   }) async {
+    final generation = _generation;
     final access = value['access_token'] as String;
     final refresh = value['refresh_token'] as String;
     final sessionUser = Map<String, dynamic>.from(value['user'] as Map);
@@ -248,6 +291,9 @@ class ApiClient extends ChangeNotifier {
         'expires_at': expiry.toIso8601String(),
       }),
     );
+    if (generation != _generation) {
+      throw const ApiException(401, '세션이 변경되었습니다.');
+    }
     // 저장이 끝날 때 origin과 자격 증명을 함께 교체한다. 대기 중에는 이전 세션만 보인다.
     if (newLogin) _generation++;
     origin = target;
@@ -415,35 +461,105 @@ class ApiClient extends ChangeNotifier {
   /// 로그인 서버를 기준으로 인증 헤더를 사용할 수 있는 영상 URL인지 검증한다.
   Uri mediaUri(String value) => ApiConfig.mediaUri(origin!, value);
 
-  /// 진행 중인 토큰 회전 후 서버에서 세션을 폐기한다. 실패하면 재시도할 세션을 유지한다.
-  Future<void> logout() => _serializeSession(_logout);
-
-  Future<void> _logout() async {
-    _decode(
-      await _raw(
-        'POST',
-        '/api/v1/auth/logout',
-        token: _access,
-        body: {'refresh_token': _refresh},
-      ),
-    );
-    await _clearSession();
+  /// 화면과 이전 요청은 즉시 로그아웃하고 서버 폐기는 별도로 시도한다.
+  Future<void> logout() async {
+    if (_logoutCleanup == null) {
+      final target = origin;
+      final access = _access;
+      final refresh = _refresh;
+      _invalidateSession();
+      // 실제 저장소 작업은 끝날 때까지 직렬화한다. timeout만으로 잠금을 풀면
+      // 늦게 끝난 이전 저장/삭제가 다음 로그인의 정보를 덮어쓸 수 있다.
+      final cleanup = _serializeSession(_deleteStoredSession);
+      _logoutCleanup = cleanup;
+      unawaited(
+        cleanup.then(
+          (_) => _finishCleanup(cleanup),
+          onError: (Object _, StackTrace _) => _finishCleanup(cleanup),
+        ),
+      );
+      notifyListeners();
+      if (target != null && (access != null || refresh != null)) {
+        unawaited(_revokeSession(target, access, refresh));
+      }
+    }
+    try {
+      await _logoutCleanup!.timeout(const Duration(seconds: 5));
+    } catch (_) {
+      sessionCleanupError =
+          '휴대폰의 로그인 정보 삭제를 완료하지 못했습니다. '
+          '앱을 다시 열면 이전 로그인이 복원될 수 있으니 삭제를 다시 시도하세요.';
+      if (!_disposed) notifyListeners();
+      throw ApiException(0, sessionCleanupError!);
+    }
   }
 
-  /// 진행 중인 이전 요청을 무효화하고 메모리와 저장소에서 로그인 정보를 제거한다.
-  Future<void> _clearSession() async {
+  void _finishCleanup(Future<void> cleanup) {
+    if (identical(_logoutCleanup, cleanup)) _logoutCleanup = null;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> _revokeSession(
+    Uri target,
+    String? access,
+    String? refresh,
+  ) async {
+    try {
+      _decode(
+        await _raw(
+          'POST',
+          '/api/v1/auth/logout',
+          target: target,
+          token: access,
+          body: {'refresh_token': refresh},
+          timeout: const Duration(seconds: 3),
+          sessionBound: false,
+        ),
+      );
+    } catch (_) {
+      // 서버에 연결할 수 없어도 앱의 로그아웃을 되돌리지 않는다.
+    }
+  }
+
+  void _invalidateSession() {
     _generation++;
+    _sessionCancellation.cancel();
+    _sessionCancellation = ApiCancellation();
+    _refreshing = null;
     _access = null;
     _refresh = null;
     _deviceId = null;
     _expires = null;
     user = null;
+    restoring = false;
+    _needsSessionCleanup = true;
+    sessionCleanupError = null;
+  }
+
+  Future<void> _deleteStoredSession() async {
     await store.write('session', null);
+    _needsSessionCleanup = false;
+    sessionCleanupError = null;
+  }
+
+  /// 인증 거절 처리에서는 이미 세션 대기열 안이므로 직접 삭제한다.
+  Future<void> _clearSession() async {
+    _invalidateSession();
     notifyListeners();
+    try {
+      await _deleteStoredSession();
+    } catch (_) {
+      sessionCleanupError = '저장된 로그인 정보를 삭제하지 못했습니다. 삭제를 다시 시도하세요.';
+      rethrow;
+    } finally {
+      if (!_disposed) notifyListeners();
+    }
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _sessionCancellation.cancel();
     _client.close();
     super.dispose();
   }

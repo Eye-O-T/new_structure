@@ -28,7 +28,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   /// 중복 제출을 막고 비동기 로그인 결과를 화면이 남아 있을 때만 오류 상태로 반영한다.
   Future<void> submit() async {
-    if (busy) return;
+    final api = ref.read(apiClientProvider);
+    if (busy || api.clearingSession || api.sessionCleanupError != null) return;
     setState(() {
       busy = true;
       error = null;
@@ -52,61 +53,89 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  Future<void> retryCleanup() async {
+    try {
+      await ref.read(apiClientProvider).logout();
+    } catch (_) {
+      // 오류는 ApiClient가 보관하여 화면 재생성 후에도 안내한다.
+    }
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('AI CCTV 로그인')),
-    body: Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: AutofillGroup(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: server,
-                  enabled: !busy,
-                  keyboardType: TextInputType.url,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: '중앙 서버 주소',
-                    hintText: 'http://cctv.example.com',
-                  ),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: ref.watch(apiClientProvider),
+    builder: (context, _) {
+      final api = ref.read(apiClientProvider);
+      final blocked =
+          busy || api.clearingSession || api.sessionCleanupError != null;
+      return Scaffold(
+        appBar: AppBar(title: const Text('AI CCTV 로그인')),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: AutofillGroup(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (api.clearingSession) ...[
+                      const Text('휴대폰의 로그인 정보를 삭제하고 있습니다.'),
+                      const LinearProgressIndicator(),
+                      const SizedBox(height: 16),
+                    ],
+                    if (api.sessionCleanupError != null) ...[
+                      Text(api.sessionCleanupError!),
+                      TextButton(
+                        onPressed: api.clearingSession ? null : retryCleanup,
+                        child: const Text('로그인 정보 삭제 다시 시도'),
+                      ),
+                    ],
+                    TextField(
+                      controller: server,
+                      enabled: !busy,
+                      keyboardType: TextInputType.url,
+                      autocorrect: false,
+                      decoration: const InputDecoration(
+                        labelText: '중앙 서버 주소',
+                        hintText: 'http://cctv.example.com',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: username,
+                      enabled: !busy,
+                      autofillHints: const [AutofillHints.username],
+                      autocorrect: false,
+                      decoration: const InputDecoration(labelText: '계정'),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: password,
+                      enabled: !busy,
+                      obscureText: true,
+                      autofillHints: const [AutofillHints.password],
+                      decoration: const InputDecoration(labelText: '비밀번호'),
+                      onSubmitted: (_) => submit(),
+                    ),
+                    const SizedBox(height: 24),
+                    if (error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Text(error!),
+                      ),
+                    FilledButton(
+                      onPressed: blocked ? null : submit,
+                      child: Text(busy ? '로그인 중…' : '로그인'),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: username,
-                  enabled: !busy,
-                  autofillHints: const [AutofillHints.username],
-                  autocorrect: false,
-                  decoration: const InputDecoration(labelText: '계정'),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: password,
-                  enabled: !busy,
-                  obscureText: true,
-                  autofillHints: const [AutofillHints.password],
-                  decoration: const InputDecoration(labelText: '비밀번호'),
-                  onSubmitted: (_) => submit(),
-                ),
-                const SizedBox(height: 24),
-                if (error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(error!),
-                  ),
-                FilledButton(
-                  onPressed: busy ? null : submit,
-                  child: Text(busy ? '로그인 중…' : '로그인'),
-                ),
-              ],
+              ),
             ),
           ),
         ),
-      ),
-    ),
+      );
+    },
   );
 
   /// 화면이 소유한 입력 컨트롤러를 함께 해제한다.
