@@ -129,6 +129,8 @@ class Settings:
     public_hls_prefix: str = "/hls"
     public_playback_prefix: str = "/playback"
     public_base_url: str | None = None
+    rtsp_public_host: str = "127.0.0.1"
+    rtsp_public_port: int = 8554
     # Edge 변경은 잠금 대기·인코더 시작·복원에 각각 최대 20초가 걸린다.
     # 완료 여부가 모호한 시간 초과 뒤 재시도하지 않도록 중앙 제한 시간은 그 합보다 길게 잡는다.
     edge_control_timeout_seconds: float = 75.0
@@ -179,6 +181,13 @@ class Settings:
                 "DATA_EXTERNAL_TOKEN or legacy INTERNAL_SERVICE_TOKEN must contain "
                 "at least 16 characters"
             )
+        if (
+            not self.rtsp_public_host
+            or len(self.rtsp_public_host) > 253
+            or re.fullmatch(r"[A-Za-z0-9_.:%-]+", self.rtsp_public_host) is None
+            or not 1 <= self.rtsp_public_port <= 65535
+        ):
+            raise RuntimeError("RTSP_PUBLIC_HOST/PORT is invalid")
         if len(self.jwt_secret.encode("utf-8")) < 32:
             raise RuntimeError("JWT_SECRET must contain at least 32 bytes")
         if not self.media_read_username or any(
@@ -297,6 +306,8 @@ class Settings:
                 "/playback",
             ).rstrip("/"),
             public_base_url=(os.getenv("PUBLIC_BASE_URL") or "").rstrip("/") or None,
+            rtsp_public_host=os.getenv("RTSP_PUBLIC_HOST", "127.0.0.1"),
+            rtsp_public_port=_read_positive_int("RTSP_PUBLIC_PORT", 8554),
             edge_control_timeout_seconds=_read_positive_float(
                 "EDGE_CONTROL_TIMEOUT_SECONDS", 75.0
             ),

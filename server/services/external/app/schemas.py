@@ -111,12 +111,17 @@ class LiveAuthResponse(PublicResponse):
     cookie_name: str
 
 
+class RtspAuthResponse(PublicResponse):
+    method: Literal["basic"]
+    username: str
+
+
 class CameraLiveResponse(PublicResponse):
     camera_id: str = Field(pattern=CAMERA_ID_PATTERN.pattern)
-    protocol: Literal["hls"]
+    protocol: Literal["hls", "rtsp"]
     url: str
-    hls_url: str
-    auth: LiveAuthResponse
+    hls_url: str | None = None
+    auth: LiveAuthResponse | RtspAuthResponse
 
 
 class VideoProfileResponse(PublicResponse):

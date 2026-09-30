@@ -3,6 +3,7 @@
 import threading
 import time
 import logging
+from contextlib import contextmanager
 from queue import Empty, Full, Queue
 from datetime import datetime, timezone
 
@@ -22,6 +23,34 @@ LIVE_OPEN_OPTIONS = {
     "analyzeduration": "100000",
     "probesize": "262144",
 }
+LIVE_RTSP_OPTIONS = {
+    "rtsp_transport": "tcp",
+    "fflags": "nobuffer",
+    "flags": "low_delay",
+    "reorder_queue_size": "0",
+    "max_delay": "0",
+    "analyzeduration": "100000",
+    "probesize": "262144",
+}
+
+
+@contextmanager
+def _open_live_stream(api, camera_id, av):
+    """Prefer direct RTSP and retain HLS as a compatibility fallback."""
+    try:
+        live = api.camera(camera_id, "/live?protocol=rtsp")
+        with av.open(live["url"], timeout=(8, 8), options=LIVE_RTSP_OPTIONS) as stream:
+            yield stream
+            return
+    except Exception:
+        live = api.camera(camera_id, "/live?protocol=hls")
+        with MediaBridge(api, camera_id, live["hls_url"]) as bridge:
+            with av.open(
+                bridge.url,
+                timeout=(8, 8),
+                options=LIVE_OPEN_OPTIONS,
+            ) as stream:
+                yield stream
 
 
 def legacy_event(event):
@@ -205,39 +234,33 @@ class VideoWorker(QThread):
                     except Empty:
                         break
                 self.loading_ready.emit("서버 영상 연결 중...")
-                live = api.camera(camera_id, "/live")
-                with MediaBridge(api, camera_id, live["hls_url"]) as bridge:
-                    with av.open(
-                        bridge.url,
-                        timeout=(8, 8),
-                        options=LIVE_OPEN_OPTIONS,
-                    ) as stream:
-                        for frame in stream.decode(video=0):
-                            if self._stop.is_set():
-                                return
-                            rgb = frame.reformat(format="rgb24")
-                            image = QImage(
-                                bytes(rgb.planes[0]), rgb.width, rgb.height,
-                                rgb.planes[0].line_size, QImage.Format_RGB888
-                            ).copy()
-                            pts = frame.time
-                            item = (image, float(pts) if pts is not None else None,
-                                    session, time.monotonic())
-                            with self._stats_lock:
-                                self._decoded_frames += 1
-                            while not self._stop.is_set():
+                with _open_live_stream(api, camera_id, av) as stream:
+                    for frame in stream.decode(video=0):
+                        if self._stop.is_set():
+                            return
+                        rgb = frame.reformat(format="rgb24")
+                        image = QImage(
+                            bytes(rgb.planes[0]), rgb.width, rgb.height,
+                            rgb.planes[0].line_size, QImage.Format_RGB888
+                        ).copy()
+                        pts = frame.time
+                        item = (image, float(pts) if pts is not None else None,
+                                session, time.monotonic())
+                        with self._stats_lock:
+                            self._decoded_frames += 1
+                        while not self._stop.is_set():
+                            try:
+                                # Never pace the decoder with the display:
+                                # keep reading HLS and evict old RGB frames.
+                                frames.put_nowait(item)
+                                break
+                            except Full:
                                 try:
-                                    # Never pace the decoder with the display:
-                                    # keep reading HLS and evict old RGB frames.
-                                    frames.put_nowait(item)
-                                    break
-                                except Full:
-                                    try:
-                                        frames.get_nowait()
-                                        with self._stats_lock:
-                                            self._dropped_frames += 1
-                                    except Empty:
-                                        pass
+                                    frames.get_nowait()
+                                    with self._stats_lock:
+                                        self._dropped_frames += 1
+                                except Empty:
+                                    pass
                 if not self._stop.is_set():
                     raise RuntimeError("Stream ended")
             except Exception as exc:

@@ -49,7 +49,9 @@ access Path=/, refresh Path=/api/v1/auth, 기본 수명은 각각 900초·604800
 GET /api/v1/cameras/{camera_id}/live의 url 또는
 GET /api/v1/recordings/{segment_id}/playback의 playback_url을 그대로 사용한다.
 PUBLIC_BASE_URL 설정 시 해당 HTTP(S) 주소의 절대 URL, 없으면 중앙 서버 주소 기준 상대 URL이다.
-라이브 기본 주소는 /hls/{camera_id}/index.m3u8이고 재생목록과 영상 조각을 받는 HLS이다.
+라이브는 기본적으로 HLS이며 /api/v1/cameras/{camera_id}/live?protocol=rtsp 요청은
+권한 확인 후 Server PC용 RTSP URL과 MediaMTX read 인증 정보를 반환한다. RTSP URL은
+서버 호스트의 8554 포트로만 연결하며 모바일 클라이언트는 기존 HLS를 사용한다.
 중앙 녹화 기본 주소는 /playback/get?path={camera_id}&start={UTC}&duration={초}&format=fmp4다.
 이 두 미디어 경로는 Nginx가 MediaMTX에 중계하며 FastAPI paths에 포함되지 않는다.
 auth.method=cookie는 기본 플레이어 안내다. 네이티브 플레이어의 Bearer도 Nginx가 허용하지만

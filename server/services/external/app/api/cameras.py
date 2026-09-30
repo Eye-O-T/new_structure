@@ -466,6 +466,7 @@ async def get_camera(
 @router.get("/api/v1/cameras/{camera_id}/live", response_model=CameraLiveResponse)
 async def get_camera_live(
     camera_id: str,
+    protocol: str = Query("hls", pattern="^(hls|rtsp)$"),
     principal: Principal = Depends(get_current_principal),
     settings: Settings = Depends(get_settings_dependency),
     data: DataClient = Depends(get_data_client),
@@ -473,9 +474,22 @@ async def get_camera_live(
     camera = await _ensure_camera_access(data, principal, camera_id)
     if not bool(camera.get("enabled", True)):
         raise HTTPException(status_code=409, detail="Camera is disabled")
-    relative_url = (
-        f"{settings.public_hls_prefix}/{quote(camera_id, safe='')}/index.m3u8"
-    )
+    if protocol == "rtsp":
+        # The read credential is scoped to MediaMTX and is returned only after
+        # the caller has passed the normal camera permission check.
+        username = quote(settings.media_read_username, safe="")
+        password = quote(settings.media_read_password, safe="")
+        media_url = (
+            f"rtsp://{username}:{password}@{settings.rtsp_public_host}:"
+            f"{settings.rtsp_public_port}/{quote(camera_id, safe='')}"
+        )
+        return {
+            "camera_id": camera_id,
+            "protocol": "rtsp",
+            "url": media_url,
+            "auth": {"method": "basic", "username": settings.media_read_username},
+        }
+    relative_url = f"{settings.public_hls_prefix}/{quote(camera_id, safe='')}/index.m3u8"
     media_url = _public_media_url(settings, relative_url)
     return {
         "camera_id": camera_id,
