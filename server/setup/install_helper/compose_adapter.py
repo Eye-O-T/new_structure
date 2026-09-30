@@ -4,15 +4,57 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from server.setup.validation import read_deployment_env
 
 START_ARGUMENTS = ("up", "-d", "--build", "--wait")
+DETECTION_MODEL_MIGRATION = {"", "default.pt"}
+
+
+def migrate_detection_model(env_file: Path) -> bool:
+    """Migrate the old missing default model to a prepared YOLO model."""
+    values = read_deployment_env(env_file)
+    current = values.get("MODEL_FILE", "")
+    models_root_value = values.get("MODELS_DIR")
+    if not models_root_value or current not in DETECTION_MODEL_MIGRATION:
+        return False
+
+    models_root = Path(models_root_value).expanduser()
+    current_path = models_root / (current or "default.pt")
+    replacement = models_root / "yolo11n.pt"
+    if current_path.is_file() or not replacement.is_file():
+        return False
+
+    content = env_file.read_text(encoding="utf-8")
+    replacement_line = "MODEL_FILE=yolo11n.pt"
+    updated, count = re.subn(
+        r"(?m)^MODEL_FILE=.*$", replacement_line, content, count=1
+    )
+    if count == 0:
+        updated = content.rstrip("\r\n") + "\n" + replacement_line + "\n"
+    if updated == content:
+        return False
+
+    backup = env_file.with_name(env_file.name + ".bak")
+    shutil.copy2(env_file, backup)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=env_file.parent, prefix=f".{env_file.name}.", suffix=".tmp"
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(updated, encoding="utf-8", newline="")
+        os.replace(temporary, env_file)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
 
 
 # 소스 실행은 저장소의 server, 배포 실행 파일은 옆에 설치된 server 폴더를 기준으로 삼는다.
