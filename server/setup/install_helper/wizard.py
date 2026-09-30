@@ -47,6 +47,8 @@ from .compose_adapter import (
 )
 from .edge_panel import EdgePanel
 from .host_actions import run_service_action
+from .network_settings import NetworkSettings, load_network_settings, save_network_settings, validate_network_settings
+from server.setup.validation import deployment_path, read_deployment_env
 from .qt_tasks import BackgroundTask
 from .workflow import Installation, inspect_installation, install_new, preflight
 
@@ -440,6 +442,112 @@ class InstallerWindow(QWidget):
         edge_scroll.setMinimumWidth(0)
         edge_scroll.setWidget(self.edge_panel)
         self.management_tabs.addTab(edge_scroll, "카메라 연결")
+        self._build_network_management()
+
+    def _build_network_management(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        self.manage_scheme = QComboBox()
+        self.manage_scheme.addItem("HTTPS", "https")
+        self.manage_scheme.addItem("HTTP (개발용)", "http")
+        self.manage_network = QComboBox()
+        for label, address in local_networks():
+            self.manage_network.addItem(label, address)
+        self.manage_public_url = QLineEdit()
+        self.manage_http = self._spin(80, 1, 65535)
+        self.manage_https = self._spin(443, 1, 65535)
+        self.manage_rtsp = self._spin(8554, 1, 65535)
+        self.manage_rtsp_bind = QLineEdit()
+        self.manage_cert = QLineEdit()
+        self.manage_key = QLineEdit()
+        for label, widget in (("통신 방식", self.manage_scheme), ("Server PC IP", self.manage_network),
+                              ("외부 접속 주소", self.manage_public_url), ("HTTP 포트", self.manage_http),
+                              ("HTTPS 포트", self.manage_https), ("RTSP 포트", self.manage_rtsp),
+                              ("RTSP Bind IP", self.manage_rtsp_bind), ("TLS 인증서", self.manage_cert),
+                              ("TLS 개인키", self.manage_key)):
+            form.addRow(label, widget)
+        self.manage_network.currentIndexChanged.connect(self._manage_network_changed)
+        self.manage_scheme.currentIndexChanged.connect(self._manage_scheme_changed)
+        buttons = QHBoxLayout()
+        validate = QPushButton("설정 검증")
+        validate.clicked.connect(self._validate_network_ui)
+        apply = QPushButton("적용 및 서버 재구성")
+        apply.clicked.connect(self._apply_network_ui)
+        buttons.addWidget(validate)
+        buttons.addWidget(apply)
+        form.addRow(buttons)
+        self.network_status = QLabel()
+        self.network_status.setWordWrap(True)
+        form.addRow(self.network_status)
+        self.management_tabs.addTab(page, "네트워크 설정")
+
+    def _manage_scheme_changed(self):
+        scheme = self.manage_scheme.currentData()
+        self._manage_suggest_url()
+        self.manage_cert.setEnabled(scheme == "https")
+        self.manage_key.setEnabled(scheme == "https")
+
+    def _manage_network_changed(self):
+        address = self.manage_network.currentData() or "127.0.0.1"
+        self.manage_rtsp_bind.setText(address)
+        self._manage_suggest_url()
+
+    def _manage_suggest_url(self):
+        host = self.manage_network.currentData() or "127.0.0.1"
+        scheme = self.manage_scheme.currentData() or "http"
+        port = self.manage_http.value() if scheme == "http" else self.manage_https.value()
+        self.manage_public_url.setText(f"{scheme}://{host}" + (f":{port}" if port != (80 if scheme == "http" else 443) else ""))
+
+    def _network_settings_from_ui(self):
+        scheme = self.manage_scheme.currentData()
+        return NetworkSettings(
+            public_scheme=scheme,
+            public_base_url=self.manage_public_url.text().strip(),
+            public_bind_address=self.manage_network.currentData() or "127.0.0.1",
+            public_http_port=self.manage_http.value(), public_https_port=self.manage_https.value(),
+            rtsp_bind_address=self.manage_rtsp_bind.text().strip(), rtsp_port=self.manage_rtsp.value(),
+            allow_insecure_http=scheme == "http", cookie_secure=scheme == "https",
+            nginx_config_file=Path(),
+        )
+
+    def _validate_network_ui(self):
+        try:
+            settings = self._network_settings_from_ui()
+            validate_network_settings(settings, cert_path=Path(self.manage_cert.text()) if self.manage_cert.text() else None,
+                                      key_path=Path(self.manage_key.text()) if self.manage_key.text() else None)
+            self.network_status.setText("네트워크 설정이 유효합니다.")
+        except (OSError, ValueError) as exc:
+            self.network_status.setText(f"설정 오류: {exc}")
+
+    def _apply_network_ui(self):
+        if self._busy or self.installation is None:
+            return
+        try:
+            settings = self._network_settings_from_ui()
+            validate_network_settings(settings, cert_path=Path(self.manage_cert.text()) if self.manage_cert.text() else None,
+                                      key_path=Path(self.manage_key.text()) if self.manage_key.text() else None)
+        except (OSError, ValueError) as exc:
+            self.network_status.setText(f"설정 오류: {exc}")
+            return
+        cert = Path(self.manage_cert.text()) if self.manage_cert.text() else None
+        key = Path(self.manage_key.text()) if self.manage_key.text() else None
+        def operation(progress):
+            progress("네트워크 설정을 저장하고 서버를 재구성하고 있습니다…")
+            try:
+                save_network_settings(settings, self.installation.env_file, self.installation.config_file,
+                                      self.server_dir, cert_path=cert, key_path=key)
+                return run_service_action(self.server_dir, self.installation, "start", progress)
+            except Exception:
+                for path in (self.installation.env_file, self.installation.config_file):
+                    backup = path.with_name(path.name + ".bak")
+                    if backup.is_file():
+                        import shutil
+                        shutil.copy2(backup, path)
+                raise
+        def completed(result):
+            self.network_status.setText("네트워크 설정을 적용했습니다. 서버 주소와 포트를 확인하세요.")
+            self._show_management(inspect_installation(self.installation.data_root, self.server_dir))
+        self._start_task(operation, completed, "네트워크 설정을 적용하고 있습니다…", reload_after_failure=True)
 
     # 선택한 네트워크 IP를 웹·RTSP 수신 기본값에 함께 반영한다.
     def _network_changed(self):
@@ -634,6 +742,7 @@ class InstallerWindow(QWidget):
                 bool(self.installation and self.installation.public_url)
             )
             self.management_tabs.setTabEnabled(1, self.installation is not None)
+            self.management_tabs.setTabEnabled(3, self.installation is not None)
 
     # 카메라 연결 중에는 저장소 변경과 서버 제어를 막아 같은 설치를 대상으로 작업하게 한다.
     def _edge_busy_changed(self, busy):
@@ -642,6 +751,7 @@ class InstallerWindow(QWidget):
         self.close_button.setEnabled(not busy)
         self.management_tabs.setTabEnabled(0, not busy)
         self.management_tabs.setTabEnabled(1, not busy)
+        self.management_tabs.setTabEnabled(3, not busy)
 
     def go_back(self):
         if not self._busy and self.pages.currentIndex() in (1, 2):
@@ -767,6 +877,32 @@ class InstallerWindow(QWidget):
         self.management_info.setText(
             f"저장된 설정을 불러왔습니다.\n접속 주소: {installed.public_url or '설정되지 않음'}\n설정: {installed.env_file}"
         )
+        try:
+            network = load_network_settings(installed.env_file, self.server_dir)
+            self.manage_scheme.blockSignals(True)
+            self.manage_scheme.setCurrentIndex(max(0, self.manage_scheme.findData(network.public_scheme)))
+            self.manage_scheme.blockSignals(False)
+            self.manage_network.blockSignals(True)
+            index = self.manage_network.findData(network.public_bind_address)
+            if index < 0:
+                self.manage_network.addItem(network.public_bind_address, network.public_bind_address)
+                index = self.manage_network.findData(network.public_bind_address)
+            self.manage_network.setCurrentIndex(index)
+            self.manage_network.blockSignals(False)
+            self.manage_public_url.setText(network.public_base_url)
+            self.manage_http.setValue(network.public_http_port)
+            self.manage_https.setValue(network.public_https_port)
+            self.manage_rtsp.setValue(network.rtsp_port)
+            self.manage_rtsp_bind.setText(network.rtsp_bind_address)
+            values = read_deployment_env(installed.env_file)
+            cert_root = deployment_path(self.server_dir, values.get("CERTS_DIR", "")) if values.get("CERTS_DIR") else installed.data_root / "certs"
+            self.manage_cert.setText(str(cert_root / "tls.crt"))
+            self.manage_key.setText(str(cert_root / "tls.key"))
+            https = network.public_scheme == "https"
+            self.manage_cert.setEnabled(https)
+            self.manage_key.setEnabled(https)
+        except (OSError, ValueError) as exc:
+            self.network_status.setText(f"네트워크 설정을 읽지 못했습니다: {exc}")
         self.edge_panel.configure(
             installed.public_url,
             installed.rtsp_host,
