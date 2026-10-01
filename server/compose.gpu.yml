@@ -1,0 +1,4 @@
+# NVIDIA GPU가 있는 호스트에서만 기본 compose와 함께 사용한다.
+services:
+  preprocessing:
+    gpus: all

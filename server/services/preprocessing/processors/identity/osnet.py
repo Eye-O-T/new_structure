@@ -1,21 +1,64 @@
 """학습된 OSNet x0.25 ONNX로 사람 재식별 특징을 추출한다. 모델 미준비 시 대체하지 않는다."""
 
 import os
+import re
 from pathlib import Path
 
-import cv2
 import numpy as np
 
 from ai_cctv_core.processing.images import load_observation_crop
 
 from .appearance import (
     _ONNX_PREPROCESSING,
-    _load_onnx_net,
     _normalized,
     _onnx_input,
     _quality,
     _read_onnx_model,
 )
+
+
+def _identity_device() -> str:
+    value = os.getenv("IDENTITY_DEVICE", "auto").strip().lower()
+    if re.fullmatch(r"(?:auto|cpu|cuda(?::[0-9]+)?)", value) is None:
+        raise ValueError("IDENTITY_DEVICE must be auto, cpu, or cuda[:index]")
+    return value
+
+
+def _load_runtime_session(payload: bytes, device: str):
+    """Use CUDA when it is actually available, while retaining CPU fallback."""
+    try:
+        import onnxruntime as ort
+    except ImportError as error:
+        raise ValueError("onnxruntime is required for OSNet") from error
+    available = ort.get_available_providers()
+    cuda = "CUDAExecutionProvider" in available
+    if device.startswith("cuda") and not cuda:
+        raise ValueError("CUDAExecutionProvider is unavailable")
+    if cuda and device != "cpu":
+        options = {}
+        if device.startswith("cuda:"):
+            options = {"device_id": int(device.split(":", 1)[1])}
+        providers = [("CUDAExecutionProvider", options), "CPUExecutionProvider"]
+    else:
+        providers = ["CPUExecutionProvider"]
+    try:
+        session = ort.InferenceSession(payload, providers=providers)
+    except Exception as error:
+        if device == "auto" and cuda:
+            session = ort.InferenceSession(payload, providers=["CPUExecutionProvider"])
+            return session, "CPUExecutionProvider"
+        raise ValueError("OSNet ONNX session cannot be created") from error
+    selected = next(
+        (
+            provider
+            for provider in session.get_providers()
+            if provider in {"CUDAExecutionProvider", "CPUExecutionProvider"}
+        ),
+        "CPUExecutionProvider",
+    )
+    if device.startswith("cuda") and selected != "CUDAExecutionProvider":
+        raise ValueError("OSNet CUDA provider was not selected")
+    return session, selected
 
 
 DEFAULT_MODEL_FILENAME = "osnet_x0_25_msmt17.onnx"
@@ -44,16 +87,18 @@ class OsNetIdentity:
         )
         payload, self._model_sha256 = _read_onnx_model(configured, models_root)
         self._space_id = f"osnet:{self._model_sha256}:{_ONNX_PREPROCESSING}"
-        self._net = _load_onnx_net(payload)
+        self._session, self._execution_provider = _load_runtime_session(
+            payload, _identity_device()
+        )
         # 준비 상태를 알리기 전에 실제 추론해 OpenCV 연산 호환성과 512차원 계약을 검사한다.
         # 이 시험 표본의 결과는 버리고 완료 요청이나 gallery에 보내지 않는다.
         self._features(np.zeros((256, 128, 3), dtype=np.uint8))
 
     def _features(self, image: np.ndarray) -> list[float]:
         try:
-            self._net.setInput(_onnx_input(image))
-            output = self._net.forward()
-        except cv2.error as error:
+            input_name = self._session.get_inputs()[0].name
+            output = self._session.run(None, {input_name: _onnx_input(image)})[0]
+        except Exception as error:
             raise ValueError(
                 "OSNet cannot run its 1x3x256x128 float32 input"
             ) from error
@@ -86,6 +131,7 @@ class OsNetIdentity:
                 "architecture": "osnet_x0_25",
                 "model_sha256": self._model_sha256,
                 "method": _ONNX_PREPROCESSING,
+                "execution_provider": self._execution_provider,
                 "quality": _quality(image),
             },
         }
