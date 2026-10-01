@@ -23,6 +23,7 @@ from .model_manager import (
     IDENTITY_PLUGIN,
     MAX_IDENTITY_MODEL_BYTES,
     install_local_model,
+    resolve_detection_model,
     resolve_identity_model,
     sha256_file,
     validate_custom_model,
@@ -350,6 +351,14 @@ def initialize(request: InstallRequest) -> InstallResult:
     }
     for directory in directories.values():
         directory.mkdir(parents=True, exist_ok=True)
+
+    if model_source is None:
+        model_source = resolve_detection_model(
+            None,
+            root,
+            request.server_dir,
+            previous_environment.get("MODEL_FILE"),
+        )
     runtime_identity = _runtime_identity()
     if runtime_identity is not None and os.geteuid() == 0:
         uid, gid = runtime_identity
@@ -410,13 +419,16 @@ def initialize(request: InstallRequest) -> InstallResult:
 
     installed_model = None
     if model_source is not None:
-        installed_model = directories["models"] / model_source.name
-        _backup_existing(installed_model)
-        installed_model = install_local_model(model_source, directories["models"])
+        target = directories["models"] / model_source.name
+        if model_source.resolve() == target.resolve():
+            installed_model = validate_custom_model(model_source)
+        else:
+            _backup_existing(target)
+            installed_model = install_local_model(model_source, directories["models"])
     container_model_path = (
         PurePosixPath("/models") / installed_model.name
         if installed_model is not None
-        else PurePosixPath("/models/default.pt")
+        else PurePosixPath("/models/yolo11n.pt")
     )
     installed_identity = None
     if identity_source is not None:
@@ -570,7 +582,7 @@ def initialize(request: InstallRequest) -> InstallResult:
         "RECOVERED_DIR": directories["recovered"],
         "SNAPSHOTS_DIR": directories["snapshots"],
         "MODELS_DIR": directories["models"],
-        "MODEL_FILE": installed_model.name if installed_model else "default.pt",
+        "MODEL_FILE": installed_model.name if installed_model else "yolo11n.pt",
         "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
         "IDENTITY_MODEL_PATH": str(container_identity_path),
         "IDENTITY_MATCH_THRESHOLD": previous_environment.get(

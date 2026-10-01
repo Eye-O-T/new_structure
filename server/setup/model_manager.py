@@ -12,11 +12,45 @@ from pathlib import Path
 MAX_MODEL_BYTES = 2 * 1024**3
 MAX_IDENTITY_MODEL_BYTES = 256 * 1024**2
 IDENTITY_MODEL_NAME = "osnet_x0_25_msmt17.onnx"
+DEFAULT_DETECTION_MODEL_NAME = "yolo11n.pt"
 IDENTITY_MODEL_CONTAINER_PATH = f"/models/{IDENTITY_MODEL_NAME}"
 IDENTITY_PLUGIN = "server.services.preprocessing.processors.identity:OsNetIdentity"
 GENERIC_IDENTITY_PLUGIN = (
     "server.services.preprocessing.processors.identity:LocalAppearanceIdentity"
 )
+
+
+def resolve_detection_model(
+    source_path: Path | None,
+    data_root: Path | None,
+    server_dir: Path,
+    previous_model_file: str | None = None,
+) -> Path | None:
+    """Resolve an explicitly selected or already prepared detection model."""
+    if source_path is not None:
+        return _validated_local_model(source_path)
+
+    candidates: list[Path] = []
+    if data_root is not None:
+        models_root = data_root.expanduser() / "models"
+        if previous_model_file:
+            candidates.append(models_root / Path(previous_model_file).name)
+        candidates.append(models_root / DEFAULT_DETECTION_MODEL_NAME)
+        candidates.append(models_root / "default.pt")
+    candidates.extend(
+        [
+            server_dir / "runtime" / "models" / DEFAULT_DETECTION_MODEL_NAME,
+            server_dir / "models" / DEFAULT_DETECTION_MODEL_NAME,
+        ]
+    )
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate in seen or not candidate.exists():
+            continue
+        seen.add(candidate)
+        return _validated_local_model(candidate)
+    return None
 
 
 def resolve_identity_model(

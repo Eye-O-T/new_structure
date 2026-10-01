@@ -288,8 +288,8 @@ services:
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1
       MEDIAMTX_RTSP_BASE_URL: rtsp://mediamtx:8554
       SNAPSHOTS_ROOT: /snapshots
-      MODEL_FILE: ${MODEL_FILE:-default.pt}
-      MODEL_PATH: /models/${MODEL_FILE:-default.pt}
+      MODEL_FILE: ${MODEL_FILE:-yolo11n.pt}
+      MODEL_PATH: /models/${MODEL_FILE:-yolo11n.pt}
       TZ: UTC
     expose:
       - "8000"

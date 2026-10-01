@@ -15,7 +15,7 @@ from typing import Any
 
 from server.setup.validation import deployment_path, read_deployment_env
 
-from .compose_adapter import START_ARGUMENTS, ComposeAdapter
+from .compose_adapter import START_ARGUMENTS, ComposeAdapter, migrate_detection_model
 from .workflow import Installation
 
 
@@ -320,6 +320,12 @@ def run_service_action(
         START_TIMEOUT_SECONDS if action == "start" or action.endswith("-on") else ACTION_TIMEOUT_SECONDS
     )
     adapter = ComposeAdapter(server_dir, installed.env_file)
+    migrated_model = False
+    if action in {"start", "restart", "preprocessing-on", "analysis-on"}:
+        try:
+            migrated_model = migrate_detection_model(installed.env_file)
+        except (OSError, UnicodeError, ValueError):
+            raise RuntimeError("감지 모델 설정을 갱신하지 못했습니다.") from None
     progress("저장된 설정과 현재 Docker 서버의 저장 위치를 확인하고 있습니다…")
     state = _deployment_state(adapter, installed, deadline)
     if state in {"different", "unknown"}:
@@ -381,7 +387,7 @@ def run_service_action(
         arguments = START_ARGUMENTS
     elif action == "restart":
         progress("선택한 저장 위치의 서버를 재시작하고 있습니다…")
-        arguments = ("restart",)
+        arguments = START_ARGUMENTS if migrated_model else ("restart",)
     else:
         progress("선택한 저장 위치의 서버를 중지하고 있습니다…")
         arguments = ("down",)
