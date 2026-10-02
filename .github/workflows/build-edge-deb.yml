@@ -1,0 +1,91 @@
+name: Build Edge DEB
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-edge-deb:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v7
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          architecture: "arm64"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl tar dpkg coreutils
+          python3 -m pip install --upgrade pip
+
+      - name: Check environment
+        run: |
+          echo "Architecture:"
+          uname -m
+
+          echo "Python:"
+          python3 --version
+
+          echo "dpkg:"
+          dpkg-deb --version
+
+      - name: Download MediaMTX ARM64
+        run: |
+          mkdir -p vendor
+
+          curl -fL \
+            https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/mediamtx_v1.9.0_linux_arm64v8.tar.gz \
+            -o /tmp/mediamtx.tar.gz
+
+          tar -xzf /tmp/mediamtx.tar.gz -C vendor
+
+          chmod +x vendor/mediamtx
+
+          vendor/mediamtx --version
+
+      - name: Prepare MediaMTX checksum
+        run: |
+          HASH="$(sha256sum vendor/mediamtx | awk '{print $1}')"
+
+          echo "MediaMTX SHA256: $HASH"
+
+          echo "MEDIAMTX_SHA256=$HASH" >> "$GITHUB_ENV"
+
+      - name: Build DEB
+        env:
+          MEDIAMTX_BINARY: ${{ github.workspace }}/vendor/mediamtx
+          MEDIAMTX_VERSION: v1.9.0
+          OUTPUT_DIR: ${{ github.workspace }}/dist/edge
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+
+          sh edge/packaging/build_deb.sh
+
+      - name: Show build result
+        run: |
+          echo "=== Build Result ==="
+          ls -lh dist/edge
+
+          echo "=== Verify Checksum ==="
+          cd dist/edge
+          sha256sum -c *.deb.sha256
+
+      - name: Upload DEB
+        uses: actions/upload-artifact@v7
+        with:
+          name: ai-cctv-edge-arm64
+          path: |
+            dist/edge/*.deb
+            dist/edge/*.deb.sha256
+          retention-days: 30
