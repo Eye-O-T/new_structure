@@ -24,7 +24,9 @@ MediaMTX 영상에서 사람을 감지·추적한다. 사람 영역 이미지는
 
 `IDENTITY_PLUGIN=server.services.preprocessing.processors.identity:OsNetIdentity`가 기본이다. `IDENTITY_MODEL_PATH`가 없거나 정확히 빈 문자열이면 `/models/osnet_x0_25_msmt17.onnx`를 읽는다. 모델은 [공식 OSNet 저장소](https://huggingface.co/kaiyangzhou/osnet)의 **OSNet x0.25 MSMT17 combineall Re-ID 사전학습 가중치**를 변환해 준비한다. 학습 데이터 범위는 [공식 Model Zoo](https://kaiyangzhou.github.io/deep-person-reid/MODEL_ZOO)를 참고한다. 이 프로젝트의 CCTV 영상으로 재학습하거나 임계값을 교정한 모델은 아니다.
 
-OpenCV DNN CPU로 실행하며, 입력은 RGB `float32` NCHW `1×3×256×128`이다. `[0,1]` 변환 뒤 ImageNet 평균 `[0.485,0.456,0.406]`·표준편차 `[0.229,0.224,0.225]`를 적용한다. 단일 `float32 1×512` 특징 출력을 검사하고 유한 비영벡터를 L2 단위 길이로 정규화한다. 특징 공간은 `osnet:<파일 SHA-256>:rgb256x128-imagenet-v1`이며 다른 모델의 벡터와 섞어 비교하지 않는다. `/models` 안의 256 MiB 이하 ONNX만 허용하고 초기화 때 시험 추론으로 실행·출력을 확인한다. 누락·손상·출력 불일치는 오류로 드러낸다. **서비스는 모델을 자동 다운로드하거나 HSV 특징으로 대체하지 않는다.**
+`IDENTITY_DEVICE=auto`에서는 ONNX Runtime CUDA provider가 준비된 경우 GPU를 선택하고 그렇지 않으면 CPU provider로 폴백한다. `cpu`는 항상 CPU를 사용하고 `cuda` 또는 `cuda:N`은 CUDA provider가 없으면 시작 오류로 처리한다.
+
+ONNX Runtime으로 실행하며, 입력은 RGB `float32` NCHW `1×3×256×128`이다. `[0,1]` 변환 뒤 ImageNet 평균 `[0.485,0.456,0.406]`·표준편차 `[0.229,0.224,0.225]`를 적용한다. 단일 `float32 1×512` 특징 출력을 검사하고 유한 비영벡터를 L2 단위 길이로 정규화한다. 특징 공간은 `osnet:<파일 SHA-256>:rgb256x128-imagenet-v1`이며 다른 모델의 벡터와 섞어 비교하지 않는다. `/models` 안의 256 MiB 이하 ONNX만 허용하고 초기화 때 시험 추론으로 실행·출력을 확인한다. 누락·손상·출력 불일치는 오류로 드러낸다. **서비스는 모델을 자동 다운로드하거나 HSV 특징으로 대체하지 않는다.**
 
 `LocalAppearanceIdentity`를 명시적으로 선택하면 기존 동작을 유지한다. 모델 경로가 없거나 빈 문자열일 때는 `appearance-hsv-v1`의 HSV·밝기·질감 392차원 특징을 계산하고, 경로를 지정하면 16~2048차원을 허용하는 기존 범용 ONNX 경로를 사용한다. 이 호환 플러그인의 입력·출력 범위는 기본 OSNet의 정확한 512차원 계약과 다르다.
 

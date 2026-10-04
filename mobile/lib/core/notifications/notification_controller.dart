@@ -34,6 +34,7 @@ class NotificationController extends ChangeNotifier
     WidgetsBinding.instance.addObserver(this);
   }
   final ApiClient api;
+
   /// open이 true면 알림 탭에 따른 상세 이동, false면 전경 수신에 따른 조회 갱신이다.
   final void Function(NotificationPayload payload, bool open) onEvent;
   final VoidCallback onResume;
@@ -50,6 +51,8 @@ class NotificationController extends ChangeNotifier
   String status = '알림 준비 중';
   NotificationPayload? _pending;
   Future<void>? _syncing;
+  Future<void>? _tokenCleanup;
+  Future<void>? _tokenOperations;
   bool _syncRequested = false;
   Timer? _retry;
   bool _disposed = false;
@@ -112,6 +115,7 @@ class NotificationController extends ChangeNotifier
       );
       _subscriptions.add(
         FirebaseMessaging.instance.onTokenRefresh.listen((token) {
+          if (!api.signedIn) return;
           _token = token;
           unawaited(sync());
         }),
@@ -143,11 +147,15 @@ class NotificationController extends ChangeNotifier
         : null;
     if (current == _session) return;
     _session = current;
+    _retry?.cancel();
+    _syncRequested = false;
     registered = false;
     _seen.clear();
     unawaited(LocalNotificationService.clear());
     if (current == null) {
-      _retry?.cancel();
+      _pending = null;
+      _token = null;
+      if (ready) _tokenCleanup = _deletePushToken();
       _update('로그인 후 알림을 받을 수 있습니다.');
     } else {
       unawaited(sync());
@@ -156,6 +164,35 @@ class NotificationController extends ChangeNotifier
       if (pending != null && pending.belongsTo(api.userId, deviceId)) {
         onEvent(pending, true);
       }
+    }
+  }
+
+  /// 서버에 닿지 못한 로그아웃도 FCM 등록 해제를 시도한다. 다음 등록은 이
+  /// 작업의 실제 종료를 기다려 늦은 deleteToken이 새 계정 토큰을 지우지 않게 한다.
+  Future<T> _serializeToken<T>(Future<T> Function() operation) async {
+    final previous = _tokenOperations;
+    final completed = Completer<void>();
+    _tokenOperations = completed.future;
+    try {
+      if (previous != null) await previous;
+      return await operation();
+    } finally {
+      completed.complete();
+      if (identical(_tokenOperations, completed.future)) {
+        _tokenOperations = null;
+      }
+    }
+  }
+
+  Future<void> _deletePushToken() async {
+    try {
+      await _serializeToken(() async {
+        final messaging = FirebaseMessaging.instance;
+        await messaging.setAutoInitEnabled(false);
+        await messaging.deleteToken();
+      });
+    } catch (_) {
+      // 오프라인에서는 원격 해제가 보장되지 않는다. 앱 내부 수신은 세션으로 차단한다.
     }
   }
 
@@ -197,6 +234,12 @@ class NotificationController extends ChangeNotifier
   Future<void> _sync() async {
     final session = _session;
     try {
+      final cleanup = _tokenCleanup;
+      if (cleanup != null) {
+        await cleanup.timeout(const Duration(seconds: 5));
+        if (identical(_tokenCleanup, cleanup)) _tokenCleanup = null;
+      }
+      if (_disposed || session != _session || !api.signedIn) return;
       final messaging = FirebaseMessaging.instance;
       final permission = enabled
           ? await messaging.requestPermission(
@@ -205,22 +248,29 @@ class NotificationController extends ChangeNotifier
               sound: true,
             )
           : await messaging.getNotificationSettings();
+      if (_disposed || session != _session || !api.signedIn) return;
       final permitted =
           permission.authorizationStatus == AuthorizationStatus.authorized ||
           permission.authorizationStatus == AuthorizationStatus.provisional;
       if (!enabled || !permitted) {
         await api.request('DELETE', '/api/v1/notifications/devices/$deviceId');
+        if (_disposed || session != _session || !api.signedIn) return;
         registered = false;
         await LocalNotificationService.clear();
+        if (_disposed || session != _session || !api.signedIn) return;
         _update(enabled ? '기기 설정에서 알림 권한을 허용하세요.' : '알림이 꺼져 있습니다.');
         return;
       }
-      _token ??= await messaging.getToken().timeout(
-        const Duration(seconds: 15),
-      );
-      if (_token == null) throw StateError('No registration token');
+      final token = await _serializeToken(() async {
+        if (_disposed || session != _session || !api.signedIn) return null;
+        await messaging.setAutoInitEnabled(true);
+        if (_disposed || session != _session || !api.signedIn) return null;
+        return messaging.getToken();
+      }).timeout(const Duration(seconds: 15));
+      if (token == null) throw StateError('No registration token');
       // 권한 확인이나 토큰 발급을 기다리는 사이 계정이 바뀌면 이전 등록 작업을 중단한다.
       if (session != _session || !api.signedIn) return;
+      _token = token;
       await api.request(
         'PUT',
         '/api/v1/notifications/devices',
@@ -233,6 +283,7 @@ class NotificationController extends ChangeNotifier
           'event_types': allEvents ? null : attentionTypes,
         },
       );
+      if (_disposed || session != _session || !api.signedIn) return;
       final server = await api.request('GET', '/api/v1/notifications/status');
       if (session != _session) return;
       registered = true;
