@@ -37,6 +37,7 @@ from .pairing import (
 from .recovery import create_app
 from .runner import EdgeRunner
 from .state import ProfileSelectionStore, default_state_root
+from .network import interface_ipv4
 
 try:  # Windows에서도 설정 검증을 사용할 수 있게 한다.
     import pwd
@@ -235,6 +236,7 @@ def pair(
     discovery_port: int,
     supported_profiles: tuple[str, ...],
     set_pairing_key: bool = False,
+    interface: str | None = None,
 ) -> int:
     """미설정 Edge를 광고하고 인증된 초기 설정을 한 번 수락한다."""
 
@@ -248,6 +250,9 @@ def pair(
     )
     if session.marker_path.exists():
         raise ValueError("Edge is already configured; pairing mode is first-setup only")
+    if interface is not None:
+        # Fail before starting uvicorn so a typo cannot leave a misleading pairing process running.
+        interface_ipv4(interface)
     if set_pairing_key:
         entered = getpass.getpass("New Edge pairing key (minimum 32 characters): ")
         confirmed = getpass.getpass("Confirm Edge pairing key: ")
@@ -277,6 +282,7 @@ def pair(
             "supported_profiles": supported_profiles,
             "pairing_key": pairing_key,
             "discovery_port": discovery_port,
+            "interface": interface,
         },
         name="edge-pairing-advertiser",
         daemon=True,
@@ -351,6 +357,10 @@ def main(argv: list[str] | None = None) -> int:
         "serve-recovery",
     ):
         sub.add_parser(command)
+    sub.choices["doctor"].add_argument(
+        "--interface",
+        help="inspect the Edge Ethernet interface and route to the central server",
+    )
     for command in ("setup", "configure"):
         configure = sub.add_parser(command)
         configure.add_argument(
@@ -379,6 +389,10 @@ def main(argv: list[str] | None = None) -> int:
     pairing.add_argument("--recovery-port", type=int, default=8002)
     pairing.add_argument("--discovery-port", type=int, default=DISCOVERY_PORT)
     pairing.add_argument("--supported-profiles", default="hd,fhd")
+    pairing.add_argument(
+        "--interface",
+        help="IPv4 interface used for directed discovery broadcast, e.g. eth0",
+    )
     pairing.add_argument(
         "--set-pairing-key",
         action="store_true",
@@ -415,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             discovery_port=args.discovery_port,
             supported_profiles=supported_profiles,
             set_pairing_key=args.set_pairing_key,
+            interface=args.interface,
         )
         if result == 0 and args.config == DEFAULT_CONFIG:
             systemctl("enable")
@@ -435,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
         return show_status(args.config)
     if args.command == "doctor":
         config = EdgeConfig.load(args.config)
-        checks = run_checks(config)
+        checks = run_checks(config, args.interface)
         for check in checks:
             print(f"[{check.status}] {check.name}: {check.message}")
         return 1 if any(check.status == "ERROR" for check in checks) else 0

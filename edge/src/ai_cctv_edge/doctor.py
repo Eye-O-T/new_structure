@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass
 
 from .config import EdgeConfig
+from .network import interface_ipv4, route_interface
 
 
 @dataclass(frozen=True)
@@ -43,8 +44,35 @@ def _plugin(name: str) -> Check:
 
 
 # 송수신 모드에 필요한 도구·저장소 쓰기·TCP 연결·비밀 파일의 존재를 차례로 진단한다.
-def run_checks(config: EdgeConfig) -> list[Check]:
+def _network_checks(config: EdgeConfig, interface: str) -> list[Check]:
+    try:
+        network = interface_ipv4(interface)
+    except ValueError as exc:
+        return [Check("ethernet-interface", "ERROR", str(exc))]
+    checks = [
+        Check("ethernet-interface", "OK", network.name),
+        Check("ethernet-ip", "OK", f"{network.address}/{network.prefix}"),
+        Check("ethernet-broadcast", "OK", network.broadcast),
+    ]
+    try:
+        selected = route_interface(config.rtsp.central_host)
+    except ValueError as exc:
+        checks.append(Check("central-route", "ERROR", str(exc)))
+    else:
+        checks.append(
+            Check(
+                "central-route",
+                "OK" if selected == interface else "ERROR",
+                f"{config.rtsp.central_host} via {selected}",
+            )
+        )
+    return checks
+
+
+def run_checks(config: EdgeConfig, interface: str | None = None) -> list[Check]:
     checks = [_command("gst-launch-1.0"), _command("gst-inspect-1.0")]
+    if interface:
+        checks.extend(_network_checks(config, interface))
     for plugin in (
         "libcamerasrc",
         "watchdog",

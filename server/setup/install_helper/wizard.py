@@ -909,6 +909,7 @@ class InstallerWindow(QWidget):
             installed.rtsp_port,
             installed.data_root,
             installed.admin_username,
+            allow_insecure_http=installed.allow_insecure_http,
         )
         self._update_navigation()
 

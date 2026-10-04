@@ -62,6 +62,7 @@ class EdgePanel(QWidget):
         self._data_root = Path.cwd()
         self._default_handoff = ""
         self._context: tuple[str, str, int, Path] | None = None
+        self._allow_insecure_http = False
         self.discovered_edges: list[DiscoveredEdge] = []
 
         layout = QVBoxLayout(self)
@@ -180,6 +181,8 @@ class EdgePanel(QWidget):
         rtsp_port: int,
         data_root: Path,
         username: str = "admin",
+        *,
+        allow_insecure_http: bool = False,
     ) -> None:
         if self.busy:
             raise RuntimeError("Edge 연결 작업이 끝난 뒤 서버 설정을 바꿀 수 있습니다.")
@@ -198,6 +201,7 @@ class EdgePanel(QWidget):
                 "서버 설정이 바뀌었습니다. 연결할 Edge를 다시 찾으세요."
             )
         self._context = context
+        self._allow_insecure_http = allow_insecure_http
         self._data_root = Path(data_root)
         self.server_url.setText(public_url)
         self.central_rtsp_host.setText(rtsp_host)
@@ -464,7 +468,10 @@ class EdgePanel(QWidget):
             try:
                 progress("전달 파일 위치와 중앙 서버 로그인을 확인하는 중입니다…")
                 handoff = prepare_private_output(output)
-                client = ServerApiClient(server_url)
+                client = ServerApiClient(
+                    server_url,
+                    allow_insecure_http=self._allow_insecure_http,
+                )
                 client.login(username, password)
                 progress("중앙 서버에 Edge와 카메라를 등록하는 중입니다…")
                 response = client.register_edge(**registration)

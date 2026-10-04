@@ -30,6 +30,7 @@ from .config import (
     render_toml,
     write_atomic,
 )
+from .network import interface_ipv4
 
 DISCOVERY_PORT = 37020
 DISCOVERY_MESSAGE_TYPE = "AI_CCTV_EDGE_ADVERTISE"
@@ -143,14 +144,20 @@ def advertise_until_stopped(
     discovery_port: int = DISCOVERY_PORT,
     interval_seconds: float = 1.0,
     destination: str = "255.255.255.255",
+    interface: str | None = None,
 ) -> None:
     if not 1 <= discovery_port <= 65535:
         raise ValueError("discovery port must be in range 1..65535")
     if interval_seconds <= 0:
         raise ValueError("advertisement interval must be positive")
+    source = "0.0.0.0"
+    if interface is not None:
+        network = interface_ipv4(interface)
+        source = network.address
+        destination = network.broadcast
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp_socket:
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        udp_socket.bind(("0.0.0.0", 0))
+        udp_socket.bind((source, 0))
         while not stop.is_set():
             payload = build_advertisement(
                 device_id=device_id,
