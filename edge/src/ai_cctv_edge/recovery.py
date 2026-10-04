@@ -106,11 +106,15 @@ def create_app(config_path: str | Path) -> FastAPI:
         load_tokens(config.control.token_file, config.recovery.token_file)
     )
     camera_root = (config.backup.root / config.camera_id).resolve()
-    app = FastAPI(title="AI_CCTV Edge Recovery", version="0.3.1")
+    app = FastAPI(title="AI_CCTV Edge Recovery", version="0.3.2")
 
     @app.get("/health/live")
     def health_live():
-        return {"status": "alive", "camera_id": config.camera_id}
+        return {
+            "status": "alive",
+            "device_id": config.device_id,
+            "camera_id": config.camera_id,
+        }
 
     # 요청 구간과 겹치는 완료 세그먼트의 상대 경로·크기·해시를 반환한다.
     @app.get("/v1/recovery/manifest", dependencies=[Depends(authenticate)])

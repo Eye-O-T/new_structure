@@ -9,10 +9,10 @@
 Raspberry Pi OS Bookworm ARM64에서 `rpicam-hello --list-cameras`로 카메라를, `timedatectl status`로 시간 동기화를 확인한다. 받은 패키지와 체크섬을 같은 폴더에 두고 그 폴더에서 실행한다. 파일명의 버전은 받은 파일에 맞춘다. Python 3.11과 필요한 OS 패키지는 `apt install`이 설치하며, 처음에는 패키지 저장소에 접속할 수 있어야 한다. 명령이 실패하면 원인을 해결한 뒤 다음 단계로 진행한다.
 
 ```bash
-sha256sum -c ai-cctv-edge_0.3.1_arm64.deb.sha256
+sha256sum -c ai-cctv-edge_0.3.2_arm64.deb.sha256
 test "$(dpkg --print-architecture)" = arm64
 sudo apt update
-sudo apt install ./ai-cctv-edge_0.3.1_arm64.deb
+sudo apt install ./ai-cctv-edge_0.3.2_arm64.deb
 sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-key
 ```
 

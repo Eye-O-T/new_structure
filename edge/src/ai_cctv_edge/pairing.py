@@ -303,7 +303,7 @@ class PairingSession:
 # 연결 키로 인증하는 최초 설정 API를 만들고 동시 완료 요청은 세션 잠금으로 묶는다.
 def create_pairing_app(session: PairingSession) -> FastAPI:
     authenticate = BearerAuthenticator(load_tokens(session.pairing_key_file))
-    app = FastAPI(title="AI_CCTV Edge Pairing", version="0.3.1")
+    app = FastAPI(title="AI_CCTV Edge Pairing", version="0.3.2")
 
     @app.get("/health/live")
     def health_live():

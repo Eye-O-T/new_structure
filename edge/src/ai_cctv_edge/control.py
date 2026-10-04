@@ -818,13 +818,17 @@ def create_control_app(
 
     app = FastAPI(
         title="AI_CCTV Edge Management",
-        version="0.3.1",
+        version="0.3.2",
         lifespan=lifespan,
     )
 
     @app.get("/health/live")
     def health_live():
-        return {"status": "alive", "camera_id": config.camera_id}
+        return {
+            "status": "alive",
+            "device_id": config.device_id,
+            "camera_id": config.camera_id,
+        }
 
     @app.get("/internal/v1/status", dependencies=[Depends(authenticate)])
     def status():
