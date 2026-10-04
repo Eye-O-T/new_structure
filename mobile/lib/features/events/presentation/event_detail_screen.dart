@@ -1,5 +1,5 @@
-// 이벤트 ID로 상세 정보를 다시 조회하고 이후 연결된 녹화·재식별·분석 상태를 보여준다.
-// unconfigured는 담당 모델이 아직 연결되지 않았다는 뜻이며 분석 완료로 표시하지 않는다.
+// 이벤트 기본 정보와 인물 사진 자리, 연결 녹화를 표시한다.
+// 사진 조회가 연결되기 전까지 인물 이벤트에는 자리표시자를 사용한다.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -41,43 +41,130 @@ class EventDetailScreen extends ConsumerWidget {
             ],
           ),
         ),
-        data: (value) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(value.title, style: Theme.of(context).textTheme.headlineSmall),
-            Text('카메라: ${value.cameraId}'),
-            if (value.personId != null) Text('카메라 내 인물 ID: ${value.personId}'),
-            if (value.globalPersonId != null)
-              Text('통합 인물 ID: ${value.globalPersonId}'),
-            if (value.metadata['identity'] is Map)
-              Text('인물 연결: ${value.metadata['identity']['status']}'),
-            if (value.metadata['analysis'] is Map) ...[
-              Text('객체 분석: ${value.metadata['analysis']['status']}'),
-              if (value.metadata['analysis']['result'] != null)
-                SelectableText('${value.metadata['analysis']['result']}'),
-            ],
-            Text(
-              '발생: ${value.occurredAt.toLocal().toString().split('.').first}',
-            ),
-            if (value.confidence != null)
-              Text('신뢰도: ${(value.confidence! * 100).toStringAsFixed(1)}%'),
-            const SizedBox(height: 16),
-            if (value.recordingIds.isEmpty)
-              const Text('연결된 녹화가 없습니다. 녹화 저장 후 다시 확인할 수 있습니다.'),
-            for (final id in value.recordingIds)
-              ListTile(
-                title: Text('연결 녹화 $id'),
-                leading: const Icon(Icons.play_circle_outline),
-                onTap: () =>
-                    context.push('/recordings/${Uri.encodeComponent(id)}'),
+        data: (value) {
+          final isPersonEvent = const {
+            'person_detected',
+            'person_appeared',
+            'person_disappeared',
+          }.contains(value.eventType);
+          final globalPersonId = value.globalPersonId?.trim();
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+            children: [
+              Text(
+                value.title,
+                style: Theme.of(context).textTheme.headlineSmall,
               ),
-            TextButton(
-              onPressed: () => ref.invalidate(eventDetailProvider(eventId)),
-              child: const Text('이벤트 정보 새로고침'),
+              const SizedBox(height: 8),
+              Text(
+                '카메라 ID: ${value.cameraId}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 24),
+              if (isPersonEvent) ...[
+                const _PersonPhotoPlaceholder(),
+                const SizedBox(height: 24),
+                _DetailField(
+                  label: '글로벌 Person ID',
+                  value: globalPersonId == null || globalPersonId.isEmpty
+                      ? '미등록'
+                      : globalPersonId,
+                ),
+                const SizedBox(height: 20),
+              ],
+              _DetailField(
+                label: '발생 시각',
+                value: value.occurredAt.toLocal().toString().split('.').first,
+              ),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 16),
+              Text('연결 녹화', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              if (value.recordingIds.isEmpty)
+                const Text('연결된 녹화가 없습니다. 녹화 저장 후 다시 확인할 수 있습니다.'),
+              for (final id in value.recordingIds)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    title: Text('연결 녹화 $id'),
+                    leading: const Icon(Icons.play_circle_outline),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () =>
+                        context.push('/recordings/${Uri.encodeComponent(id)}'),
+                  ),
+                ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => ref.invalidate(eventDetailProvider(eventId)),
+                child: const Text('이벤트 정보 새로고침'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 이후 실제 Crop 이미지로 교체할 사진 영역이다. 네트워크 요청은 하지 않는다.
+class _PersonPhotoPlaceholder extends StatelessWidget {
+  const _PersonPhotoPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 280),
+        child: AspectRatio(
+          aspectRatio: 4 / 5,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(16),
             ),
-          ],
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.person_outline,
+                  size: 64,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    '인물 사진 준비 중',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
+}
+
+class _DetailField extends StatelessWidget {
+  const _DetailField({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 6),
+      SelectableText(value, style: Theme.of(context).textTheme.bodyLarge),
+    ],
+  );
 }
