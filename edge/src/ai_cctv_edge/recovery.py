@@ -106,7 +106,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         load_tokens(config.control.token_file, config.recovery.token_file)
     )
     camera_root = (config.backup.root / config.camera_id).resolve()
-    app = FastAPI(title="AI_CCTV Edge Recovery", version="0.3.0")
+    app = FastAPI(title="AI_CCTV Edge Recovery", version="0.3.1")
 
     @app.get("/health/live")
     def health_live():

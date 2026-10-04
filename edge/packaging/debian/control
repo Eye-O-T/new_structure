@@ -1,5 +1,5 @@
 Package: ai-cctv-edge
-Version: 0.3.0
+Version: 0.3.1
 Section: video
 Priority: optional
 Architecture: arm64

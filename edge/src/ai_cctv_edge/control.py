@@ -818,7 +818,7 @@ def create_control_app(
 
     app = FastAPI(
         title="AI_CCTV Edge Management",
-        version="0.3.0",
+        version="0.3.1",
         lifespan=lifespan,
     )
 
