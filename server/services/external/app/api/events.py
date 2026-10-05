@@ -86,6 +86,8 @@ async def list_events(
         cursor=cursor,
         order=order,
     )
+    result["items"] = [_public_event(item) for item in result.get("items", [])]
+    return result
 
 
 # 이벤트를 찾은 뒤 소속 카메라 권한을 검사하여 이벤트 ID만 아는 경우의 열람을 막는다.
@@ -106,10 +108,6 @@ async def _event_image(event_id: str, kind: str, principal: Principal, data: Dat
         media_type=upstream.headers.get("content-type", "application/octet-stream"),
         headers={"Cache-Control": "private, no-store"},
     )
-    result["items"] = [_public_event(item) for item in result.get("items", [])]
-    return result
-
-
 @router.get("/api/v1/events/{event_id}/snapshot")
 async def get_event_snapshot(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
     return await _event_image(event_id, "snapshot", principal, data)

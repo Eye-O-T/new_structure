@@ -203,6 +203,12 @@ class RecordingPageResponse(PublicResponse):
     offset: int | None = Field(default=None, ge=0)
 
 
+class EventMediaAvailability(PublicResponse):
+    snapshot: bool = False
+    crop: bool = False
+    annotated_snapshot: bool = False
+
+
 class EventResponse(PublicResponse):
     id: int | str
     camera_id: str = Field(pattern=CAMERA_ID_PATTERN.pattern)
@@ -213,7 +219,7 @@ class EventResponse(PublicResponse):
     confidence: float | None = Field(default=None, ge=0, le=1)
     recording_segment_id: int | None = None
     recording_segment_ids: list[int] = Field(default_factory=list)
-    media: dict[str, bool] = Field(default_factory=dict)
+    media: EventMediaAvailability = Field(default_factory=EventMediaAvailability)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
 

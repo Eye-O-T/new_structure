@@ -7,6 +7,13 @@ import 'package:go_router/go_router.dart';
 import 'package:app/core/network/providers.dart';
 import 'event_history_view_model.dart';
 
+final eventImageProvider = FutureProvider.autoDispose.family<Uint8List, String>((ref, key) {
+  final separator = key.indexOf('|');
+  final eventId = key.substring(0, separator);
+  final kind = key.substring(separator + 1);
+  return ref.read(apiClientProvider).getBytes('/api/v1/events/$eventId/$kind');
+});
+
 /// 이벤트 ID별 조회 상태를 표시하고 연결 녹화의 인증된 재생 화면으로 이동한다.
 class EventDetailScreen extends ConsumerWidget {
   const EventDetailScreen({super.key, required this.eventId});
@@ -64,7 +71,12 @@ class EventDetailScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
               if (isPersonEvent) ...[
-                _EventImage(eventId: value.id, kind: value.media['crop'] == true ? 'crop' : 'snapshot'),
+                if (value.media['crop'] == true)
+                  _EventImage(eventId: value.id, kind: 'crop')
+                else if (value.media['snapshot'] == true)
+                  _EventImage(eventId: value.id, kind: 'snapshot')
+                else
+                  const Text('Image is not available.'),
                 const SizedBox(height: 24),
                 _DetailField(
                   label: '글로벌 Person ID',
@@ -161,16 +173,22 @@ class _EventImage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return FutureBuilder<Uint8List>(
-      future: ref.read(apiClientProvider).getBytes('/api/v1/events/$eventId/$kind'),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) return const Text('Image is unavailable.');
-        return Image.memory(snapshot.data!, fit: BoxFit.contain);
-      },
+    final image = ref.watch(eventImageProvider('$eventId|$kind'));
+    return image.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => Text(_imageError(error)),
+      data: (bytes) => Image.memory(bytes, fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => const Text('Image format is invalid.')),
     );
+  }
+
+  String _imageError(Object error) {
+    if (error is ApiException) {
+      if (error.statusCode == 403) return 'You do not have permission to view this image.';
+      if (error.statusCode == 404) return 'Image is not available.';
+      if (error.statusCode == 0) return 'Could not load image. Retry.';
+    }
+    return 'Could not load image. Retry.';
   }
 }
 

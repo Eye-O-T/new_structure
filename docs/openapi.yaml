@@ -57,7 +57,7 @@ info:
     블랙박스로 바꾼 경우에는 unconfigured를 반환한다. 알 수 없는 이벤트 유형·metadata 키도 허용한다.
     objects는 최신 좌표 조회 API이며 영상 프레임과 정확히 동기화된 추적 스트림이 아니다.
     관측 시각·원본 크기로 표시 여부와 좌표를 계산하고 stale=true이면 박스를 지운다.
-    snapshot_path 등 저장소 상대 경로를 공개 이미지 URL로 조합하지 않는다. 별도 스냅샷 API는 없다.
+    Event 이미지 경로는 공개하지 않으며, 인증된 event-specific 이미지 API를 사용한다.
 
     ### FCM 수신 계약
     로그인 후 현재 refresh_token과 함께 PUT /api/v1/notifications/devices로 기기를 등록한다.
@@ -1223,6 +1223,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventResponse'
+
+  /api/v1/events/{event_id}/snapshot:
+    get:
+      summary: Get event snapshot
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Event snapshot image
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+        '403': {description: Camera access denied}
+        '404': {description: Event or image not found}
+
+  /api/v1/events/{event_id}/crop:
+    get:
+      summary: Get person crop
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Person crop image
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+        '403': {description: Camera access denied}
+        '404': {description: Event or image not found}
+
+  /api/v1/events/{event_id}/annotated-snapshot:
+    get:
+      summary: Get annotated event snapshot
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Annotated snapshot image
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+        '403': {description: Camera access denied}
+        '404': {description: Event or image not found}
         '422':
           description: Validation Error
           content:
@@ -1880,11 +1925,8 @@ components:
             type: integer
           type: array
           title: Recording Segment Ids
-        snapshot_path:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Snapshot Path
+        media:
+          $ref: '#/components/schemas/EventMediaAvailability'
         metadata:
           type: object
           title: Metadata
@@ -1901,6 +1943,19 @@ components:
       - event_type
       - occurred_at
       title: EventResponse
+    EventMediaAvailability:
+      properties:
+        snapshot:
+          type: boolean
+          default: false
+        crop:
+          type: boolean
+          default: false
+        annotated_snapshot:
+          type: boolean
+          default: false
+      type: object
+      title: EventMediaAvailability
     HTTPValidationError:
       properties:
         detail:

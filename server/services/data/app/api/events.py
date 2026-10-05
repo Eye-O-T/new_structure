@@ -175,7 +175,11 @@ def _event_media_path(event: dict[str, Any], kind: str) -> str | None:
     if kind == "snapshot":
         return event.get("snapshot_path")
     if kind in {"crop", "annotated-snapshot"}:
-        return (event.get("metadata") or {}).get("object", {}).get(
+        metadata = event.get("metadata")
+        obj = metadata.get("object") if isinstance(metadata, dict) else None
+        if not isinstance(obj, dict):
+            return None
+        return obj.get(
             "annotated_snapshot_path" if kind == "annotated-snapshot" else "crop_path"
         )
     raise ApiError(404, "EVENT_IMAGE_NOT_AVAILABLE", "Unknown event image kind")

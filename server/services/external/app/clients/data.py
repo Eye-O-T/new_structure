@@ -453,11 +453,30 @@ class DataClient:
         await response.aread()
         await response.aclose()
         if response.status_code == 404:
-            raise DataNotFound("event image not found")
+            code = None
+            message = "event image not found"
+            try:
+                error = response.json().get("error", {})
+                code = error.get("code")
+                message = error.get("message") or message
+            except (AttributeError, ValueError):
+                pass
+            if code:
+                raise DataNotFound(message, code=code)
+            raise DataNotFound(message)
         if response.status_code in {401, 403}:
             raise DataForbidden("data service denied the request")
         if response.status_code >= 500:
             raise DataServiceUnavailable("data service unavailable")
+        if response.status_code == 415:
+            try:
+                error = response.json().get("error", {})
+                raise DataInvalidRequest(
+                    error.get("message") or "unsupported event image type",
+                    code=error.get("code") or "UNSUPPORTED_EVENT_IMAGE_TYPE",
+                )
+            except (AttributeError, ValueError):
+                raise DataInvalidRequest("unsupported event image type", code="UNSUPPORTED_EVENT_IMAGE_TYPE")
         raise DataServiceError("data service rejected the image request")
 
     # 내부 이벤트 검색에 필요한 필터만 골라 전달하고 None 조건은 공통 요청 계층에서 뺀다.
