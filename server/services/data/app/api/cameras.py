@@ -50,12 +50,16 @@ def create_camera(payload: CameraCreate, repository: Repo) -> dict[str, Any]:
 def put_edge_device(
     edge_device_id: str, payload: EdgeDevicePut, repository: Repo
 ) -> dict[str, Any]:
-    return repository.put_edge_device(
-        edge_device_id,
-        payload.management_url,
-        payload.recovery_url,
-        payload.auth_token,
-    )
+    try:
+        return repository.put_edge_device(
+            edge_device_id,
+            payload.mac_address,
+            payload.management_url,
+            payload.recovery_url,
+            payload.auth_token,
+        )
+    except EdgeIdentityConflict as exc:
+        raise ApiError(409, "EDGE_IDENTITY_CONFLICT", str(exc)) from exc
 
 
 @router.get("/edge-devices/{edge_device_id}")

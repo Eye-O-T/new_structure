@@ -191,6 +191,7 @@ class CameraUpdate(StrictModel):
     name: str | None = Field(default=None, min_length=1, max_length=256)
     stream_path: str | None = None
     edge_device_id: str | None = Field(default=None, max_length=256)
+    edge_mac_address: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
     edge_management_url: str | None = Field(default=None, max_length=2048)
     edge_recovery_url: str | None = Field(default=None, max_length=2048)
     edge_auth_token: str | None = Field(default=None, min_length=32, max_length=4096)
@@ -237,6 +238,7 @@ class CameraPublishCredentialPut(StrictModel):
 
 
 class EdgeDevicePut(StrictModel):
+    mac_address: str = Field(pattern=r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
     management_url: str
     recovery_url: str
     auth_token: str = Field(min_length=32, max_length=4096)

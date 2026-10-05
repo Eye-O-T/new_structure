@@ -202,6 +202,7 @@ class CamerasRepositoryMixin:
             "name",
             "stream_path",
             "edge_device_id",
+            "edge_mac_address",
             "source_url",
             "enabled",
             "status",
@@ -332,25 +333,27 @@ class CamerasRepositoryMixin:
     def put_edge_device(
         self,
         edge_device_id: str,
+        mac_address: str,
         management_url: str,
         recovery_url: str,
         auth_token: str,
     ) -> dict[str, Any]:
         now = _now()
         with self.database.transaction() as connection:
+            self._check_edge_identity(connection, edge_device_id, mac_address)
             connection.execute(
                 """
                 INSERT INTO edge_devices(
-                    edge_device_id, management_url, recovery_url, auth_token,
+                    edge_device_id, mac_address, management_url, recovery_url, auth_token,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(edge_device_id) DO UPDATE SET
                     management_url = excluded.management_url,
                     recovery_url = excluded.recovery_url,
-                    auth_token = excluded.auth_token,
+                auth_token = excluded.auth_token,
                     updated_at = excluded.updated_at
                 """,
-                (edge_device_id, management_url, recovery_url, auth_token, now, now),
+                (edge_device_id, mac_address, management_url, recovery_url, auth_token, now, now),
             )
             row = connection.execute(
                 "SELECT * FROM edge_devices WHERE edge_device_id = ?",

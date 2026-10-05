@@ -69,6 +69,7 @@ class CameraPatch(StrictModel):
     stream_path: str | None = Field(default=None, pattern=CAMERA_ID_PATTERN.pattern)
     source_url: str | None = Field(default=None, max_length=2048)
     edge_device_id: str | None = Field(default=None, min_length=1, max_length=256)
+    edge_mac_address: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
     edge_management_url: str | None = Field(default=None, max_length=2048)
     edge_recovery_url: str | None = Field(default=None, max_length=2048)
     edge_auth_token: SecretStr | None = Field(
