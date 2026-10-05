@@ -213,7 +213,7 @@ class EventResponse(PublicResponse):
     confidence: float | None = Field(default=None, ge=0, le=1)
     recording_segment_id: int | None = None
     recording_segment_ids: list[int] = Field(default_factory=list)
-    snapshot_path: str | None = None
+    media: dict[str, bool] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
 

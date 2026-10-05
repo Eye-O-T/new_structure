@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -435,6 +436,21 @@ class ApiClient extends ChangeNotifier {
       throw const ApiException(401, '세션이 변경되었습니다.');
     }
     return _decode(response);
+  }
+
+  Future<Uint8List> getBytes(String path, {ApiCancellation? cancellation}) async {
+    final generation = _generation;
+    final token = await accessToken();
+    var response = await _raw('GET', path, token: token, cancellation: cancellation);
+    if (response.statusCode == 401 && _access == token) {
+      await refreshSession();
+      response = await _raw('GET', path, token: _access, cancellation: cancellation);
+    }
+    if (_generation != generation) throw const ApiException(401, 'Session changed.');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      _decode(response);
+    }
+    return response.bodyBytes;
   }
 
   /// 빈 페이지가 나올 때까지 실제 수신 개수만큼 offset을 늘려 전체 목록을 모은다.

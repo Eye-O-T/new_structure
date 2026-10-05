@@ -10,6 +10,7 @@ from fastapi import (
     HTTPException,
     Query,
 )
+from fastapi.responses import StreamingResponse
 
 from ..clients.data import (
     DataClient,
@@ -30,6 +31,24 @@ from ..security.permissions import (
 from .validation import _validate_resource_id, _validated_time_range
 
 router = APIRouter()
+
+
+def _public_event(event: dict[str, Any]) -> dict[str, Any]:
+    result = dict(event)
+    result.pop("snapshot_path", None)
+    metadata = dict(result.get("metadata") or {})
+    obj = dict(metadata.get("object") or {})
+    has_crop = bool(obj.pop("crop_path", None))
+    has_annotated = bool(obj.pop("annotated_snapshot_path", None))
+    if "object" in metadata:
+        metadata["object"] = obj
+    result["metadata"] = metadata
+    result["media"] = {
+        "snapshot": bool(event.get("snapshot_path")),
+        "crop": has_crop,
+        "annotated_snapshot": has_annotated,
+    }
+    return result
 
 
 # 일반 사용자는 카메라를 지정하고 그 권한을 확인해야 하며 관리자만 전체 검색을 할 수 있다.
@@ -56,7 +75,7 @@ async def list_events(
     if camera_id is not None:
         await _ensure_camera_access(data, principal, camera_id)
     start_utc, end_utc = _validated_time_range(start, end)
-    return await data.list_events(
+    result = await data.list_events(
         user_id=principal.user_id,
         camera_id=camera_id,
         event_type=event_type,
@@ -70,6 +89,42 @@ async def list_events(
 
 
 # 이벤트를 찾은 뒤 소속 카메라 권한을 검사하여 이벤트 ID만 아는 경우의 열람을 막는다.
+async def _event_image(event_id: str, kind: str, principal: Principal, data: DataClient) -> StreamingResponse:
+    event = await data.get_event(_validate_resource_id(event_id), user_id=principal.user_id)
+    await _ensure_camera_access(data, principal, str(event.get("camera_id", "")))
+    upstream = await data.open_event_image(event_id, kind)
+
+    async def body():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+
+    return StreamingResponse(
+        body(),
+        media_type=upstream.headers.get("content-type", "application/octet-stream"),
+        headers={"Cache-Control": "private, no-store"},
+    )
+    result["items"] = [_public_event(item) for item in result.get("items", [])]
+    return result
+
+
+@router.get("/api/v1/events/{event_id}/snapshot")
+async def get_event_snapshot(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
+    return await _event_image(event_id, "snapshot", principal, data)
+
+
+@router.get("/api/v1/events/{event_id}/crop")
+async def get_event_crop(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
+    return await _event_image(event_id, "crop", principal, data)
+
+
+@router.get("/api/v1/events/{event_id}/annotated-snapshot")
+async def get_event_annotated_snapshot(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
+    return await _event_image(event_id, "annotated-snapshot", principal, data)
+
+
 @router.get("/api/v1/events/{event_id}", response_model=EventResponse)
 async def get_event(
     event_id: str,
@@ -81,4 +136,4 @@ async def get_event(
         user_id=principal.user_id,
     )
     await _ensure_camera_access(data, principal, str(event.get("camera_id", "")))
-    return event
+    return _public_event(event)

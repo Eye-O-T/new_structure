@@ -438,6 +438,28 @@ class DataClient:
             raise DataServiceUnavailable("data service unavailable")
         raise DataServiceError("data service rejected the request")
 
+    async def open_event_image(self, event_id: str, kind: str) -> httpx.Response:
+        try:
+            response = await self._client.send(
+                self._client.build_request(
+                    "GET", f"events/{quote(event_id, safe='')}/media/{quote(kind, safe='')}"
+                ),
+                stream=True,
+            )
+        except httpx.RequestError as exc:
+            raise DataServiceUnavailable("data service unavailable") from exc
+        if response.status_code == 200:
+            return response
+        await response.aread()
+        await response.aclose()
+        if response.status_code == 404:
+            raise DataNotFound("event image not found")
+        if response.status_code in {401, 403}:
+            raise DataForbidden("data service denied the request")
+        if response.status_code >= 500:
+            raise DataServiceUnavailable("data service unavailable")
+        raise DataServiceError("data service rejected the image request")
+
     # 내부 이벤트 검색에 필요한 필터만 골라 전달하고 None 조건은 공통 요청 계층에서 뺀다.
     async def list_events(self, **params: Any) -> Any:
         return await self._request(

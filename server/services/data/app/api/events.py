@@ -14,6 +14,7 @@ from fastapi import (
     Query,
     status,
 )
+from fastapi.responses import FileResponse
 
 from ai_cctv_core.time import format_utc, parse_utc
 
@@ -168,3 +169,36 @@ def get_event(event_id: int, repository: Repo) -> dict[str, Any]:
     if event is None:
         raise _not_found("event")
     return event
+
+
+def _event_media_path(event: dict[str, Any], kind: str) -> str | None:
+    if kind == "snapshot":
+        return event.get("snapshot_path")
+    if kind in {"crop", "annotated-snapshot"}:
+        return (event.get("metadata") or {}).get("object", {}).get(
+            "annotated_snapshot_path" if kind == "annotated-snapshot" else "crop_path"
+        )
+    raise ApiError(404, "EVENT_IMAGE_NOT_AVAILABLE", "Unknown event image kind")
+
+
+@router.get("/events/{event_id}/media/{kind}")
+def get_event_media(
+    event_id: int,
+    kind: Literal["snapshot", "crop", "annotated-snapshot"],
+    repository: Repo,
+    settings: RuntimeSettings,
+) -> FileResponse:
+    event = repository.get_event(event_id)
+    if event is None:
+        raise _not_found("event")
+    raw_path = _event_media_path(event, kind)
+    if not raw_path:
+        raise ApiError(404, "EVENT_IMAGE_NOT_AVAILABLE", "Event image is not available")
+    _relative, target = normalize_relative_path(settings.snapshot_root, raw_path)
+    if not target.is_file():
+        raise ApiError(404, "EVENT_IMAGE_FILE_NOT_FOUND", "Event image file was not found")
+    suffix = target.suffix.lower()
+    media_type = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}.get(suffix)
+    if media_type is None:
+        raise ApiError(415, "UNSUPPORTED_EVENT_IMAGE_TYPE", "Unsupported event image type")
+    return FileResponse(target, media_type=media_type, headers={"Cache-Control": "private, no-store"})

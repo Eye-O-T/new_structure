@@ -1,8 +1,10 @@
 // 이벤트 기본 정보와 인물 사진 자리, 연결 녹화를 표시한다.
 // 사진 조회가 연결되기 전까지 인물 이벤트에는 자리표시자를 사용한다.
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:app/core/network/providers.dart';
 import 'event_history_view_model.dart';
 
 /// 이벤트 ID별 조회 상태를 표시하고 연결 녹화의 인증된 재생 화면으로 이동한다.
@@ -62,7 +64,7 @@ class EventDetailScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 24),
               if (isPersonEvent) ...[
-                const _PersonPhotoPlaceholder(),
+                _EventImage(eventId: value.id, kind: value.media['crop'] == true ? 'crop' : 'snapshot'),
                 const SizedBox(height: 24),
                 _DetailField(
                   label: '글로벌 Person ID',
@@ -148,6 +150,26 @@ class _PersonPhotoPlaceholder extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _EventImage extends ConsumerWidget {
+  const _EventImage({required this.eventId, required this.kind});
+  final String eventId;
+  final String kind;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FutureBuilder<Uint8List>(
+      future: ref.read(apiClientProvider).getBytes('/api/v1/events/$eventId/$kind'),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) return const Text('Image is unavailable.');
+        return Image.memory(snapshot.data!, fit: BoxFit.contain);
+      },
     );
   }
 }

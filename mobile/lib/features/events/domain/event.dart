@@ -11,6 +11,7 @@ class Event {
   final double? confidence;
   final List<String> recordingIds;
   final Map<String, dynamic> metadata;
+  final Map<String, bool> media;
 
   const Event({
     required this.id,
@@ -22,6 +23,7 @@ class Event {
     this.confidence,
     this.recordingIds = const [],
     this.metadata = const {},
+    this.media = const {},
   });
 
   /// 단일·복수 녹화 연결 필드를 함께 지원하고 중복 ID를 제거해 화면 모델을 만든다.
@@ -43,6 +45,7 @@ class Event {
       confidence: (json['confidence'] as num?)?.toDouble(),
       recordingIds: ids.toList(),
       metadata: Map<String, dynamic>.from((json['metadata'] as Map?) ?? {}),
+      media: Map<String, bool>.from((json['media'] as Map?) ?? {}),
     );
   }
 
