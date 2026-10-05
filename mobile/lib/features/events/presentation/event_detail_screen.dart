@@ -77,6 +77,16 @@ class EventDetailScreen extends ConsumerWidget {
                   _EventImage(eventId: value.id, kind: 'snapshot')
                 else
                   const Text('Image is not available.'),
+                if (value.media['annotated_snapshot'] == true)
+                  TextButton(
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (_) => Dialog(
+                        child: _EventImage(eventId: value.id, kind: 'annotated-snapshot'),
+                      ),
+                    ),
+                    child: const Text('View annotated snapshot'),
+                  ),
                 const SizedBox(height: 24),
                 _DetailField(
                   label: '글로벌 Person ID',
@@ -176,7 +186,17 @@ class _EventImage extends ConsumerWidget {
     final image = ref.watch(eventImageProvider('$eventId|$kind'));
     return image.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => Text(_imageError(error)),
+      error: (error, _) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(_imageError(error)),
+          if (error is! ApiException || error.statusCode == 0)
+            TextButton(
+              onPressed: () => ref.invalidate(eventImageProvider('$eventId|$kind')),
+              child: const Text('Retry'),
+            ),
+        ],
+      ),
       data: (bytes) => Image.memory(bytes, fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => const Text('Image format is invalid.')),
     );

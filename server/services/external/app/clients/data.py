@@ -41,6 +41,10 @@ class DataInvalidRequest(DataServiceError):
     status_code = 422
 
 
+class DataUnsupportedMediaType(DataServiceError):
+    status_code = 415
+
+
 # 인증 헤더·연결 풀·오류 변환을 공유하는 Data 내부 API 접근 경계이다.
 class DataClient:
     def __init__(
@@ -471,12 +475,12 @@ class DataClient:
         if response.status_code == 415:
             try:
                 error = response.json().get("error", {})
-                raise DataInvalidRequest(
+                raise DataUnsupportedMediaType(
                     error.get("message") or "unsupported event image type",
                     code=error.get("code") or "UNSUPPORTED_EVENT_IMAGE_TYPE",
                 )
             except (AttributeError, ValueError):
-                raise DataInvalidRequest("unsupported event image type", code="UNSUPPORTED_EVENT_IMAGE_TYPE")
+                raise DataUnsupportedMediaType("unsupported event image type", code="UNSUPPORTED_EVENT_IMAGE_TYPE")
         raise DataServiceError("data service rejected the image request")
 
     # 내부 이벤트 검색에 필요한 필터만 골라 전달하고 None 조건은 공통 요청 계층에서 뺀다.

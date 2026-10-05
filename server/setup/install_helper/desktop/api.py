@@ -115,6 +115,42 @@ class DesktopApi(ServerApiClient):
             query["cursor"] = cursor
         return self._request("GET", "/api/v1/events?" + urlencode(query))
 
+    def event(self, event_id):
+        return self._request("GET", f"/api/v1/events/{quote(str(event_id), safe='')}")
+
+    def event_image(self, event_id, kind):
+        if kind not in {"snapshot", "crop", "annotated-snapshot"}:
+            raise ValueError("Invalid event image kind")
+        path = f"/api/v1/events/{quote(str(event_id), safe='')}/{kind}"
+        with self._lock:
+            if not self._access_token:
+                raise ServerApiError(401, "AUTH_REQUIRED", "Please sign in again.")
+            token = self._access_token
+        for attempt in range(2):
+            request = Request(self.base_url + path, headers={"Authorization": "Bearer " + token})
+            try:
+                with self._opener(request, timeout=MEDIA_REQUEST_TIMEOUT_SECONDS) as response:
+                    content_type = response.headers.get_content_type()
+                    if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+                        raise ValueError("Unsupported event image type")
+                    content = response.read(32 * 1024 * 1024 + 1)
+                    if len(content) > 32 * 1024 * 1024:
+                        raise ValueError("Event image exceeds size limit")
+                    return content, content_type
+            except HTTPError as exc:
+                if exc.code != 401 or attempt:
+                    raise
+                with self._lock:
+                    if self._access_token == token:
+                        self._refresh()
+                    token = self._access_token
+
+    def recording(self, recording_id):
+        return self._request("GET", f"/api/v1/recordings/{quote(str(recording_id), safe='')}")
+
+    def recording_playback(self, recording_id):
+        return self._request("GET", f"/api/v1/recordings/{quote(str(recording_id), safe='')}/playback")
+
     def media_path(self, camera_id, reference, base=None):
         camera_path(camera_id)
         url = urljoin(base or self.base_url + "/", reference)

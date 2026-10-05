@@ -36,8 +36,10 @@ router = APIRouter()
 def _public_event(event: dict[str, Any]) -> dict[str, Any]:
     result = dict(event)
     result.pop("snapshot_path", None)
-    metadata = dict(result.get("metadata") or {})
-    obj = dict(metadata.get("object") or {})
+    raw_metadata = result.get("metadata")
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    raw_object = metadata.get("object")
+    obj = dict(raw_object) if isinstance(raw_object, dict) else {}
     has_crop = bool(obj.pop("crop_path", None))
     has_annotated = bool(obj.pop("annotated_snapshot_path", None))
     if "object" in metadata:
