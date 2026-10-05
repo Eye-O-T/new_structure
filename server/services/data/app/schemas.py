@@ -171,6 +171,7 @@ class CameraCreate(StrictModel):
     def validate_edge_metadata(self) -> "CameraCreate":
         supplied = (
             self.edge_device_id,
+            self.edge_mac_address,
             self.edge_management_url,
             self.edge_recovery_url,
             self.edge_auth_token,

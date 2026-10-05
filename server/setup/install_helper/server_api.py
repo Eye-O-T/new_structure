@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import socket
 from collections.abc import Callable, Mapping
@@ -252,6 +253,8 @@ class ServerApiClient:
     ) -> dict[str, Any]:
         if not all((camera_id.strip(), name.strip(), edge_device_id.strip(), edge_mac_address.strip())):
             raise ValueError("camera ID, name and Edge device ID are required")
+        if not re.fullmatch(r"[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}", edge_mac_address.strip()):
+            raise ValueError("Edge MAC address must contain six hexadecimal octets")
         _validate_edge_url(edge_management_url, "Edge management URL")
         _validate_edge_url(edge_recovery_url, "Edge recovery URL")
         if len(edge_auth_token) < 32:

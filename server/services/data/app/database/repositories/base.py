@@ -19,6 +19,11 @@ class CameraHasHistory(Exception):
     pass
 
 
+class EdgeIdentityConflict(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
+
+
 def _now() -> str:
     return format_utc(utc_now())
 

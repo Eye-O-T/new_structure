@@ -124,6 +124,8 @@ class EdgePanel(QWidget):
         self.rtsp_port.setValue(8554)
         self.edge_camera_id = QLineEdit("cam-001")
         self.edge_device_id = QLineEdit("edge-001")
+        self.edge_mac_address = QLineEdit()
+        self.edge_mac_address.setPlaceholderText("aa:bb:cc:dd:ee:ff")
         self.edge_management_url = QLineEdit()
         self.edge_management_url.setPlaceholderText("http://192.168.0.41:8003")
         self.edge_recovery_url = QLineEdit()
@@ -143,6 +145,7 @@ class EdgePanel(QWidget):
         advanced_form.addRow("영상 수신 포트", self.rtsp_port)
         advanced_form.addRow("카메라 ID", self.edge_camera_id)
         advanced_form.addRow("장치 ID", self.edge_device_id)
+        advanced_form.addRow("MAC Address", self.edge_mac_address)
         advanced_form.addRow("Edge 관리 주소", self.edge_management_url)
         advanced_form.addRow("Edge 복구 주소", self.edge_recovery_url)
         advanced_form.addRow("영상 화질", self.video_profile)
@@ -195,6 +198,7 @@ class EdgePanel(QWidget):
             self.manual_mode.setChecked(False)
             self.edge_camera_id.setText("cam-001")
             self.edge_device_id.setText("edge-001")
+            self.edge_mac_address.clear()
             self.edge_management_url.clear()
             self.edge_recovery_url.clear()
             self.status.setText(
@@ -334,6 +338,7 @@ class EdgePanel(QWidget):
         edge = self.discovered_edges[index]
         self.edge_device_id.setText(edge.device_id)
         self.edge_camera_id.setText(edge.camera_id)
+        self.edge_mac_address.setText(edge.mac_address)
         self.edge_management_url.setText(edge.management_url)
         self.edge_recovery_url.setText(edge.recovery_url)
         self.video_profile.clear()
@@ -421,7 +426,7 @@ class EdgePanel(QWidget):
             "camera_id": camera_id,
             "name": self.edge_name.text().strip(),
             "edge_device_id": self.edge_device_id.text().strip(),
-            "edge_mac_address": edge.mac_address if edge is not None else "",
+            "edge_mac_address": self.edge_mac_address.text().strip().lower(),
             "edge_management_url": self.edge_management_url.text().strip(),
             "edge_recovery_url": self.edge_recovery_url.text().strip(),
             "edge_auth_token": token,

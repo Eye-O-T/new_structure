@@ -3,7 +3,7 @@
 분야별 mixin은 SQL을 나누되 별도 중첩 트랜잭션을 열지 않는다."""
 
 from ..connection import Database
-from .base import CameraHasHistory, CameraLimitReached
+from .base import CameraHasHistory, CameraLimitReached, EdgeIdentityConflict
 from .cameras import CamerasRepositoryMixin
 from .events import EventsRepositoryMixin
 from .identity import MATCH_MARGIN, MATCH_THRESHOLD, validate_match_policy
@@ -15,7 +15,7 @@ from .retention import RetentionRepositoryMixin
 from .sessions import SessionsRepositoryMixin
 from .users import UsersRepositoryMixin
 
-__all__ = ["DataRepository", "CameraHasHistory", "CameraLimitReached"]
+__all__ = ["DataRepository", "CameraHasHistory", "CameraLimitReached", "EdgeIdentityConflict"]
 
 
 # 도메인별 SQL 구현을 동일한 Database 인스턴스 위에 합쳐 서비스에 제공한다.

@@ -14,7 +14,7 @@ from fastapi import (
 from ai_cctv_core.identifiers import validate_camera_id
 from ai_cctv_core.time import format_utc
 
-from ..database.repositories import CameraHasHistory, CameraLimitReached
+from ..database.repositories import CameraHasHistory, CameraLimitReached, EdgeIdentityConflict
 from ..dependencies import Repo, _page
 from ..errors import ApiError, _not_found
 from ..schemas import (
@@ -41,6 +41,8 @@ def create_camera(payload: CameraCreate, repository: Repo) -> dict[str, Any]:
             "CAMERA_LIMIT_REACHED",
             "스키마 버전 1은 카메라를 최대 4대까지 지원합니다.",
         ) from exc
+    except EdgeIdentityConflict as exc:
+        raise ApiError(409, "EDGE_IDENTITY_CONFLICT", str(exc)) from exc
 
 
 # 제어·복구에 필요한 장치 주소와 인증값을 내부 저장소에 함께 전달한다.
@@ -131,6 +133,8 @@ def update_camera(
             "CAMERA_LIMIT_REACHED",
             "At most four cameras can be enabled at once.",
         ) from exc
+    except EdgeIdentityConflict as exc:
+        raise ApiError(409, "EDGE_IDENTITY_CONFLICT", str(exc)) from exc
     if camera is None:
         raise _not_found("camera")
     return camera

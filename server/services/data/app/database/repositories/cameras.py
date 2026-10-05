@@ -9,6 +9,7 @@ from ..connection import Database
 from .base import (
     CameraHasHistory,
     CameraLimitReached,
+    EdgeIdentityConflict,
     _as_dict,
     _camera,
     _now,
@@ -19,6 +20,26 @@ from .base import (
 
 class CamerasRepositoryMixin:
     database: Database
+
+    @staticmethod
+    def _check_edge_identity(connection, device_id: str, mac_address: str):
+        by_device = connection.execute(
+            "SELECT * FROM edge_devices WHERE edge_device_id = ?", (device_id,)
+        ).fetchone()
+        by_mac = connection.execute(
+            "SELECT * FROM edge_devices WHERE mac_address = ?", (mac_address,)
+        ).fetchone()
+        if by_device is None and by_mac is None:
+            return None
+        if by_device is not None and by_device["mac_address"] == mac_address:
+            return by_device
+        if by_device is not None:
+            raise EdgeIdentityConflict(
+                f"Edge device_id {device_id!r} is already registered with a different MAC address"
+            )
+        raise EdgeIdentityConflict(
+            f"MAC address {mac_address!r} is already registered to another Edge device"
+        )
 
     def camera_count(self) -> int:
         with self.database.connection() as connection:
@@ -40,7 +61,8 @@ class CamerasRepositoryMixin:
             recovery_url = values.get("edge_recovery_url")
             auth_token = values.get("edge_auth_token")
             mac_address = values.get("edge_mac_address")
-            if edge_device_id and management_url and recovery_url and auth_token:
+            if edge_device_id and management_url and recovery_url and auth_token and mac_address:
+                self._check_edge_identity(connection, edge_device_id, mac_address)
                 connection.execute(
                     """
                     INSERT INTO edge_devices(
@@ -215,6 +237,7 @@ class CamerasRepositoryMixin:
                     "edge_management_url",
                     "edge_recovery_url",
                     "edge_auth_token",
+                    "edge_mac_address",
                 )
             )
             if edge_fields_supplied:
@@ -236,16 +259,21 @@ class CamerasRepositoryMixin:
                     "edge_auth_token",
                     registered["auth_token"] if registered is not None else None,
                 )
-                if management_url is None or recovery_url is None or auth_token is None:
+                mac_address = values.get(
+                    "edge_mac_address",
+                    registered["mac_address"] if registered is not None else None,
+                )
+                if management_url is None or recovery_url is None or auth_token is None or mac_address is None:
                     raise ValueError(
                         "complete Edge device metadata is required for a new device"
                     )
+                self._check_edge_identity(connection, edge_device_id, mac_address)
                 connection.execute(
                     """
                     INSERT INTO edge_devices(
-                        edge_device_id, management_url, recovery_url, auth_token,
+                        edge_device_id, mac_address, management_url, recovery_url, auth_token,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(edge_device_id) DO UPDATE SET
                         management_url = excluded.management_url,
                         recovery_url = excluded.recovery_url,
@@ -254,6 +282,7 @@ class CamerasRepositoryMixin:
                     """,
                     (
                         edge_device_id,
+                        mac_address,
                         management_url,
                         recovery_url,
                         auth_token,
