@@ -39,21 +39,24 @@ class CamerasRepositoryMixin:
             management_url = values.get("edge_management_url")
             recovery_url = values.get("edge_recovery_url")
             auth_token = values.get("edge_auth_token")
+            mac_address = values.get("edge_mac_address")
             if edge_device_id and management_url and recovery_url and auth_token:
                 connection.execute(
                     """
                     INSERT INTO edge_devices(
-                        edge_device_id, management_url, recovery_url, auth_token,
+                        edge_device_id, mac_address, management_url, recovery_url, auth_token,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(edge_device_id) DO UPDATE SET
                         management_url = excluded.management_url,
+                        mac_address = excluded.mac_address,
                         recovery_url = excluded.recovery_url,
                         auth_token = excluded.auth_token,
                         updated_at = excluded.updated_at
                     """,
                     (
                         edge_device_id,
+                        mac_address,
                         management_url,
                         recovery_url,
                         auth_token,

@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import re
 import socket
@@ -15,7 +13,7 @@ from urllib.parse import urlsplit
 
 DISCOVERY_PORT = 37020
 DISCOVERY_MESSAGE_TYPE = "AI_CCTV_EDGE_ADVERTISE"
-DISCOVERY_VERSION = 1
+DISCOVERY_VERSION = 2
 MAX_DISCOVERY_PACKET = 8192
 _EXACT_FIELDS = {
     "message_type",
@@ -27,7 +25,7 @@ _EXACT_FIELDS = {
     "management_port",
     "recovery_port",
     "supported_profiles",
-    "signature",
+    "mac_address",
 }
 _CAMERA_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -43,6 +41,7 @@ class DiscoveredEdge:
     supported_profiles: tuple[str, ...]
     message_id: str
     sent_at: int
+    mac_address: str
 
 
 # 키 순서·공백·인코딩을 고정해 Edge와 설치 도우미가 동일한 바이트에 서명하도록 한다.
@@ -60,13 +59,11 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
 def parse_advertisement(
     data: bytes,
     peer_address: str,
-    pairing_key: str,
+    pairing_key: str | None = None,
     *,
     now: int | None = None,
     max_age_seconds: int = 10,
 ) -> DiscoveredEdge:
-    if len(pairing_key) < 32:
-        raise ValueError("Edge pairing key must contain at least 32 characters")
     if not isinstance(data, bytes) or len(data) > MAX_DISCOVERY_PACKET:
         raise ValueError("invalid discovery packet size")
     try:
@@ -123,20 +120,9 @@ def parse_advertisement(
         socket.inet_aton(peer_address)
     except OSError as exc:
         raise ValueError("discovery peer must be IPv4") from exc
-    signature = message["signature"]
-    if not isinstance(signature, str) or len(signature) != 64:
-        raise ValueError("invalid discovery signature")
-    try:
-        int(signature, 16)
-    except ValueError as exc:
-        raise ValueError("invalid discovery signature") from exc
-    unsigned = dict(message)
-    del unsigned["signature"]
-    expected = hmac.new(
-        pairing_key.encode("utf-8"), _canonical_payload(unsigned), hashlib.sha256
-    ).hexdigest()
-    if not hmac.compare_digest(signature, expected):
-        raise ValueError("discovery signature does not match the pairing key")
+    mac = message["mac_address"]
+    if not isinstance(mac, str) or not re.fullmatch(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}", mac):
+        raise ValueError("invalid discovery MAC address")
     return DiscoveredEdge(
         device_id=device_id,
         camera_id=camera_id,
@@ -146,6 +132,7 @@ def parse_advertisement(
         supported_profiles=profiles,
         message_id=identifier,
         sent_at=sent_at,
+        mac_address=mac,
     )
 
 
@@ -158,7 +145,7 @@ def _port(value: object) -> int:
 
 # 정해진 시간·대수 안에서 광고를 모으고 메시지 재전송을 걸러 장치별 최신 결과만 남긴다.
 def discover_edges(
-    pairing_key: str,
+    pairing_key: str | None = None,
     *,
     timeout: float = 3.0,
     port: int = DISCOVERY_PORT,

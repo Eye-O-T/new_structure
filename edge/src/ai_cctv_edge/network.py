@@ -15,6 +15,24 @@ class InterfaceIPv4:
     prefix: int
     broadcast: str
 
+def interface_mac(interface: str) -> str:
+    if not interface or len(interface) >= 16 or any(c in interface for c in "\x00\r\n"):
+        raise ValueError(f"invalid network interface: {interface!r}")
+    try:
+        raw = open(f"/sys/class/net/{interface}/address", encoding="ascii").read().strip()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"network interface has no MAC address: {interface}") from exc
+    parts = raw.split(":")
+    if len(parts) != 6:
+        raise ValueError("invalid interface MAC address")
+    try:
+        octets = [int(part, 16) for part in parts]
+    except ValueError as exc:
+        raise ValueError("invalid interface MAC address") from exc
+    if any(not 0 <= value <= 255 for value in octets) or all(value == 0 for value in octets):
+        raise ValueError("invalid interface MAC address")
+    return ":".join(f"{value:02x}" for value in octets)
+
 
 def network_details(name: str, address: str, netmask: str) -> InterfaceIPv4:
     network = ipaddress.IPv4Network(f"{address}/{netmask}", strict=False)

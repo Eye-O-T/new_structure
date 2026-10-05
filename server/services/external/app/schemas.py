@@ -35,6 +35,7 @@ class CameraCreate(StrictModel):
     stream_path: str | None = Field(default=None, pattern=CAMERA_ID_PATTERN.pattern)
     source_url: str | None = Field(default=None, max_length=2048)
     edge_device_id: str | None = Field(default=None, min_length=1, max_length=256)
+    edge_mac_address: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$")
     edge_management_url: str | None = Field(default=None, max_length=2048)
     edge_recovery_url: str | None = Field(default=None, max_length=2048)
     edge_auth_token: SecretStr | None = Field(
@@ -55,7 +56,7 @@ class CameraCreate(StrictModel):
             value is not None for value in values
         ):
             raise ValueError(
-                "edge_device_id, edge_management_url, edge_recovery_url and "
+                "edge_device_id, edge_mac_address, edge_management_url, edge_recovery_url and "
                 "edge_auth_token "
                 "must be supplied together"
             )

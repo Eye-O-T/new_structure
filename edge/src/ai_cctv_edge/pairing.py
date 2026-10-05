@@ -2,8 +2,6 @@
 # UDP 광고의 HMAC 서명은 변조를 확인하기 위한 것이며 광고 내용 자체를 암호화하지 않는다.
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
 import shutil
@@ -30,11 +28,11 @@ from .config import (
     render_toml,
     write_atomic,
 )
-from .network import interface_ipv4
+from .network import interface_ipv4, interface_mac
 
 DISCOVERY_PORT = 37020
 DISCOVERY_MESSAGE_TYPE = "AI_CCTV_EDGE_ADVERTISE"
-DISCOVERY_VERSION = 1
+DISCOVERY_VERSION = 2
 MAX_DISCOVERY_PACKET = 8192
 
 
@@ -74,7 +72,8 @@ def build_advertisement(
     management_port: int,
     recovery_port: int,
     supported_profiles: tuple[str, ...],
-    pairing_key: str,
+    pairing_key: str | None = None,
+    mac_address: str = "00:00:00:00:00:01",
     sent_at: int | None = None,
     message_id: str | None = None,
 ) -> bytes:
@@ -95,12 +94,6 @@ def build_advertisement(
     profiles = tuple(dict.fromkeys(supported_profiles))
     if not profiles or any(item not in {"hd", "fhd"} for item in profiles):
         raise ValueError("supported profiles may only contain hd and fhd")
-    if (
-        len(pairing_key) < 32
-        or pairing_key != pairing_key.strip()
-        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in pairing_key)
-    ):
-        raise ValueError("pairing key must contain at least 32 characters")
     identifier = message_id or str(uuid.uuid4())
     try:
         parsed_id = uuid.UUID(identifier)
@@ -121,11 +114,9 @@ def build_advertisement(
         "management_port": management_port,
         "recovery_port": recovery_port,
         "supported_profiles": list(profiles),
+        "mac_address": mac_address.lower(),
     }
-    signature = hmac.new(
-        pairing_key.encode("utf-8"), _canonical_payload(unsigned), hashlib.sha256
-    ).hexdigest()
-    result = _canonical_payload({**unsigned, "signature": signature})
+    result = _canonical_payload(unsigned)
     if len(result) > MAX_DISCOVERY_PACKET:
         raise ValueError("discovery advertisement is too large")
     return result
@@ -140,7 +131,7 @@ def advertise_until_stopped(
     management_port: int,
     recovery_port: int,
     supported_profiles: tuple[str, ...],
-    pairing_key: str,
+    pairing_key: str | None = None,
     discovery_port: int = DISCOVERY_PORT,
     interval_seconds: float = 1.0,
     destination: str = "255.255.255.255",
@@ -151,6 +142,7 @@ def advertise_until_stopped(
     if interval_seconds <= 0:
         raise ValueError("advertisement interval must be positive")
     source = "0.0.0.0"
+    mac_address = interface_mac(interface) if interface is not None else "00:00:00:00:00:01"
     if interface is not None:
         network = interface_ipv4(interface)
         source = network.address
@@ -166,6 +158,7 @@ def advertise_until_stopped(
                 recovery_port=recovery_port,
                 supported_profiles=supported_profiles,
                 pairing_key=pairing_key,
+                mac_address=mac_address,
             )
             try:
                 udp_socket.sendto(payload, (destination, discovery_port))
