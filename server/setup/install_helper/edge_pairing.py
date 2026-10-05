@@ -77,13 +77,8 @@ def probe_edge_connection(
         result = json.loads(raw.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise EdgePairingError("Edge health response is not UTF-8 JSON") from exc
-    if (
-        not isinstance(result, dict)
-        or result.get("device_id") != edge.device_id
-        or result.get("camera_id") != edge.camera_id
-        or result.get("status") not in {"pairing", "alive"}
-    ):
-        raise EdgePairingError("Edge health identity does not match the advertisement")
+    if not isinstance(result, dict) or result.get("status") not in {"pairing", "alive"}:
+        raise EdgePairingError("Edge health probe did not report a live service")
     return {
         "status": result["status"],
         "device_id": edge.device_id,
@@ -135,23 +130,17 @@ def validate_pairing_settings(
 def complete_edge_pairing(
     edge: DiscoveredEdge,
     *,
-    pairing_key: str,
     server_response: Mapping[str, Any],
+    operational_token: str,
     central_host: str,
     central_port: int,
     video_profile: str,
     backup_root: str = "/var/lib/ai-cctv-edge/recordings",
     timeout: float = 10.0,
 ) -> dict[str, Any]:
-    if (
-        len(pairing_key) < 32
-        or pairing_key != pairing_key.strip()
-        or any(
-            ord(character) < 0x20 or ord(character) == 0x7F for character in pairing_key
-        )
-    ):
-        raise EdgePairingError("Edge pairing key is invalid")
     credentials = server_response.get("publish_credentials")
+    if len(operational_token) < 32 or operational_token != operational_token.strip():
+        raise EdgePairingError("Edge auth token is invalid")
     camera_id = server_response.get("camera_id")
     if camera_id != edge.camera_id or not isinstance(credentials, Mapping):
         raise EdgePairingError("server registration identity does not match the Edge")
@@ -177,6 +166,7 @@ def complete_edge_pairing(
             "supported_profiles": list(edge.supported_profiles),
             "publish_username": username,
             "publish_password": password,
+            "edge_auth_token": operational_token,
         },
         ensure_ascii=False,
     ).encode("utf-8")
@@ -185,7 +175,6 @@ def complete_edge_pairing(
         data=body,
         method="PUT",
         headers={
-            "Authorization": f"Bearer {pairing_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         },

@@ -221,6 +221,7 @@ def _api_command(args: argparse.Namespace) -> int:
             camera_id=args.camera_id,
             name=args.name,
             edge_device_id=args.edge_device_id,
+            edge_mac_address=args.edge_mac_address,
             edge_management_url=args.management_url,
             edge_recovery_url=args.recovery_url,
             edge_auth_token=edge_token,
@@ -399,6 +400,7 @@ def build_parser() -> argparse.ArgumentParser:
     edge_register.add_argument("camera_id")
     edge_register.add_argument("--name", required=True)
     edge_register.add_argument("--edge-device-id", required=True)
+    edge_register.add_argument("--edge-mac-address", required=True)
     edge_register.add_argument("--management-url", required=True)
     edge_register.add_argument("--recovery-url", required=True)
     edge_register.add_argument(

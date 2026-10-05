@@ -13,10 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from .auth import BearerAuthenticator, load_tokens
 from .config import (
     CAMERA_ID,
     BackupConfig,
@@ -48,22 +47,6 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
 
 
 # 파일 끝의 개행만 허용하며 공백·제어 문자로 의미가 달라질 수 있는 연결 키는 거부한다.
-def load_pairing_key(path: Path) -> str:
-    try:
-        raw = path.expanduser().resolve().read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise ValueError("pairing key file cannot be read as UTF-8") from exc
-    key = raw.rstrip("\r\n")
-    if (
-        len(key) < 32
-        or key != key.strip()
-        or raw not in {key, key + "\n", key + "\r\n"}
-        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in key)
-    ):
-        raise ValueError("pairing key must contain at least 32 printable characters")
-    return key
-
-
 # 장치 식별·서비스 포트·지원 프로필에 시각과 UUID를 붙여 서명된 발견 패킷을 만든다.
 def build_advertisement(
     *,
@@ -72,8 +55,8 @@ def build_advertisement(
     management_port: int,
     recovery_port: int,
     supported_profiles: tuple[str, ...],
-    pairing_key: str | None = None,
-    mac_address: str = "00:00:00:00:00:01",
+    mac_address: str,
+    ip_address: str,
     sent_at: int | None = None,
     message_id: str | None = None,
 ) -> bytes:
@@ -115,6 +98,7 @@ def build_advertisement(
         "recovery_port": recovery_port,
         "supported_profiles": list(profiles),
         "mac_address": mac_address.lower(),
+        "ip_address": ip_address,
     }
     result = _canonical_payload(unsigned)
     if len(result) > MAX_DISCOVERY_PACKET:
@@ -131,7 +115,6 @@ def advertise_until_stopped(
     management_port: int,
     recovery_port: int,
     supported_profiles: tuple[str, ...],
-    pairing_key: str | None = None,
     discovery_port: int = DISCOVERY_PORT,
     interval_seconds: float = 1.0,
     destination: str = "255.255.255.255",
@@ -142,7 +125,9 @@ def advertise_until_stopped(
     if interval_seconds <= 0:
         raise ValueError("advertisement interval must be positive")
     source = "0.0.0.0"
-    mac_address = interface_mac(interface) if interface is not None else "00:00:00:00:00:01"
+    if interface is None:
+        raise ValueError("an IPv4 interface is required for discovery")
+    mac_address = interface_mac(interface)
     if interface is not None:
         network = interface_ipv4(interface)
         source = network.address
@@ -157,8 +142,8 @@ def advertise_until_stopped(
                 management_port=management_port,
                 recovery_port=recovery_port,
                 supported_profiles=supported_profiles,
-                pairing_key=pairing_key,
                 mac_address=mac_address,
+                ip_address=source,
             )
             try:
                 udp_socket.sendto(payload, (destination, discovery_port))
@@ -184,13 +169,14 @@ class PairingCompletion(BaseModel):
     supported_profiles: list[Literal["hd", "fhd"]] = Field(min_length=1)
     publish_username: str = Field(min_length=1, max_length=256)
     publish_password: str = Field(min_length=16, max_length=1024)
+    edge_auth_token: str = Field(min_length=32, max_length=4096)
 
 
 # 한 번의 초기 연결 상태와 완료 표식을 관리하며 요청 직렬화 잠금을 제공한다.
 @dataclass
 class PairingSession:
     config_path: Path
-    pairing_key_file: Path
+    token_file: Path
     device_id: str
     camera_id: str
     management_port: int = 8003
@@ -243,6 +229,8 @@ class PairingSession:
             raise HTTPException(status_code=422, detail="backup root must be absolute")
 
         password_file = self.config_path.parent / "publish.password"
+        operational_token = request.edge_auth_token
+        operational_token_file = self.config_path.parent / "recovery.token"
         config = EdgeConfig(
             schema_version=1,
             device_id=self.device_id,
@@ -261,19 +249,20 @@ class PairingSession:
             backup=BackupConfig(root=backup_root),
             recovery=RecoveryConfig(
                 port=self.recovery_port,
-                token_file=self.pairing_key_file,
+                token_file=operational_token_file,
             ),
             control=ControlConfig(
                 port=self.management_port,
-                token_file=self.pairing_key_file,
+                token_file=operational_token_file,
             ),
         )
         config.validate()
         # 완료 표시를 마지막에 남겨, 설정이 모두 기록되기 전에 서비스가 시작되지 않게 한다.
         write_atomic(password_file, request.publish_password + "\n", mode=0o640)
+        write_atomic(operational_token_file, operational_token + "\n", mode=0o600)
         write_atomic(self.config_path, render_toml(config), mode=0o640)
         write_atomic(self.marker_path, "configured\n", mode=0o644)
-        self._set_edge_ownership(password_file, self.config_path, self.pairing_key_file)
+        self._set_edge_ownership(password_file, operational_token_file, self.config_path)
         self.completed.set()
         return config
 
@@ -295,7 +284,6 @@ class PairingSession:
 
 # 연결 키로 인증하는 최초 설정 API를 만들고 동시 완료 요청은 세션 잠금으로 묶는다.
 def create_pairing_app(session: PairingSession) -> FastAPI:
-    authenticate = BearerAuthenticator(load_tokens(session.pairing_key_file))
     app = FastAPI(title="AI_CCTV Edge Pairing", version="0.3.2")
 
     @app.get("/health/live")
@@ -308,7 +296,6 @@ def create_pairing_app(session: PairingSession) -> FastAPI:
 
     @app.put(
         "/internal/v1/pairing/complete",
-        dependencies=[Depends(authenticate)],
     )
     def complete(request: PairingCompletion):
         with session.apply_lock:

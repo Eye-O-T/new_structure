@@ -1,5 +1,5 @@
 # 신뢰 LAN에서 Edge의 UDP 광고를 받아 초기 연결 대상을 찾는다.
-# 공유 Key로 만든 HMAC 서명과 시각을 확인하고 실제 패킷 발신 주소로 접속한다.
+# Discovery advertisements are validated structurally and use the UDP sender address.
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ _EXACT_FIELDS = {
     "recovery_port",
     "supported_profiles",
     "mac_address",
+    "ip_address",
 }
 _CAMERA_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
@@ -42,6 +43,7 @@ class DiscoveredEdge:
     message_id: str
     sent_at: int
     mac_address: str
+    advertised_ip: str
 
 
 # 키 순서·공백·인코딩을 고정해 Edge와 설치 도우미가 동일한 바이트에 서명하도록 한다.
@@ -59,7 +61,6 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
 def parse_advertisement(
     data: bytes,
     peer_address: str,
-    pairing_key: str | None = None,
     *,
     now: int | None = None,
     max_age_seconds: int = 10,
@@ -123,6 +124,11 @@ def parse_advertisement(
     mac = message["mac_address"]
     if not isinstance(mac, str) or not re.fullmatch(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}", mac):
         raise ValueError("invalid discovery MAC address")
+    advertised_ip = message["ip_address"]
+    try:
+        socket.inet_aton(advertised_ip)
+    except (OSError, TypeError):
+        raise ValueError("invalid advertised IP address")
     return DiscoveredEdge(
         device_id=device_id,
         camera_id=camera_id,
@@ -133,6 +139,7 @@ def parse_advertisement(
         message_id=identifier,
         sent_at=sent_at,
         mac_address=mac,
+        advertised_ip=advertised_ip,
     )
 
 
@@ -145,15 +152,12 @@ def _port(value: object) -> int:
 
 # 정해진 시간·대수 안에서 광고를 모으고 메시지 재전송을 걸러 장치별 최신 결과만 남긴다.
 def discover_edges(
-    pairing_key: str | None = None,
     *,
     timeout: float = 3.0,
     port: int = DISCOVERY_PORT,
     bind_host: str = "0.0.0.0",
     max_results: int = 16,
 ) -> list[DiscoveredEdge]:
-    if len(pairing_key) < 32:
-        raise ValueError("Edge pairing key must contain at least 32 characters")
     if timeout <= 0 or not 1 <= port <= 65535 or max_results <= 0:
         raise ValueError("invalid discovery settings")
     deadline = time.monotonic() + timeout
@@ -175,15 +179,15 @@ def discover_edges(
             except OSError:
                 break
             try:
-                item = parse_advertisement(data, peer[0], pairing_key)
+                item = parse_advertisement(data, peer[0])
             except ValueError:
                 continue
             if item.message_id in seen_message_ids:
                 continue
             seen_message_ids.add(item.message_id)
-            existing = results.get(item.device_id)
+            existing = results.get(item.mac_address)
             if existing is None or item.sent_at > existing.sent_at:
-                results[item.device_id] = item
+                results[item.mac_address] = item
     return sorted(results.values(), key=lambda item: (item.device_id, item.address))
 
 

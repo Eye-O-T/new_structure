@@ -32,7 +32,6 @@ from .pairing import (
     PairingSession,
     advertise_until_stopped,
     create_pairing_app,
-    load_pairing_key,
 )
 from .recovery import create_app
 from .runner import EdgeRunner
@@ -229,20 +228,19 @@ def pair(
     *,
     device_id: str,
     camera_id: str,
-    pairing_key_file: Path,
+    token_file: Path | None = None,
     bind_host: str,
     management_port: int,
     recovery_port: int,
     discovery_port: int,
     supported_profiles: tuple[str, ...],
-    set_pairing_key: bool = False,
     interface: str | None = None,
 ) -> int:
     """미설정 Edge를 광고하고 인증된 초기 설정을 한 번 수락한다."""
 
     session = PairingSession(
         config_path=path.expanduser().resolve(),
-        pairing_key_file=pairing_key_file.expanduser().resolve(),
+        token_file=(token_file or path.parent / "recovery.token").expanduser().resolve(),
         device_id=device_id,
         camera_id=camera_id,
         management_port=management_port,
@@ -253,21 +251,6 @@ def pair(
     if interface is not None:
         # Fail before starting uvicorn so a typo cannot leave a misleading pairing process running.
         interface_ipv4(interface)
-    if set_pairing_key:
-        entered = getpass.getpass("New Edge pairing key (minimum 32 characters): ")
-        confirmed = getpass.getpass("Confirm Edge pairing key: ")
-        if entered != confirmed:
-            raise ValueError("pairing key confirmation does not match")
-        if len(entered) < 32 or entered != entered.strip() or any(
-            ord(character) < 0x20 or ord(character) == 0x7F
-            for character in entered
-        ):
-            raise ValueError(
-                "pairing key must contain at least 32 printable characters"
-            )
-        write_atomic(session.pairing_key_file, entered + "\n", mode=0o640)
-    pairing_key = load_pairing_key(session.pairing_key_file)
-
     import uvicorn
 
     stopped = threading.Event()
@@ -280,7 +263,6 @@ def pair(
             "management_port": management_port,
             "recovery_port": recovery_port,
             "supported_profiles": supported_profiles,
-            "pairing_key": pairing_key,
             "discovery_port": discovery_port,
             "interface": interface,
         },
@@ -379,11 +361,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     pairing.add_argument("--device-id", default="edge-001")
     pairing.add_argument("--camera-id", default="cam-001")
-    pairing.add_argument(
-        "--pairing-key-file",
-        type=Path,
-        default=DEFAULT_CONFIG.parent / "recovery.token",
-    )
     pairing.add_argument("--bind-host", default="0.0.0.0")
     pairing.add_argument("--management-port", type=int, default=8003)
     pairing.add_argument("--recovery-port", type=int, default=8002)
@@ -392,11 +369,6 @@ def main(argv: list[str] | None = None) -> int:
     pairing.add_argument(
         "--interface",
         help="IPv4 interface used for directed discovery broadcast, e.g. eth0",
-    )
-    pairing.add_argument(
-        "--set-pairing-key",
-        action="store_true",
-        help="replace the unconfigured Edge key from a hidden confirmation prompt",
     )
     args = parser.parse_args(argv)
 
@@ -422,13 +394,11 @@ def main(argv: list[str] | None = None) -> int:
             args.config,
             device_id=args.device_id,
             camera_id=args.camera_id,
-            pairing_key_file=args.pairing_key_file,
             bind_host=args.bind_host,
             management_port=args.management_port,
             recovery_port=args.recovery_port,
             discovery_port=args.discovery_port,
             supported_profiles=supported_profiles,
-            set_pairing_key=args.set_pairing_key,
             interface=args.interface,
         )
         if result == 0 and args.config == DEFAULT_CONFIG:

@@ -245,11 +245,12 @@ class ServerApiClient:
         camera_id: str,
         name: str,
         edge_device_id: str,
+        edge_mac_address: str,
         edge_management_url: str,
         edge_recovery_url: str,
         edge_auth_token: str,
     ) -> dict[str, Any]:
-        if not all((camera_id.strip(), name.strip(), edge_device_id.strip())):
+        if not all((camera_id.strip(), name.strip(), edge_device_id.strip(), edge_mac_address.strip())):
             raise ValueError("camera ID, name and Edge device ID are required")
         _validate_edge_url(edge_management_url, "Edge management URL")
         _validate_edge_url(edge_recovery_url, "Edge recovery URL")
@@ -262,6 +263,7 @@ class ServerApiClient:
                 "camera_id": camera_id,
                 "name": name,
                 "edge_device_id": edge_device_id,
+                "edge_mac_address": edge_mac_address.lower(),
                 "edge_management_url": edge_management_url,
                 "edge_recovery_url": edge_recovery_url,
                 "edge_auth_token": edge_auth_token,

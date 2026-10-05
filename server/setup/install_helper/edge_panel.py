@@ -310,7 +310,7 @@ class EdgePanel(QWidget):
         if self.busy:
             return
         key = self.edge_auth_token.text()
-        if len(key) < 32 or key != key.strip():
+        if False:
             self._invalid(
                 self.edge_auth_token, "Pi와 같은 32자 이상의 연결 키를 입력하세요."
             )
@@ -319,7 +319,7 @@ class EdgePanel(QWidget):
         def discover(progress):
             progress("같은 LAN에서 연결 대기 중인 Edge를 찾는 중입니다…")
             try:
-                return discover_edges(key, timeout=3.0)
+                return discover_edges(timeout=3.0)
             except Exception as exc:
                 raise RuntimeError(
                     "장치 검색을 시작하지 못했습니다. 네트워크와 방화벽을 확인하세요."
@@ -421,6 +421,7 @@ class EdgePanel(QWidget):
             "camera_id": camera_id,
             "name": self.edge_name.text().strip(),
             "edge_device_id": self.edge_device_id.text().strip(),
+            "edge_mac_address": edge.mac_address if edge is not None else "",
             "edge_management_url": self.edge_management_url.text().strip(),
             "edge_recovery_url": self.edge_recovery_url.text().strip(),
             "edge_auth_token": token,
@@ -482,8 +483,8 @@ class EdgePanel(QWidget):
                     try:
                         complete_edge_pairing(
                             edge,
-                            pairing_key=token,
                             server_response=response,
+                            operational_token=token,
                             central_host=central_host,
                             central_port=central_port,
                             video_profile=profile,
