@@ -107,6 +107,7 @@ class DataClient:
                 if candidate_code in {
                     "CAMERA_HAS_HISTORY",
                     "CAMERA_LIMIT_REACHED",
+                    "EDGE_IDENTITY_CONFLICT",
                 }:
                     code = str(candidate_code)
                     if isinstance(candidate_message, str) and candidate_message:
