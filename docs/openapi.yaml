@@ -1228,7 +1228,7 @@ paths:
     get:
       summary: Get event snapshot
       security:
-        - bearerAuth: []
+        - HTTPBearer: []
       responses:
         '200':
           description: Event snapshot image
@@ -1243,7 +1243,7 @@ paths:
     get:
       summary: Get person crop
       security:
-        - bearerAuth: []
+        - HTTPBearer: []
       responses:
         '200':
           description: Person crop image
@@ -1258,7 +1258,7 @@ paths:
     get:
       summary: Get annotated event snapshot
       security:
-        - bearerAuth: []
+        - HTTPBearer: []
       responses:
         '200':
           description: Annotated snapshot image

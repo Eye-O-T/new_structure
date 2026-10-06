@@ -69,6 +69,10 @@ class EventDetailScreen extends ConsumerWidget {
                 '카메라 ID: ${value.cameraId}',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
+              const SizedBox(height: 6),
+              _DetailField(label: '이벤트 ID', value: value.id),
+              const SizedBox(height: 6),
+              _DetailField(label: '이벤트 유형', value: value.eventType),
               const SizedBox(height: 24),
               if (isPersonEvent) ...[
                 if (value.media['crop'] == true)
@@ -76,7 +80,7 @@ class EventDetailScreen extends ConsumerWidget {
                 else if (value.media['snapshot'] == true)
                   _EventImage(eventId: value.id, kind: 'snapshot')
                 else
-                  const Text('Image is not available.'),
+                  const Text('이미지가 없습니다.'),
                 if (value.media['annotated_snapshot'] == true)
                   TextButton(
                     onPressed: () => showDialog<void>(
@@ -85,14 +89,26 @@ class EventDetailScreen extends ConsumerWidget {
                         child: _EventImage(eventId: value.id, kind: 'annotated-snapshot'),
                       ),
                     ),
-                    child: const Text('View annotated snapshot'),
+                    child: const Text('분석 이미지 보기'),
                   ),
                 const SizedBox(height: 24),
+                _DetailField(
+                  label: 'Person ID',
+                  value: value.personId?.trim().isNotEmpty == true
+                      ? value.personId!
+                      : '미등록',
+                ),
+                const SizedBox(height: 12),
                 _DetailField(
                   label: '글로벌 Person ID',
                   value: globalPersonId == null || globalPersonId.isEmpty
                       ? '미등록'
                       : globalPersonId,
+                ),
+                const SizedBox(height: 12),
+                _DetailField(
+                  label: 'Confidence',
+                  value: value.confidence?.toString() ?? '없음',
                 ),
                 const SizedBox(height: 20),
               ],
@@ -131,51 +147,6 @@ class EventDetailScreen extends ConsumerWidget {
   }
 }
 
-/// 이후 실제 Crop 이미지로 교체할 사진 영역이다. 네트워크 요청은 하지 않는다.
-class _PersonPhotoPlaceholder extends StatelessWidget {
-  const _PersonPhotoPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 280),
-        child: AspectRatio(
-          aspectRatio: 4 / 5,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.person_outline,
-                  size: 64,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    '인물 사진 준비 중',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _EventImage extends ConsumerWidget {
   const _EventImage({required this.eventId, required this.kind});
   final String eventId;
@@ -193,22 +164,22 @@ class _EventImage extends ConsumerWidget {
           if (error is! ApiException || error.statusCode == 0)
             TextButton(
               onPressed: () => ref.invalidate(eventImageProvider('$eventId|$kind')),
-              child: const Text('Retry'),
+              child: const Text('다시 시도'),
             ),
         ],
       ),
       data: (bytes) => Image.memory(bytes, fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => const Text('Image format is invalid.')),
+          errorBuilder: (_, __, ___) => const Text('이미지 형식이 올바르지 않습니다.')),
     );
   }
 
   String _imageError(Object error) {
     if (error is ApiException) {
-      if (error.statusCode == 403) return 'You do not have permission to view this image.';
-      if (error.statusCode == 404) return 'Image is not available.';
-      if (error.statusCode == 0) return 'Could not load image. Retry.';
+      if (error.statusCode == 403) return '이미지를 볼 권한이 없습니다.';
+      if (error.statusCode == 404) return '이미지가 없습니다.';
+      if (error.statusCode == 0) return '이미지를 불러오지 못했습니다.';
     }
-    return 'Could not load image. Retry.';
+    return '이미지를 불러오지 못했습니다.';
   }
 }
 

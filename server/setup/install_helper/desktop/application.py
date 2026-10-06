@@ -5,10 +5,12 @@ import logging
 import sys
 import time
 
-from PyQt5.QtCore import QProcess, QTimer, Qt
-from PyQt5.QtWidgets import QApplication, QLabel, QMessageBox
+from PyQt5.QtCore import QProcess, QTimer, Qt, QUrl
+from PyQt5.QtGui import QDesktopServices, QPixmap
+from PyQt5.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QMessageBox, QPushButton, QVBoxLayout
 
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
+from .api import safe_error
 from ..qt_tasks import BackgroundTask
 
 
@@ -158,6 +160,80 @@ class CCTVMainWindow(ReferenceWindow):
             label.setTextFormat(Qt.PlainText)
         if event.get("type") == "network_failure" and isinstance(self.video_source, tuple):
             self.cam_status.setText(f"● {self.video_source[1]} · 연결 확인 중")
+
+    def open_event_detail(self, event):
+        event_id = event.get("id")
+        if not event_id or not self.api:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Event {event_id}")
+        dialog.setMinimumWidth(520)
+        layout = QVBoxLayout(dialog)
+        try:
+            detail = self.api.event(event_id)
+        except Exception as exc:
+            layout.addWidget(QLabel(f"Could not load event: {safe_error(exc)}"))
+            buttons = QDialogButtonBox(QDialogButtonBox.Close)
+            buttons.rejected.connect(dialog.reject)
+            layout.addWidget(buttons)
+            dialog.exec_()
+            return
+
+        for name, value in (
+            ("Event ID", detail.get("id", event_id)),
+            ("Type", detail.get("event_type", "-")),
+            ("Camera", detail.get("camera_id", "-")),
+            ("Time", detail.get("occurred_at", "-")),
+            ("Person ID", detail.get("person_id") or "-"),
+            ("Global Person ID", detail.get("global_person_id") or "-"),
+            ("Confidence", detail.get("confidence", "-")),
+        ):
+            layout.addWidget(QLabel(f"{name}: {value}"))
+
+        media = detail.get("media", {})
+        for kind, key, label in (
+            ("snapshot", "snapshot", "Snapshot"),
+            ("crop", "crop", "Person crop"),
+            ("annotated-snapshot", "annotated_snapshot", "Annotated snapshot"),
+        ):
+            if not media.get(key):
+                continue
+            try:
+                content, _content_type = self.api.event_image(event_id, kind)
+                image = QPixmap()
+                if not image.loadFromData(content):
+                    raise ValueError("invalid image")
+                image_label = QLabel()
+                image_label.setPixmap(image.scaledToWidth(440, Qt.SmoothTransformation))
+                image_label.setToolTip(label)
+                layout.addWidget(image_label)
+            except Exception as exc:
+                layout.addWidget(QLabel(f"{label}: unavailable ({safe_error(exc)})"))
+
+        for recording_id in detail.get("recording_segment_ids", []):
+            try:
+                recording = self.api.recording(recording_id)
+                status = recording.get("status", "unknown")
+                layout.addWidget(QLabel(
+                    f"Recording ID: {recording_id} | "
+                    f"Start: {recording.get('start_at', '-')} | "
+                    f"End: {recording.get('end_at', '-')} | Status: {status}"
+                ))
+                if status == "ready":
+                    playback_url = self.api.recording_playback(recording_id).get("playback_url")
+                    if playback_url:
+                        button = QPushButton("Play recording")
+                        button.clicked.connect(
+                            lambda _checked=False, url=playback_url: QDesktopServices.openUrl(QUrl(url))
+                        )
+                        layout.addWidget(button)
+            except Exception as exc:
+                layout.addWidget(QLabel(f"Recording {recording_id}: unavailable ({safe_error(exc)})"))
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec_()
 
     def closeEvent(self, event):
         local_publisher = getattr(self, "local_publisher", None)

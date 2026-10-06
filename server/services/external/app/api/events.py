@@ -110,17 +110,17 @@ async def _event_image(event_id: str, kind: str, principal: Principal, data: Dat
         media_type=upstream.headers.get("content-type", "application/octet-stream"),
         headers={"Cache-Control": "private, no-store"},
     )
-@router.get("/api/v1/events/{event_id}/snapshot")
+@router.get("/api/v1/events/{event_id}/snapshot", summary="Event snapshot", description="Returns the event snapshot after permission checks.")
 async def get_event_snapshot(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
     return await _event_image(event_id, "snapshot", principal, data)
 
 
-@router.get("/api/v1/events/{event_id}/crop")
+@router.get("/api/v1/events/{event_id}/crop", summary="Event person crop", description="Returns the event person crop after permission checks.")
 async def get_event_crop(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
     return await _event_image(event_id, "crop", principal, data)
 
 
-@router.get("/api/v1/events/{event_id}/annotated-snapshot")
+@router.get("/api/v1/events/{event_id}/annotated-snapshot", summary="Event annotated snapshot", description="Returns the annotated event snapshot after permission checks.")
 async def get_event_annotated_snapshot(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
     return await _event_image(event_id, "annotated-snapshot", principal, data)
 

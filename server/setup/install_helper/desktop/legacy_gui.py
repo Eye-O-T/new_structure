@@ -434,6 +434,11 @@ class CCTVMainWindow(QMainWindow):
 
         event_box = QFrame()
         event_box.setStyleSheet("background-color: #0f172a; border-radius: 5px;")
+        if event.get("id"):
+            event_box.setCursor(Qt.PointingHandCursor)
+            event_box.mousePressEvent = lambda _mouse_event, item=event: getattr(
+                self, "open_event_detail", lambda _event: None
+            )(item)
 
         layout = QVBoxLayout(event_box)
         layout.setContentsMargins(18, 14, 18, 14)

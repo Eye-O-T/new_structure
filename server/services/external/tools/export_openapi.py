@@ -194,6 +194,18 @@ OPERATIONS = {
         "이벤트 검색",
         "viewer는 camera_id를 반드시 지정해야 한다. admin은 생략하여 전체를 검색할 수 있다. event_type·from·to는 선택이며 시각 범위는 from 이상·to 미만이다. 인물 연결·분석 결과는 나중에 갱신될 수 있다.",
     ),
+    "get_event_snapshot": (
+        "Event snapshot",
+        "Returns the event snapshot after the event and camera permission checks.",
+    ),
+    "get_event_crop": (
+        "Event person crop",
+        "Returns the event person crop after the event and camera permission checks.",
+    ),
+    "get_event_annotated_snapshot": (
+        "Event annotated snapshot",
+        "Returns the annotated event snapshot after the event and camera permission checks.",
+    ),
     "get_event": (
         "이벤트 상세",
         "푸시의 event_id로도 조회한다. snapshot_path는 공개 URL이 아니다. 연결 녹화는 recording_segment_id 또는 recording_segment_ids로 조회한다.",
