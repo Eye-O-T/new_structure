@@ -22,7 +22,7 @@ Windows에서 서버 설치와 최초 Edge 연결을 돕는 GUI·CLI다. 설정 
 | 사람 탐지 모델 | 사람 클래스가 `0`인 Ultralytics 호환 로컬 파일. 설치 프로그램에는 포함하지 않음 |
 | 인물 식별 모델(OSNet) | OSNet x0.25 재식별 ONNX 파일. [모델 준비 도구](../../tools/README.md)로 준비하거나 배포 담당자에게 받음 |
 | TLS 인증서·개인키 | 사용할 HTTPS 이름의 인증서와 암호화되지 않은 PEM 개인키 |
-| 관리자 비밀번호 | 기본 계정 `admin`의 비밀번호를 직접 입력. 12자 이상 |
+| 관리자 비밀번호 | 기본 계정 `admin`의 비밀번호를 직접 입력. 4~12자 |
 | 휴대전화 접속 주소 | `http://cctv.example.com` 또는 `https://cctv.example.com`처럼 실제 서버 주소와 필요 시 포트. HTTPS에서 인증서의 서버 이름과 일치해야 함 |
 
 모델·TLS 파일은 선택 저장소의 `models/`·`certs/tls.crt`·`certs/tls.key`, 서버 패키지의 `runtime/models/`·`runtime/certificates/`에서 후보를 찾는다. PC 전체를 검색하지 않으며 다른 위치의 파일은 직접 선택한다. 모델·인증서를 자동 다운로드하거나 자체 인증서를 만들어 신뢰 검사를 우회하지 않는다.

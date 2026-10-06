@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from argon2 import PasswordHasher
 
 from ai_cctv_core.config import AppConfig, CameraBootstrap, write_config_atomic
+from server.password_policy import validate_admin_password
 
 from .model_manager import (
     IDENTITY_PLUGIN,
@@ -255,8 +256,7 @@ def _validate_request(request: InstallRequest) -> Path | None:
             raise ValueError("public base URL scheme does not match public_scheme")
     if not re.fullmatch(r"[A-Za-z0-9_.@-]{3,64}", request.admin_username):
         raise ValueError("administrator username contains unsupported characters")
-    if len(request.admin_password) < 12:
-        raise ValueError("administrator password must contain at least 12 characters")
+    validate_admin_password(request.admin_password)
     if len(request.cameras) > 4:
         raise ValueError("at most four bootstrap cameras are supported")
     ports = (

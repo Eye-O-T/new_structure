@@ -309,7 +309,7 @@ def _validate_install_input(
     except (OSError, ValueError, TypeError):
         raise ValueError(
             "설치 입력값을 확인하세요. 관리자 ID는 영문·숫자·_.@- 3~64자, "
-            "비밀번호는 12자 이상이어야 합니다. 서로 다른 유효 포트, IP 주소, "
+            "비밀번호는 4자 이상 12자 이하여야 합니다. 서로 다른 유효 포트, IP 주소, "
             "HTTPS 접속 주소, 중복 없는 카메라 설정과 모델·인증서 파일을 확인하세요."
         ) from None
 

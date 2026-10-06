@@ -216,7 +216,7 @@ OPERATIONS = {
     ),
     "create_user": (
         "사용자 생성",
-        "admin 또는 viewer 역할을 지정한다. 새 비밀번호는 12자 이상이어야 한다.",
+        "admin 또는 viewer 역할을 지정한다. 새 비밀번호는 4자 이상 12자 이하여야 한다.",
     ),
     "update_user": (
         "사용자 변경",

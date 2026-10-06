@@ -18,7 +18,7 @@ class StrictModel(BaseModel):
 
 class LoginRequest(StrictModel):
     username: str = Field(min_length=1, max_length=128, pattern=r"^[^/\\\x00-\x1f]+$")
-    password: SecretStr = Field(min_length=1, max_length=1024)
+    password: SecretStr = Field(min_length=4, max_length=12)
 
 
 class RefreshRequest(StrictModel):
@@ -282,13 +282,13 @@ class SystemStatusResponse(PublicResponse):
 
 class UserCreate(StrictModel):
     username: str = Field(min_length=1, max_length=128, pattern=r"^[^/\\\x00-\x1f]+$")
-    password: SecretStr = Field(min_length=12, max_length=1024)
+    password: SecretStr = Field(min_length=4, max_length=12)
     role: Role
     is_active: bool = True
 
 
 class UserPatch(StrictModel):
-    password: SecretStr | None = Field(default=None, min_length=12, max_length=1024)
+    password: SecretStr | None = Field(default=None, min_length=4, max_length=12)
     role: Role | None = None
     is_active: bool | None = None
 

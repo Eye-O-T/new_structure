@@ -1357,7 +1357,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/ApiError'
-      description: 관리자 전용. admin 또는 viewer 역할을 지정한다. 새 비밀번호는 12자 이상이어야 한다.
+      description: 관리자 전용. admin 또는 viewer 역할을 지정한다. 새 비밀번호는 4자 이상 12자 이하여야 한다.
       tags:
       - admin
   /api/v1/admin/users/{user_id}:
@@ -1989,8 +1989,8 @@ components:
           title: Username
         password:
           type: string
-          maxLength: 1024
-          minLength: 1
+          maxLength: 12
+          minLength: 4
           format: password
           title: Password
           writeOnly: true
@@ -2347,8 +2347,8 @@ components:
           title: Username
         password:
           type: string
-          maxLength: 1024
-          minLength: 12
+          maxLength: 12
+          minLength: 4
           format: password
           title: Password
           writeOnly: true
@@ -2397,8 +2397,8 @@ components:
         password:
           anyOf:
           - type: string
-            maxLength: 1024
-            minLength: 12
+            maxLength: 12
+            minLength: 4
             format: password
             writeOnly: true
           - type: 'null'

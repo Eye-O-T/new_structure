@@ -278,7 +278,8 @@ class InstallerWindow(QWidget):
         self.username = QLineEdit("admin")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
-        self.password.setPlaceholderText("12자 이상")
+        self.password.setMaxLength(12)
+        self.password.setPlaceholderText("4~12자")
         self.confirm_password = QLineEdit()
         self.confirm_password.setEchoMode(QLineEdit.Password)
         self.network = QComboBox()
@@ -762,8 +763,8 @@ class InstallerWindow(QWidget):
     def _make_request(self):
         if self.password.text() != self.confirm_password.text():
             raise ValueError("비밀번호와 비밀번호 확인이 일치하지 않습니다.")
-        if len(self.password.text()) < 12:
-            raise ValueError("관리자 비밀번호를 12자 이상 입력해 주세요.")
+        if not 4 <= len(self.password.text()) <= 12:
+            raise ValueError("관리자 비밀번호를 4자 이상 12자 이하로 입력해 주세요.")
         scheme = self.public_scheme.currentData()
         url = _validate_public_base_url(self.public_base_url.text())
         if not url:
