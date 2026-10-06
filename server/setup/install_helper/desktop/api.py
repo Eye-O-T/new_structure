@@ -151,6 +151,34 @@ class DesktopApi(ServerApiClient):
     def recording_playback(self, recording_id):
         return self._request("GET", f"/api/v1/recordings/{quote(str(recording_id), safe='')}/playback")
 
+    def playback_url(self, reference):
+        """Resolve a server-provided playback URL without allowing another origin."""
+        if not isinstance(reference, str) or not reference:
+            raise ValueError("Invalid playback URL")
+        parsed = urlsplit(reference)
+        if parsed.username or parsed.password or parsed.fragment or "\\" in parsed.path:
+            raise ValueError("Invalid playback URL")
+        origin = urlsplit(self.base_url)
+        if parsed.scheme or parsed.netloc:
+            if parsed.scheme not in {"http", "https"} or (
+                parsed.scheme,
+                parsed.hostname,
+                parsed.port,
+            ) != (origin.scheme, origin.hostname, origin.port):
+                raise ValueError("재생 주소가 로그인한 서버와 다릅니다.")
+            return reference
+        if not reference.startswith("/") or reference.startswith("//"):
+            raise ValueError("Invalid playback URL")
+        resolved = urljoin(self.base_url + "/", reference)
+        resolved_parts = urlsplit(resolved)
+        if (
+            resolved_parts.scheme,
+            resolved_parts.hostname,
+            resolved_parts.port,
+        ) != (origin.scheme, origin.hostname, origin.port):
+            raise ValueError("재생 주소가 로그인한 서버와 다릅니다.")
+        return resolved
+
     def media_path(self, camera_id, reference, base=None):
         camera_path(camera_id)
         url = urljoin(base or self.base_url + "/", reference)

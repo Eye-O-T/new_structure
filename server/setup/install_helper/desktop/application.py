@@ -15,6 +15,14 @@ from ..qt_tasks import BackgroundTask
 
 
 LOGGER = logging.getLogger(__name__)
+_RECORDING_STATUS_LABELS = {
+    "ready": "재생 가능",
+    "writing": "처리 중",
+    "missing": "파일 없음",
+    "corrupt": "손상됨",
+    "deleting": "삭제 중",
+    "deleted": "삭제됨 / 보관기간 만료",
+}
 
 
 class CCTVMainWindow(ReferenceWindow):
@@ -26,6 +34,7 @@ class CCTVMainWindow(ReferenceWindow):
         self.cameras = []
         self._closing = False
         self._logout_task = None
+        self._event_detail_tasks = set()
         self._logout_done = False
         self._stopping = False
         self._render_count = 0
@@ -166,74 +175,117 @@ class CCTVMainWindow(ReferenceWindow):
         if not event_id or not self.api:
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"Event {event_id}")
+        dialog.setWindowTitle(f"이벤트 상세: {event_id}")
         dialog.setMinimumWidth(520)
         layout = QVBoxLayout(dialog)
-        try:
-            detail = self.api.event(event_id)
-        except Exception as exc:
-            layout.addWidget(QLabel(f"Could not load event: {safe_error(exc)}"))
-            buttons = QDialogButtonBox(QDialogButtonBox.Close)
-            buttons.rejected.connect(dialog.reject)
-            layout.addWidget(buttons)
-            dialog.exec_()
-            return
-
-        for name, value in (
-            ("Event ID", detail.get("id", event_id)),
-            ("Type", detail.get("event_type", "-")),
-            ("Camera", detail.get("camera_id", "-")),
-            ("Time", detail.get("occurred_at", "-")),
-            ("Person ID", detail.get("person_id") or "-"),
-            ("Global Person ID", detail.get("global_person_id") or "-"),
-            ("Confidence", detail.get("confidence", "-")),
-        ):
-            layout.addWidget(QLabel(f"{name}: {value}"))
-
-        media = detail.get("media", {})
-        for kind, key, label in (
-            ("snapshot", "snapshot", "Snapshot"),
-            ("crop", "crop", "Person crop"),
-            ("annotated-snapshot", "annotated_snapshot", "Annotated snapshot"),
-        ):
-            if not media.get(key):
-                continue
-            try:
-                content, _content_type = self.api.event_image(event_id, kind)
-                image = QPixmap()
-                if not image.loadFromData(content):
-                    raise ValueError("invalid image")
-                image_label = QLabel()
-                image_label.setPixmap(image.scaledToWidth(440, Qt.SmoothTransformation))
-                image_label.setToolTip(label)
-                layout.addWidget(image_label)
-            except Exception as exc:
-                layout.addWidget(QLabel(f"{label}: unavailable ({safe_error(exc)})"))
-
-        for recording_id in detail.get("recording_segment_ids", []):
-            try:
-                recording = self.api.recording(recording_id)
-                status = recording.get("status", "unknown")
-                layout.addWidget(QLabel(
-                    f"Recording ID: {recording_id} | "
-                    f"Start: {recording.get('start_at', '-')} | "
-                    f"End: {recording.get('end_at', '-')} | Status: {status}"
-                ))
-                if status == "ready":
-                    playback_url = self.api.recording_playback(recording_id).get("playback_url")
-                    if playback_url:
-                        button = QPushButton("Play recording")
-                        button.clicked.connect(
-                            lambda _checked=False, url=playback_url: QDesktopServices.openUrl(QUrl(url))
-                        )
-                        layout.addWidget(button)
-            except Exception as exc:
-                layout.addWidget(QLabel(f"Recording {recording_id}: unavailable ({safe_error(exc)})"))
-
+        loading = QLabel("이벤트 정보를 불러오는 중입니다.")
+        layout.addWidget(loading)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
+
+        state = {"open": True}
+        dialog.destroyed.connect(lambda: state.__setitem__("open", False))
+
+        def operation(_progress):
+            detail = self.api.event(event_id)
+            media_results = []
+            media = detail.get("media") if isinstance(detail.get("media"), dict) else {}
+            for kind, key, label in (
+                ("snapshot", "snapshot", "스냅샷"),
+                ("crop", "crop", "Person Crop"),
+                ("annotated-snapshot", "annotated_snapshot", "분석 이미지"),
+            ):
+                if not media.get(key):
+                    continue
+                try:
+                    content, content_type = self.api.event_image(event_id, kind)
+                    media_results.append((label, content, content_type, None))
+                except Exception as exc:
+                    media_results.append((label, None, None, safe_error(exc)))
+            recording_results = []
+            for recording_id in detail.get("recording_segment_ids", []):
+                try:
+                    recording = self.api.recording(recording_id)
+                    playback = (
+                        self.api.recording_playback(recording_id)
+                        if recording.get("status") == "ready" else None
+                    )
+                    recording_results.append((recording_id, recording, playback, None))
+                except Exception as exc:
+                    recording_results.append((recording_id, None, None, safe_error(exc)))
+            return detail, media_results, recording_results
+
+        def render(result):
+            if not state["open"] or not dialog.isVisible():
+                return
+            loading.deleteLater()
+            detail, media_results, recording_results = result
+            for name, value in (
+                ("Event ID", detail.get("id", event_id)),
+                ("이벤트 유형", detail.get("event_type", "-")),
+                ("카메라", detail.get("camera_id", "-")),
+                ("발생 시각", detail.get("occurred_at", "-")),
+                ("Person ID", detail.get("person_id") or "-"),
+                ("Global Person ID", detail.get("global_person_id") or "-"),
+                ("Confidence", detail.get("confidence", "-")),
+            ):
+                layout.insertWidget(layout.indexOf(buttons), QLabel(f"{name}: {value}"))
+            for label, content, _content_type, error in media_results:
+                if error:
+                    layout.insertWidget(layout.indexOf(buttons), QLabel(f"{label}: {error}"))
+                    continue
+                image = QPixmap()
+                if not image.loadFromData(content):
+                    layout.insertWidget(layout.indexOf(buttons), QLabel(f"{label}: 이미지 형식이 올바르지 않습니다."))
+                    continue
+                image_label = QLabel()
+                image_label.setPixmap(image.scaledToWidth(440, Qt.SmoothTransformation))
+                image_label.setToolTip(label)
+                layout.insertWidget(layout.indexOf(buttons), image_label)
+            for recording_id, recording, playback, error in recording_results:
+                if error:
+                    layout.insertWidget(layout.indexOf(buttons), QLabel(f"관련 녹화 {recording_id}: {error}"))
+                    continue
+                status = recording.get("status", "unknown")
+                layout.insertWidget(layout.indexOf(buttons), QLabel(
+                    f"관련 녹화 ID: {recording_id} | "
+                    f"시작: {recording.get('start_time', '-')} | "
+                    f"종료: {recording.get('end_time', '-')} | "
+                    f"상태: {_RECORDING_STATUS_LABELS.get(status, status)}"
+                ))
+                playback_url = (playback or {}).get("playback_url")
+                if playback_url:
+                    button = QPushButton("녹화 재생")
+                    button.clicked.connect(
+                        lambda _checked=False, url=playback_url: self._open_playback_url(url)
+                    )
+                    layout.insertWidget(layout.indexOf(buttons), button)
+
+        def failed(message):
+            if state["open"] and dialog.isVisible():
+                loading.setText(f"이벤트 정보를 불러오지 못했습니다: {message}")
+
+        task = BackgroundTask(operation, self)
+        tasks = getattr(self, "_event_detail_tasks", set())
+        tasks.add(task)
+        self._event_detail_tasks = tasks
+        task.result.connect(render)
+        task.failed.connect(failed)
+        task.finished.connect(lambda: self._finish_event_detail_task(task))
+        task.start()
         dialog.exec_()
+
+    def _finish_event_detail_task(self, task):
+        self._event_detail_tasks.discard(task)
+        task.deleteLater()
+
+    def _open_playback_url(self, playback_url):
+        try:
+            if not QDesktopServices.openUrl(QUrl(self.api.playback_url(playback_url))):
+                raise ValueError("재생 프로그램을 열 수 없습니다.")
+        except Exception as exc:
+            QMessageBox.warning(self, "녹화 재생", f"재생 주소를 열 수 없습니다: {safe_error(exc)}")
 
     def closeEvent(self, event):
         local_publisher = getattr(self, "local_publisher", None)

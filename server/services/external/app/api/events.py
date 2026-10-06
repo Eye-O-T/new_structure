@@ -32,6 +32,21 @@ from .validation import _validate_resource_id, _validated_time_range
 
 router = APIRouter()
 
+_EVENT_IMAGE_RESPONSES = {
+    200: {
+        "description": "Event image",
+        "content": {
+            "image/jpeg": {"schema": {"type": "string", "format": "binary"}},
+            "image/png": {"schema": {"type": "string", "format": "binary"}},
+            "image/webp": {"schema": {"type": "string", "format": "binary"}},
+        },
+    },
+    401: {"description": "Authentication required"},
+    403: {"description": "Camera access denied"},
+    404: {"description": "Event or image not found"},
+    415: {"description": "Unsupported event image type"},
+}
+
 
 def _public_event(event: dict[str, Any]) -> dict[str, Any]:
     result = dict(event)
@@ -110,17 +125,38 @@ async def _event_image(event_id: str, kind: str, principal: Principal, data: Dat
         media_type=upstream.headers.get("content-type", "application/octet-stream"),
         headers={"Cache-Control": "private, no-store"},
     )
-@router.get("/api/v1/events/{event_id}/snapshot", summary="Event snapshot", description="Returns the event snapshot after permission checks.")
+@router.get(
+    "/api/v1/events/{event_id}/snapshot",
+    summary="Event snapshot",
+    description="Returns the event snapshot after permission checks.",
+    response_class=StreamingResponse,
+    responses=_EVENT_IMAGE_RESPONSES,
+    tags=["events"],
+)
 async def get_event_snapshot(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
     return await _event_image(event_id, "snapshot", principal, data)
 
 
-@router.get("/api/v1/events/{event_id}/crop", summary="Event person crop", description="Returns the event person crop after permission checks.")
+@router.get(
+    "/api/v1/events/{event_id}/crop",
+    summary="Event person crop",
+    description="Returns the event person crop after permission checks.",
+    response_class=StreamingResponse,
+    responses=_EVENT_IMAGE_RESPONSES,
+    tags=["events"],
+)
 async def get_event_crop(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
     return await _event_image(event_id, "crop", principal, data)
 
 
-@router.get("/api/v1/events/{event_id}/annotated-snapshot", summary="Event annotated snapshot", description="Returns the annotated event snapshot after permission checks.")
+@router.get(
+    "/api/v1/events/{event_id}/annotated-snapshot",
+    summary="Event annotated snapshot",
+    description="Returns the annotated event snapshot after permission checks.",
+    response_class=StreamingResponse,
+    responses=_EVENT_IMAGE_RESPONSES,
+    tags=["events"],
+)
 async def get_event_annotated_snapshot(event_id: str, principal: Principal = Depends(get_current_principal), data: DataClient = Depends(get_data_client)) -> StreamingResponse:
     return await _event_image(event_id, "annotated-snapshot", principal, data)
 

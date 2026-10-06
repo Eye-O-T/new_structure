@@ -78,7 +78,7 @@ confidence는 감지기의 확신 정도(0~1)이며 신원 일치 확률이 아�
 블랙박스로 바꾼 경우에는 unconfigured를 반환한다. 알 수 없는 이벤트 유형·metadata 키도 허용한다.
 objects는 최신 좌표 조회 API이며 영상 프레임과 정확히 동기화된 추적 스트림이 아니다.
 관측 시각·원본 크기로 표시 여부와 좌표를 계산하고 stale=true이면 박스를 지운다.
-snapshot_path 등 저장소 상대 경로를 공개 이미지 URL로 조합하지 않는다. 별도 스냅샷 API는 없다.
+snapshot_path 등 저장소 상대 경로를 공개 이미지 URL로 조합하지 않는다. 이벤트 이미지는 인증된 snapshot·crop·annotated-snapshot API로 조회한다.
 
 ### FCM 수신 계약
 로그인 후 현재 refresh_token과 함께 PUT /api/v1/notifications/devices로 기기를 등록한다.
@@ -208,7 +208,7 @@ OPERATIONS = {
     ),
     "get_event": (
         "이벤트 상세",
-        "푸시의 event_id로도 조회한다. snapshot_path는 공개 URL이 아니다. 연결 녹화는 recording_segment_id 또는 recording_segment_ids로 조회한다.",
+        "푸시의 event_id로도 조회한다. snapshot_path는 공개 URL이 아니며 인증된 이미지 API로 조회한다. 연결 녹화는 recording_segment_id 또는 recording_segment_ids로 조회한다.",
     ),
     "list_users": (
         "사용자 목록",

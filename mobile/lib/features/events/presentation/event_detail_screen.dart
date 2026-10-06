@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:app/core/network/providers.dart';
+import '../domain/event.dart';
 import 'event_history_view_model.dart';
 
 final eventImageProvider = FutureProvider.autoDispose.family<Uint8List, String>((ref, key) {
@@ -57,6 +58,7 @@ class EventDetailScreen extends ConsumerWidget {
             'person_disappeared',
           }.contains(value.eventType);
           final globalPersonId = value.globalPersonId?.trim();
+          final imageKind = preferredEventImageKind(value);
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
             children: [
@@ -75,10 +77,8 @@ class EventDetailScreen extends ConsumerWidget {
               _DetailField(label: '이벤트 유형', value: value.eventType),
               const SizedBox(height: 24),
               if (isPersonEvent) ...[
-                if (value.media['crop'] == true)
-                  _EventImage(eventId: value.id, kind: 'crop')
-                else if (value.media['snapshot'] == true)
-                  _EventImage(eventId: value.id, kind: 'snapshot')
+                if (imageKind != null)
+                  _EventImage(eventId: value.id, kind: imageKind)
                 else
                   const Text('이미지가 없습니다.'),
                 if (value.media['annotated_snapshot'] == true)

@@ -53,6 +53,12 @@ class Event {
   String get title => eventLabels[eventType] ?? eventType;
 }
 
+String? preferredEventImageKind(Event event) {
+  if (event.media['crop'] == true) return 'crop';
+  if (event.media['snapshot'] == true) return 'snapshot';
+  return null;
+}
+
 /// 서버 이벤트 종류를 목록과 상세 화면에서 공통으로 쓰는 한글 이름에 대응시킨다.
 const eventLabels = {
   'person_detected': '사람 감지',
