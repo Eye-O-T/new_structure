@@ -12,9 +12,6 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-from server.password_policy import validate_admin_password
-
-
 CONTAINER_SCRIPT = textwrap.dedent(
     """
     import json
@@ -69,10 +66,8 @@ def main() -> int:
     confirmation = getpass.getpass("Confirm administrator password: ")
     if password != confirmation:
         raise SystemExit("password confirmation does not match")
-    try:
-        validate_admin_password(password)
-    except ValueError as error:
-        raise SystemExit(str(error)) from error
+    if not 4 <= len(password) <= 12:
+        raise SystemExit("administrator password must contain 4 to 12 characters")
 
     server_dir = args.server_dir.expanduser().resolve()
     docker = shutil.which("docker")
