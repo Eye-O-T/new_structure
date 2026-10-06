@@ -2,6 +2,7 @@
 
 import os
 import re
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,8 @@ from .appearance import (
     _quality,
     _read_onnx_model,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _identity_device() -> str:
@@ -40,13 +43,16 @@ def _load_runtime_session(payload: bytes, device: str):
             options = {"device_id": int(device.split(":", 1)[1])}
         providers = [("CUDAExecutionProvider", options), "CPUExecutionProvider"]
     else:
+        if device == "auto" and not cuda:
+            LOGGER.info("requested_device=auto; using CPUExecutionProvider")
         providers = ["CPUExecutionProvider"]
     try:
         session = ort.InferenceSession(payload, providers=providers)
     except Exception as error:
         if device == "auto" and cuda:
+            LOGGER.warning("requested_device=auto; OSNet CUDA initialization failed, using CPUExecutionProvider")
             session = ort.InferenceSession(payload, providers=["CPUExecutionProvider"])
-            return session, "CPUExecutionProvider"
+            return session, "CPUExecutionProvider", "cpu"
         raise ValueError("OSNet ONNX session cannot be created") from error
     selected = next(
         (
@@ -58,7 +64,10 @@ def _load_runtime_session(payload: bytes, device: str):
     )
     if device.startswith("cuda") and selected != "CUDAExecutionProvider":
         raise ValueError("OSNet CUDA provider was not selected")
-    return session, selected
+    execution_device = "cpu"
+    if selected == "CUDAExecutionProvider":
+        execution_device = device if device.startswith("cuda:") else "cuda:0"
+    return session, selected, execution_device
 
 
 DEFAULT_MODEL_FILENAME = "osnet_x0_25_msmt17.onnx"
@@ -87,12 +96,25 @@ class OsNetIdentity:
         )
         payload, self._model_sha256 = _read_onnx_model(configured, models_root)
         self._space_id = f"osnet:{self._model_sha256}:{_ONNX_PREPROCESSING}"
-        self._session, self._execution_provider = _load_runtime_session(
-            payload, _identity_device()
+        self.requested_device = _identity_device()
+        self._session, self._execution_provider, self.execution_device = _load_runtime_session(
+            payload, self.requested_device
+        )
+        self.device_id = (
+            int(self.execution_device.split(":", 1)[1])
+            if self.execution_device.startswith("cuda:") else None
         )
         # 준비 상태를 알리기 전에 실제 추론해 OpenCV 연산 호환성과 512차원 계약을 검사한다.
         # 이 시험 표본의 결과는 버리고 완료 요청이나 gallery에 보내지 않는다.
         self._features(np.zeros((256, 128, 3), dtype=np.uint8))
+
+    def runtime_metadata(self):
+        return {
+            "requested_device": self.requested_device,
+            "execution_device": self.execution_device,
+            "execution_provider": self._execution_provider,
+            "device_id": self.device_id,
+        }
 
     def _features(self, image: np.ndarray) -> list[float]:
         try:

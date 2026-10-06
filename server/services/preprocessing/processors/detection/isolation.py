@@ -16,7 +16,8 @@ def _serve(connection, reference, arguments):
             callable(getattr(tracker, name, None)) for name in ("reset", "process")
         ):
             raise ValueError("Invalid detection processor")
-        connection.send({"kind": "ready"})
+        runtime = tracker.runtime_metadata() if callable(getattr(tracker, "runtime_metadata", None)) else None
+        connection.send({"kind": "ready", "runtime": runtime})
         while True:
             operation, frame = connection.recv()
             try:
@@ -67,6 +68,7 @@ class IsolatedDetector:
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe()
         self._connection = parent
+        self.runtime = None
         self._process = context.Process(
             target=_serve,
             args=(child, reference, (model_path, confidence, device)),
@@ -75,8 +77,10 @@ class IsolatedDetector:
         try:
             self._process.start()
             child.close()
-            if self._exchange(startup_timeout_seconds).get("kind") != "ready":
+            ready = self._exchange(startup_timeout_seconds)
+            if ready.get("kind") != "ready":
                 raise RuntimeError("DETECTION_STARTUP_FAILED")
+            self.runtime = ready.get("runtime")
         except BaseException:
             child.close()
             self.close()

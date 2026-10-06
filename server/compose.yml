@@ -257,6 +257,9 @@ services:
     build:
       context: ..
       dockerfile: server/services/preprocessing/Dockerfile
+      args:
+        TORCH_INDEX_URL: ${PREPROCESSING_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        TORCH_VERSION: ${PREPROCESSING_TORCH_VERSION:-2.8.0}
     image: ai-cctv-preprocessing:${AI_CCTV_VERSION:-0.3.0}
     # 작업자 종료 상한(최대 60초)과 자식 모델 정리 시간을 보장한다.
     stop_grace_period: 75s
@@ -290,6 +293,8 @@ services:
       SNAPSHOTS_ROOT: /snapshots
       MODEL_FILE: ${MODEL_FILE:-yolo11n.pt}
       MODEL_PATH: /models/${MODEL_FILE:-yolo11n.pt}
+      INFERENCE_DEVICE: ${INFERENCE_DEVICE:-auto}
+      IDENTITY_DEVICE: ${IDENTITY_DEVICE:-auto}
       TZ: UTC
     expose:
       - "8000"

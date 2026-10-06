@@ -340,6 +340,31 @@ def checks(
             )
         )
         return results
+    environment = read_deployment_env(adapter.env_file)
+    if environment.get("PREPROCESSING_GPU", "false").lower() in {"true", "1", "yes"}:
+        gpu_compose = adapter.server_dir / "compose.gpu.yml"
+        results.append(
+            Check(
+                "OK" if gpu_compose.is_file() else "ERROR",
+                "GPU Compose override",
+                str(gpu_compose) if gpu_compose.is_file() else "compose.gpu.yml is missing",
+            )
+        )
+        gpu_configured = gpu_compose.is_file() and "gpus:" in gpu_compose.read_text(encoding="utf-8")
+        results.append(
+            Check(
+                "OK" if gpu_configured else "ERROR",
+                "GPU container request",
+                "preprocessing requests Docker GPU access" if gpu_configured else "preprocessing GPU request is missing",
+            )
+        )
+        results.append(
+            Check(
+                "OK" if shutil.which("nvidia-smi") else "WARN",
+                "NVIDIA host tooling",
+                "nvidia-smi available" if shutil.which("nvidia-smi") else "nvidia-smi not found; GPU smoke test unavailable",
+            )
+        )
     try:
         compose = adapter.run("config", "--quiet", capture=True)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:

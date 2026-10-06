@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import DetectionFrame, DetectionResult
+from .device import resolve_torch_device
 
 
 # YOLO의 추적 출력을 서비스 공통 DetectionResult 형식으로 변환하는 어댑터다.
@@ -16,9 +17,26 @@ class YoloTracker:
             raise ValueError("detection model must be a non-empty local file")
         from ultralytics import YOLO
 
+        self.requested_device = str(device).strip().lower()
+        self.execution_device = resolve_torch_device(self.requested_device)
+        self.device_name = None
+        if self.execution_device.startswith("cuda"):
+            try:
+                import torch
+                self.device_name = torch.cuda.get_device_name(
+                    int(self.execution_device.split(":", 1)[1])
+                )
+            except Exception:
+                pass
         self._model = YOLO(str(model_path))
         self._confidence = confidence
-        self._device = None if device == "auto" else device
+
+    def runtime_metadata(self):
+        return {
+            "requested_device": self.requested_device,
+            "execution_device": self.execution_device,
+            "device_name": self.device_name,
+        }
 
     # 영상 재접속 시 기존 ByteTrack 상태를 초기화해 이전 세션의 궤적을 이어 쓰지 않는다.
     def reset(self):
@@ -34,7 +52,7 @@ class YoloTracker:
             tracker="bytetrack.yaml",
             classes=[0],
             conf=self._confidence,
-            device=self._device,
+            device=self.execution_device,
             verbose=False,
         )
         if not result_set or result_set[0].boxes is None:

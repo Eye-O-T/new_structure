@@ -44,6 +44,9 @@ class WorkerStatus:
     observation_persistence_failures: int = 0
     model_timeouts: int = 0
     last_inference_seconds: float | None = None
+    requested_device: str | None = None
+    execution_device: str | None = None
+    device_name: str | None = None
 
 
 # 카메라마다 독립 스레드·추적 세션을 두고 Data에는 상태와 관측 결과만 전달한다.
@@ -309,6 +312,13 @@ class CameraWorker(threading.Thread):
                     stop_event=self.stop_event,
                 )
             self._tracker = tracker
+            runtime = getattr(tracker, "runtime", None)
+            if runtime is None and callable(getattr(tracker, "runtime_metadata", None)):
+                runtime = tracker.runtime_metadata()
+            if isinstance(runtime, dict):
+                self.status.requested_device = runtime.get("requested_device")
+                self.status.execution_device = runtime.get("execution_device")
+                self.status.device_name = runtime.get("device_name")
             if not callable(getattr(tracker, "process", None)) or not callable(
                 getattr(tracker, "reset", None)
             ):

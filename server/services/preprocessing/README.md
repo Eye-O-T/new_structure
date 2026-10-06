@@ -1,5 +1,19 @@
 # Preprocessing 서비스
 
+## 실행 장치와 Docker 이미지
+
+기본 이미지는 Python 3.11과 PyTorch `2.8.0` CPU wheel을 사용하므로 GPU가 없는 환경에서도 실행됩니다. GPU 환경에서는 `compose.gpu.yml`이 PyTorch `2.8.0` CUDA `cu128` wheel과 Docker `gpus: all` 설정을 선택합니다. NVIDIA Driver와 NVIDIA Container Toolkit(또는 Docker Desktop GPU 지원)이 필요합니다.
+
+```powershell
+# CPU 또는 자동 선택
+docker compose --env-file server/.env -f server/compose.yml --profile ai up -d --build preprocessing
+
+# GPU override
+docker compose --env-file server/.env -f server/compose.yml -f server/compose.gpu.yml --profile ai up -d --build preprocessing
+```
+
+`INFERENCE_DEVICE`와 `IDENTITY_DEVICE`는 각각 `auto`, `cpu`, `cuda`, `cuda:N`을 사용합니다. `auto`만 CUDA 불가 시 CPU로 폴백하며, 명시적인 `cuda`/`cuda:N`은 GPU가 없거나 해당 index가 없으면 시작 오류가 됩니다. 실제 선택 결과는 `/internal/v1/status`의 worker `requested_device`/`execution_device`와 `identity`의 `requested_device`/`execution_device`/`execution_provider`에서 확인합니다.
+
 MediaMTX 영상에서 사람을 감지·추적한다. 사람 영역 이미지는 공유 저장소에 저장하고 바운딩 박스·`person_id`·이미지 경로를 Data에 전달한다. `person_id`는 카메라와 추적 세션 안에서만 유효하므로 사람을 구분할 때 `camera_id`·`tracking_session_id`와 함께 사용한다. 카메라 간 `global_person_id`를 연결하는 작업도 같은 컨테이너에서 별도로 실행한다. 기동 후 인물 연결 플러그인의 실패가 감지를 중단시키지 않는다.
 
 | 위치 | 수정할 내용 |

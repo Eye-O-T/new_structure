@@ -14,7 +14,8 @@ def _model_process(connection, reference):
         plugin = load_factory(reference)()
         if not callable(getattr(plugin, "process", None)):
             raise ValueError("Invalid processor")
-        connection.send({"kind": "ready"})
+        runtime = plugin.runtime_metadata() if callable(getattr(plugin, "runtime_metadata", None)) else None
+        connection.send({"kind": "ready", "runtime": runtime})
         while True:
             request = connection.recv()
             if request is None:
@@ -60,6 +61,7 @@ class IsolatedProcessor:
         self.restartable = True
         self._process = None
         self._connection = None
+        self.runtime = None
         self._closed = stop_event if stop_event is not None else threading.Event()
         self._lock = threading.Lock()
         self._lifecycle = threading.RLock()
@@ -119,8 +121,10 @@ class IsolatedProcessor:
                     raise TimeoutError("MODEL_STARTUP_TIMEOUT")
                 if parent.poll(min(0.1, remaining)):
                     break
-            if parent.recv().get("kind") != "ready":
+            ready = parent.recv()
+            if ready.get("kind") != "ready":
                 raise RuntimeError("MODEL_STARTUP_FAILED")
+            self.runtime = ready.get("runtime")
             if self._closed.is_set():
                 raise RuntimeError("MODEL_PROCESS_CLOSED")
         except BaseException:

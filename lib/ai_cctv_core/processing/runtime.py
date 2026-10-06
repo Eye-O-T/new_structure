@@ -84,7 +84,12 @@ def worker_status(worker: ObjectWorker | None) -> dict:
             "last_outcome": None,
             "backend": None,
             "model_ready": False,
+            "requested_device": None,
+            "execution_device": None,
+            "execution_provider": None,
         }
+    runtime = getattr(worker.plugin, "runtime", None)
+    runtime = runtime if isinstance(runtime, dict) else {}
     return {
         "ready": worker.ready,
         "stalled": worker.stalled,
@@ -92,4 +97,7 @@ def worker_status(worker: ObjectWorker | None) -> dict:
         "last_outcome": worker.last_outcome,
         "backend": getattr(worker.plugin, "reference", type(worker.plugin).__name__),
         "model_ready": not worker.stalled and worker.last_outcome != "unconfigured",
+        "requested_device": runtime.get("requested_device"),
+        "execution_device": runtime.get("execution_device"),
+        "execution_provider": runtime.get("execution_provider"),
     }

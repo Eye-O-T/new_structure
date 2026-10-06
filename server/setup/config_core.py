@@ -583,6 +583,12 @@ def initialize(request: InstallRequest) -> InstallResult:
         "SNAPSHOTS_DIR": directories["snapshots"],
         "MODELS_DIR": directories["models"],
         "MODEL_FILE": installed_model.name if installed_model else "yolo11n.pt",
+        "PREPROCESSING_GPU": previous_environment.get("PREPROCESSING_GPU", "false"),
+        "PREPROCESSING_TORCH_VERSION": previous_environment.get(
+            "PREPROCESSING_TORCH_VERSION", "2.8.0"
+        ),
+        "INFERENCE_DEVICE": previous_environment.get("INFERENCE_DEVICE", "auto"),
+        "IDENTITY_DEVICE": previous_environment.get("IDENTITY_DEVICE", "auto"),
         "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
         "IDENTITY_MODEL_PATH": str(container_identity_path),
         "IDENTITY_MATCH_THRESHOLD": previous_environment.get(
