@@ -32,6 +32,8 @@ LIVE_RTSP_OPTIONS = {
     "analyzeduration": "100000",
     "probesize": "262144",
 }
+OBJECT_POLL_INTERVAL_SECONDS = 0.5
+EVENT_POLL_INTERVAL_SECONDS = 2.0
 
 
 @contextmanager
@@ -89,6 +91,7 @@ class ObservationAdapter:
 class VideoWorker(QThread):
     frame_ready = pyqtSignal(object)
     metrics_ready = pyqtSignal(dict)
+    objects_ready = pyqtSignal(dict)
     event_ready = pyqtSignal(dict)
     loading_ready = pyqtSignal(str)
 
@@ -138,31 +141,38 @@ class VideoWorker(QThread):
         start = datetime.now(timezone.utc).isoformat()
         seen = set()
         failed = False
+        last_event_poll = 0.0
         while not self._stop.is_set():
             try:
-                self.metrics_ready.emit(adapter.metrics(api.camera(camera_id, "/objects")))
-                end = datetime.now(timezone.utc).isoformat()
-                cursor = None
-                current = set()
-                while not self._stop.is_set():
-                    page = api.events(camera_id, start, cursor)
-                    for event in page.get("items", []):
-                        key = str(event["id"])
-                        current.add(key)
-                        if key not in seen:
-                            self.event_ready.emit(legacy_event(event))
-                    cursor = page.get("next_cursor")
-                    if not page.get("has_more") or not cursor:
-                        break
-                seen = current
-                start = end  # overlap at request start to include events arriving during pagination.
+                payload = api.camera(camera_id, "/objects")
+                self.objects_ready.emit(payload)
+                self.metrics_ready.emit(adapter.metrics(payload))
+                now = time.monotonic()
+                if now - last_event_poll >= EVENT_POLL_INTERVAL_SECONDS:
+                    end = datetime.now(timezone.utc).isoformat()
+                    cursor = None
+                    current = set()
+                    while not self._stop.is_set():
+                        page = api.events(camera_id, start, cursor)
+                        for event in page.get("items", []):
+                            key = str(event["id"])
+                            current.add(key)
+                            if key not in seen:
+                                self.event_ready.emit(legacy_event(event))
+                        cursor = page.get("next_cursor")
+                        if not page.get("has_more") or not cursor:
+                            break
+                    seen = current
+                    start = end  # overlap at request start to include events arriving during pagination.
+                    last_event_poll = now
                 failed = False
             except Exception as exc:
+                self.objects_ready.emit({"objects": [], "stale": True})
                 self.metrics_ready.emit({"current_objects": "—", "tracked_total": len(adapter.tracks)})
                 if not failed:
                     self.event_ready.emit({"type": "error", "message": safe_error(exc)})
                 failed = True
-            self._stop.wait(2)
+            self._stop.wait(OBJECT_POLL_INTERVAL_SECONDS)
 
     def run(self):
         api, camera_id = self.source

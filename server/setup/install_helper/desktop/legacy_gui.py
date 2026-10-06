@@ -1,6 +1,7 @@
 # Adapted from Eye-O-T/AI_CCTV, develop 09db3ed464772cd139e45168b91ad46e0f3f9901.
 # See README.md in this package for provenance and migration boundaries.
 from datetime import datetime
+import time
 from urllib.parse import urlparse
 
 from PyQt5.QtWidgets import (
@@ -12,12 +13,14 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QFrame,
     QScrollArea,
+    QCheckBox,
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import QSettings, Qt
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 from .settings_window import SettingsWindow
 from .resource_monitor_window import ResourceMonitorWindow
 from .video_worker import VideoWorker
+from .overlay import overlay_items
 
 
 class CCTVMainWindow(QMainWindow):
@@ -41,6 +44,12 @@ class CCTVMainWindow(QMainWindow):
         self.original_segment_seconds = 10
         self.clip_max_seconds = 10
         self.resource_monitor_window = None
+        self._overlay_payload = None
+        self._overlay_received_at = 0.0
+        self._overlay_settings = QSettings("Eye-O-T", "AI-CCTV-Desktop")
+        self._overlay_enabled = self._overlay_settings.value(
+            "display/bounding_boxes", True, type=bool
+        )
 
         self.init_ui()
 
@@ -84,12 +93,17 @@ class CCTVMainWindow(QMainWindow):
         )
         self.btn_resource_monitor.clicked.connect(self.open_resource_monitor)
 
+        self.bounding_box_toggle = QCheckBox("Bounding Box 표시")
+        self.bounding_box_toggle.setChecked(self._overlay_enabled)
+        self.bounding_box_toggle.toggled.connect(self.set_bounding_boxes_enabled)
+
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.btn_start)
         header_layout.addWidget(self.btn_stop)
         header_layout.addWidget(self.btn_setting)
         header_layout.addWidget(self.btn_resource_monitor)
+        header_layout.addWidget(self.bounding_box_toggle)
 
         main_layout.addLayout(header_layout)
 
@@ -211,6 +225,9 @@ class CCTVMainWindow(QMainWindow):
         if self.worker is not None:
             return
 
+        self._overlay_payload = None
+        self._overlay_received_at = 0.0
+
         source = self.video_source
 
         self.worker = VideoWorker(
@@ -223,6 +240,7 @@ class CCTVMainWindow(QMainWindow):
         )
         self.worker.frame_ready.connect(self.update_frame)
         self.worker.metrics_ready.connect(self.update_metrics)
+        self.worker.objects_ready.connect(self.update_objects)
         self.worker.event_ready.connect(self.add_event)
         self.worker.loading_ready.connect(self.show_loading_screen)
         self.worker.finished.connect(self.handle_worker_finished)
@@ -330,14 +348,56 @@ class CCTVMainWindow(QMainWindow):
 
         qt_img = QImage(frame)
 
-        pixmap = QPixmap.fromImage(qt_img)
-        scaled_pixmap = pixmap.scaled(
-            self.video_label.width(),
-            self.video_label.height(),
-            Qt.KeepAspectRatio
+        source_pixmap = QPixmap.fromImage(qt_img)
+        widget_width = self.video_label.width()
+        widget_height = self.video_label.height()
+        if widget_width <= 0 or widget_height <= 0:
+            return
+        scale = min(widget_width / source_pixmap.width(), widget_height / source_pixmap.height())
+        display_width = round(source_pixmap.width() * scale)
+        display_height = round(source_pixmap.height() * scale)
+        offset_x = (widget_width - display_width) // 2
+        offset_y = (widget_height - display_height) // 2
+        canvas = QPixmap(widget_width, widget_height)
+        canvas.fill(QColor("#0f172a"))
+        painter = QPainter(canvas)
+        painter.drawPixmap(
+            offset_x,
+            offset_y,
+            source_pixmap.scaled(display_width, display_height, Qt.KeepAspectRatio, Qt.SmoothTransformation),
         )
+        if self._overlay_enabled and time.monotonic() - self._overlay_received_at <= 3:
+            self._paint_overlay(painter, widget_width, widget_height)
+        painter.end()
+        self.video_label.setPixmap(canvas)
 
-        self.video_label.setPixmap(scaled_pixmap)
+    def update_objects(self, payload):
+        if not isinstance(payload, dict) or payload.get("stale") or not payload.get("objects"):
+            self._overlay_payload = None
+            self._overlay_received_at = 0.0
+            return
+        self._overlay_payload = payload
+        self._overlay_received_at = time.monotonic()
+
+    def set_bounding_boxes_enabled(self, enabled):
+        self._overlay_enabled = bool(enabled)
+        self._overlay_settings.setValue("display/bounding_boxes", self._overlay_enabled)
+        if not self._overlay_enabled:
+            self.video_label.update()
+
+    def _paint_overlay(self, painter, widget_width, widget_height):
+        payload = self._overlay_payload
+        for entry in overlay_items(payload, widget_width, widget_height):
+            x1, y1, x2, y2 = entry["rect"]
+            item = entry["item"]
+            painter.setPen(QPen(QColor("#22c55e"), 2))
+            painter.drawRect(round(x1), round(y1), round(x2 - x1), round(y2 - y1))
+            identity = item.get("global_person_id") or item.get("person_id") or "person"
+            confidence = item.get("confidence")
+            text = f"{identity} {float(confidence):.2f}" if isinstance(confidence, (int, float)) else str(identity)
+            painter.setFont(QFont("Arial", 10, QFont.Bold))
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(round(x1) + 4, max(14, round(y1) - 4), text)
 
     def set_camera_status(self, text, border_color, text_color):
         self.cam_status.setText(text)
