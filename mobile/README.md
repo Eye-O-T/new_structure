@@ -17,7 +17,7 @@
 
 사람 박스와 `P`는 중앙 객체 처리 파이프라인이 활성화되어 최신 좌표를 제공할 때 표시된다. 서버의 OSNet 모델이 준비되고 Data가 전역 ID를 부여하면 `G`도 표시된다. 비동기 처리가 끝나기 전이나 모델·크롭 처리에 실패한 경우에는 `P`만 보일 수 있다. `G`는 외관에 따른 연결 결과이며 같은 사람임을 확정하는 신원 정보가 아니다. 박스는 최신 좌표를 별도로 조회해 그리며 영상 지연 때문에 사람 위치와 어긋날 수 있다. 모델 준비는 [Preprocessing 안내](../server/services/preprocessing/README.md#실행과-검증), 좌표 규약은 [OpenAPI](../docs/openapi.yaml)를 참고한다.
 
-최초 Edge 검색·연결은 [설치 도우미](../server/setup/install_helper/README.md), 운영 중 Edge·카메라 등록과 관리는 [서버 관리자 화면](../docs/operations.md#서버-관리자-화면)을 사용한다. 앱에는 독립 녹화 검색·사용자 및 카메라 접근 권한 편집 화면이 없다. iOS·Web·데스크톱 폴더는 남아 있지만 제품 동작은 검증하지 않았다.
+최초 Edge 검색·연결은 [설치 도우미](../server/setup/install_helper/README.md), 운영 중 Edge·카메라 등록과 관리는 [사용자 안내](../docs/user-guide.md)를 사용한다. 앱에는 독립 녹화 검색·사용자 및 카메라 접근 권한 편집 화면이 없다. iOS·Web·데스크톱 폴더는 남아 있지만 제품 동작은 검증하지 않았다.
 
 ## 앱 설치와 로그인
 
@@ -53,7 +53,7 @@ Flutter SDK 경로의 공백으로 빌드 도구가 실패하면 공백 없는 S
 
 ## Firebase와 배포
 
-[중앙 FCM 설정 및 인수 시험](../docs/deployment-guide.md#모바일과-푸시)을 따른다.
+[중앙 FCM 설정 및 인수 시험](../docs/user-guide.md)을 따른다.
 `android/app/google-services.json`이 없으면 Firebase 연결만 비활성 상태로 시작한다.
 실제 푸시를 받으려면 같은 Firebase 프로젝트의 Android 설정과 중앙 서비스 계정이 모두 필요하다. `google-services.json`은 빌드 전에 배치하며, 파일을 추가하거나 바꾼 뒤에는 APK를 다시 빌드·설치한다.
 Firebase가 설정된 앱은 로그인 후 Android 알림 권한을 요청한다. 앱의 **설정 → 알림 연결 상태**에서 등록 결과를 확인하고 필요하면 다시 시도한다. **모든 이벤트 알림**을 끄면 사람 감지·장애·위험 상태만 수신하며, **푸시 알림**을 끄면 해당 기기의 등록을 해제한다.

@@ -41,3 +41,22 @@ DB·중앙 녹화·복구 녹화·이미지·모델·설정은 호스트에 저�
 - 인물 연결·색 분석 정확도와 동시 처리 성능은 현장 검증이 필요하다.
 
 상태 확인과 장애 대응은 [운영 안내](operations.md)를 따른다.
+# Current architecture
+
+```mermaid
+flowchart LR
+    Edge[Edge / local camera] -->|RTSP| MediaMTX
+    MediaMTX -->|RTSP| Desktop[Server Desktop]
+    MediaMTX -->|HLS| Mobile[Mobile]
+    MediaMTX --> Preprocessing
+    Preprocessing -->|objects, snapshots, crops| Data
+    Data --> External
+    External -->|HTTPS API| Desktop
+    External -->|HTTPS API| Mobile
+    Edge -. UDP discovery .-> Desktop
+    External -->|Control / Recovery token| Edge
+```
+
+The Server Compose deployment contains Nginx, External, Data, MediaMTX, Preprocessing, and Analysis. Edge advertisements identify a device with device ID and MAC address; they do not use a Pairing Key. The Edge operational token authenticates Control and Recovery after registration.
+
+Preprocessing uses YOLO/ByteTrack for objects and OSNet through ONNX Runtime for identity descriptors. Both CPU and CUDA execution are supported according to the resolved device policy. Event media consists of snapshots, person crops, optional annotations, and related recordings.

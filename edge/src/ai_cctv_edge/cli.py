@@ -296,7 +296,7 @@ def pair(
         f"Pairing mode: device={device_id} camera={camera_id} "
         f"discovery=UDP/{discovery_port} management={bind_host}:{management_port}"
     )
-    print("Open the central server install helper, enter the same Edge key, and scan the LAN.")
+    print("Open the central server Install Helper and scan the same LAN for this Edge.")
     try:
         server.run()
     finally:

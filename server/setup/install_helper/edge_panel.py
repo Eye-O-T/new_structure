@@ -67,8 +67,8 @@ class EdgePanel(QWidget):
 
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Pi에서 연결 대기 모드를 켠 뒤, 같은 연결 키로 장치를 찾으세요.\n"
-            "장치를 선택하고 카메라 이름을 입력한 뒤 연결하면 설정을 전달합니다."
+            "Pi에서 Edge discovery 모드를 시작한 뒤 같은 LAN에서 장치를 찾으세요.\n"
+            "검색에는 인증 토큰이 필요하지 않으며, 등록할 때 Edge 운영 인증 토큰을 입력합니다."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -81,7 +81,7 @@ class EdgePanel(QWidget):
         self.password.setEchoMode(QLineEdit.Password)
         self.edge_auth_token = QLineEdit()
         self.edge_auth_token.setEchoMode(QLineEdit.Password)
-        self.edge_auth_token.setPlaceholderText("Pi에 설정한 32자 이상의 연결 키")
+        self.edge_auth_token.setPlaceholderText("Pi에서 안전하게 전달받은 32자 이상의 운영 인증 토큰")
         self.discovered_edge_items = QComboBox()
         self.discovered_edge_items.setPlaceholderText("아직 찾은 장치가 없습니다")
         self.discovered_edge_items.currentIndexChanged.connect(
@@ -91,7 +91,7 @@ class EdgePanel(QWidget):
         self.edge_name.setPlaceholderText("예: 현관, 실험실 입구")
         form.addRow("관리자 계정", self.username)
         form.addRow("관리자 암호", self.password)
-        form.addRow("장치 연결 키", self.edge_auth_token)
+        form.addRow("Edge 운영 인증 토큰", self.edge_auth_token)
         form.addRow("찾은 Edge", self.discovered_edge_items)
         form.addRow("카메라 이름", self.edge_name)
         controls_layout.addLayout(form)
@@ -297,8 +297,8 @@ class EdgePanel(QWidget):
                 self.discovered_edge_items.addItem(f"{edge.device_id} · {edge.address}")
             if not result:
                 self.status.setText(
-                    "장치를 찾지 못했습니다. Pi의 연결 대기 모드, 같은 연결 키, "
-                    "같은 LAN과 방화벽의 UDP 37020 허용 여부를 확인하세요."
+                    "장치를 찾지 못했습니다. Pi의 discovery 모드, 같은 LAN과 "
+                    "방화벽의 UDP 37020 허용 여부를 확인하세요."
                 )
                 return
             self.discovered_edge_items.setCurrentIndex(0)
@@ -309,19 +309,12 @@ class EdgePanel(QWidget):
         else:
             self.status.setText(result)
 
-    # 연결 키를 UI에서 읽어 고정한 뒤 백그라운드에서 제한 시간 동안 LAN 광고를 수집한다.
+    # 인증 토큰 없이 백그라운드에서 제한 시간 동안 LAN 광고를 수집한다.
     def discover_edge_devices(self) -> None:
         if self.busy:
             return
-        key = self.edge_auth_token.text()
-        if False:
-            self._invalid(
-                self.edge_auth_token, "Pi와 같은 32자 이상의 연결 키를 입력하세요."
-            )
-            return
-
         def discover(progress):
-            progress("같은 LAN에서 연결 대기 중인 Edge를 찾는 중입니다…")
+            progress("같은 LAN에서 discovery 광고를 보내는 Edge를 찾는 중입니다…")
             try:
                 return discover_edges(timeout=3.0)
             except Exception as exc:
@@ -415,7 +408,7 @@ class EdgePanel(QWidget):
             or any(ord(char) < 0x20 or ord(char) == 0x7F for char in token)
         ):
             self._invalid(
-                self.edge_auth_token, "Pi와 같은 32자 이상의 연결 키를 입력하세요."
+                self.edge_auth_token, "Edge 운영 인증 토큰(32자 이상)을 입력하세요."
             )
             return
         # Snapshot every widget before starting work; worker code uses only values.

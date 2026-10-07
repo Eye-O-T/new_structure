@@ -91,4 +91,4 @@ python server/tools/export_release_manifest.py --env-file C:/path/to/compose.env
 로컬 빌드 이미지에는 registry digest가 없을 수 있어 이미지 ID도 함께 기록한다.
 모델은 현재 배포에 실제 마운트한 파일을 지정한다. env 파일 내용·인증키·전체 컨테이너
 환경변수를 결과에 넣지 않는다. 이 기록은 의존성 설치용 lock이나 서명·실환경 인수의
-대체물이 아니며 [배포 인수 기록](../../docs/operations.md#버전별-인수복원-기록)과 함께 보관한다.
+대체물이 아니며 [사용자 안내](../../docs/user-guide.md)와 함께 보관한다.

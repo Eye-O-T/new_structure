@@ -39,11 +39,11 @@ Windows x64 PC에 **Docker Desktop을 설치하고 Linux 컨테이너 모드로 
 sha256sum -c ai-cctv-edge_0.3.0_arm64.deb.sha256
 sudo apt update
 sudo apt install ./ai-cctv-edge_0.3.0_arm64.deb
-sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-key
+sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001
 ```
 
-1. 마지막 명령에서 **32자 이상의 장치 연결 키**를 두 번 입력하고, 연결이 끝날 때까지 Pi 터미널을 열어 둡니다. 여러 장치를 설치하면 `edge-001`과 `cam-001`을 장치마다 다르게 지정하세요.
-2. 서버 PC의 설치 도우미에서 **카메라 연결**을 열고 관리자 계정·비밀번호와 Pi에 입력한 장치 연결 키를 입력합니다.
+1. 마지막 명령은 같은 LAN에 Edge discovery advertisement를 보냅니다. 연결이 끝날 때까지 Pi 터미널을 열어 두고, 여러 장치를 설치하면 `edge-001`과 `cam-001`을 장치마다 다르게 지정하세요.
+2. 서버 PC의 설치 도우미에서 **카메라 연결**을 열고 관리자 계정·비밀번호와 Pi에서 안전하게 전달받은 Edge 운영 인증 토큰을 입력합니다.
 3. **Edge 찾기**를 눌러 장치를 선택하고 **카메라 이름**을 입력한 뒤 **선택한 Edge 연결**을 누릅니다.
 4. 연결이 완료되면 아래 순서로 Android 앱을 설치해 해당 카메라의 영상이 나오는지 확인합니다. 이후 Pi를 재부팅하면 저장된 설정으로 자동 실행됩니다.
 
@@ -77,3 +77,15 @@ sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-ke
 ## 라이선스
 
 이 프로젝트의 자체 소스 코드는 [MIT License](LICENSE)로 제공합니다. 사용하는 외부 라이브러리와 모델에는 각각의 라이선스가 적용됩니다.
+# Current installation contract
+
+Use a published installer/package only when its GitHub Release asset exists. Otherwise install from source. The supported Server source path is Windows 10/11 x64 with Python 3.11.x, Git, `uv`, Docker Desktop in Linux-container mode, and Docker Compose v2:
+
+```powershell
+git clone https://github.com/Eye-O-T/new_structure.git
+cd new_structure
+uv sync --project server/setup/install_helper --locked
+uv run --project server/setup/install_helper --locked python -m server.setup.install_helper
+```
+
+Use `uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli --help` for the CLI. AI models, GPU support, TLS, and FFmpeg are conditional requirements; see [User Guide](docs/user-guide.md).

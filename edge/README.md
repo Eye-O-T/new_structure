@@ -13,7 +13,7 @@ sha256sum -c ai-cctv-edge_0.3.2_arm64.deb.sha256
 test "$(dpkg --print-architecture)" = arm64
 sudo apt update
 sudo apt install ./ai-cctv-edge_0.3.2_arm64.deb
-sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --set-pairing-key
+sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001
 ```
 
 `pair`는 첫 등록용이며, 장치마다 `edge-001`·`cam-001`을 고유한 ID로 바꾼다. 숨김 입력으로 32자 이상 연결 키를 설정한 뒤 등록이 끝날 때까지 Pi 터미널을 열어 둔다.
@@ -87,3 +87,6 @@ sh edge/packaging/build_deb.sh
 ```
 
 `dist/edge/`에 `.deb`와 `.deb.sha256`이 생성된다. Python 패키지 파일(wheel)은 `.deb` 안에 포함되며, OS 의존성은 별도로 `apt`가 설치한다. 빌드 끝에 `verify_deb.sh`가 패키지 구조·권한·ARM64 wheel·비밀 파일 혼입 여부를 검사한다. 배포 전 Pi에서 설치·업데이트·재부팅·제거를 확인한다.
+# Current discovery and registration contract
+
+`ai-cctv-edge pair --device-id <device-id> --camera-id <camera-id>` starts LAN discovery advertising. It does not accept or require a Pairing Key. In Server Desktop, first run **Edge 찾기**, then select the advertised device and supply the Edge operational authentication token only when registering it. Device ID plus MAC address identify the device; the operational token authenticates Control and Recovery after registration.
