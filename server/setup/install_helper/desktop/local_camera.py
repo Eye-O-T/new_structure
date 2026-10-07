@@ -21,6 +21,7 @@ class LocalCameraPublisher(QObject):
         self.process.errorOccurred.connect(self._error)
         self.process.readyReadStandardError.connect(self._read_error_output)
         self.camera_name = ""
+        self.camera_id = ""
         self._error_output = ""
         self.failure_message = ""
 
@@ -31,9 +32,10 @@ class LocalCameraPublisher(QObject):
             raise RuntimeError("FFmpeg가 설치되어 있지 않습니다. AI_CCTV_FFMPEG를 설정하거나 PATH에 ffmpeg를 추가하세요.")
         return value
 
-    def start(self, camera_name, stream_url, *, width=1280, height=720, fps=30):
+    def start(self, camera_name, stream_url, *, camera_id="", width=1280, height=720, fps=30):
         self.stop()
         self.camera_name = camera_name
+        self.camera_id = camera_id
         self._error_output = ""
         self.failure_message = ""
         ffmpeg = self.ffmpeg_path()

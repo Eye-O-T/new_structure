@@ -156,8 +156,8 @@ class CCTVMainWindow(ReferenceWindow):
         if event.get("type") == "network_failure" and isinstance(self.video_source, tuple):
             camera_id = self.video_source[1]
             publisher = getattr(self, "local_publisher", None)
-            if camera_id == "local-camera" and (
-                publisher is None or publisher.process.state() == QProcess.NotRunning
+            if publisher is not None and camera_id == publisher.camera_id and (
+                publisher.process.state() == QProcess.NotRunning
             ):
                 event = {
                     **event,

@@ -3,10 +3,10 @@
 from time import sleep
 from urllib.error import HTTPError
 
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QProcess, QTimer
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QMessageBox, QScrollArea,
+    QPushButton, QComboBox, QMessageBox, QScrollArea, QCheckBox,
 )
 
 from .api import DesktopApi
@@ -26,6 +26,7 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         self.local_publisher.state_changed.connect(self._local_camera_state)
         super().__init__(parent, **kwargs)
         self.body = self.pages
+        self.bounding_boxes_enabled = bool(getattr(parent, "_overlay_enabled", True))
 
     def create_basic_page(self):
         page = QWidget()
@@ -70,16 +71,23 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         self.camera = QComboBox()
         for widget in (self.username, self.password, self.camera):
             style_input(widget)
-        for item in self.parent().cameras:
-            self.camera.addItem(f"{item.get('name', '')} · {item['camera_id']}", item["camera_id"])
+        self._local_devices = list_camera_devices()
+        self._populate_camera_combo()
         if isinstance(self.selected_source, tuple):
-            self.camera.setCurrentIndex(self.camera.findData(self.selected_source[1]))
+            self.camera.setCurrentIndex(
+                self.camera.findData(("server", self.selected_source[1]))
+            )
         server_url = self.parent().server_url
         form.addRow("서버 주소", QLabel(server_url))
         form.addRow("관리자 계정", self.username)
         form.addRow("비밀번호", self.password)
         form.addRow("카메라", self.camera)
         layout.addLayout(form)
+        self.bounding_box_checkbox = QCheckBox("Bounding Box 표시")
+        self.bounding_box_checkbox.setChecked(
+            bool(getattr(self.parent(), "_overlay_enabled", True))
+        )
+        layout.addWidget(self.bounding_box_checkbox)
         trust_label = (
             f"추가 CA: {self.parent().ca_file}"
             if self.parent().ca_file
@@ -96,46 +104,6 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         self.refresh_cameras_button.clicked.connect(self.refresh_cameras)
         layout.addWidget(self.refresh_cameras_button)
         layout.addSpacing(16)
-        section("노트북 웹캠")
-        local_hint = QLabel(
-            "이 PC의 웹캠을 서버 카메라로 등록할 때만 사용합니다. "
-            "송출 시작은 FFmpeg를 실행하고, 송출 중지는 이 PC의 FFmpeg를 종료합니다."
-        )
-        local_hint.setWordWrap(True)
-        layout.addWidget(local_hint)
-        local = QFormLayout()
-        self.local_camera_name = QComboBox()
-        devices = list_camera_devices()
-        self._has_local_devices = bool(devices)
-        self.local_camera_name.addItems(devices)
-        if not devices:
-            self.local_camera_name.addItem("카메라 장치를 찾지 못했습니다")
-        self.local_camera_id = QLineEdit("local-camera")
-        owner = self.parent()
-        self.local_rtsp_host = QLineEdit(getattr(owner, "rtsp_host", "127.0.0.1"))
-        self.local_rtsp_port = QLineEdit(str(getattr(owner, "rtsp_port", 8554)))
-        for widget in (
-            self.local_camera_name,
-            self.local_camera_id,
-            self.local_rtsp_host,
-            self.local_rtsp_port,
-        ):
-            style_input(widget)
-        local.addRow("노트북 카메라 장치명", self.local_camera_name)
-        local.addRow("로컬 카메라 ID", self.local_camera_id)
-        local.addRow("RTSP 서버 주소", self.local_rtsp_host)
-        local.addRow("RTSP 포트", self.local_rtsp_port)
-        layout.addLayout(local)
-        self.local_start = QPushButton("노트북 카메라 송출 시작")
-        self.local_stop = QPushButton("노트북 카메라 송출 중지")
-        self.local_start.setEnabled(bool(devices))
-        self.local_stop.setEnabled(False)
-        style_button(self.local_start, "#15803d", "#22c55e", "#16a34a")
-        style_button(self.local_stop, "#b91c1c", "#ef4444", "#dc2626")
-        self.local_start.clicked.connect(self.start_local_camera)
-        self.local_stop.clicked.connect(self.stop_local_camera)
-        layout.addWidget(self.local_start)
-        layout.addWidget(self.local_stop)
         manage = QPushButton("카메라 등록 · 운영 설정")
         style_button(manage, "#334155", "#64748b", "#475569")
         manage.clicked.connect(self.manage)
@@ -156,6 +124,24 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         scroll.setWidget(page)
         return scroll
 
+    def _populate_camera_combo(self):
+        current = self.camera.currentData() if self.camera.count() else None
+        self.camera.clear()
+        for item in self.parent().cameras:
+            camera_id = item["camera_id"]
+            if camera_id == "local-camera" and self._local_devices:
+                continue
+            self.camera.addItem(
+                f"{item.get('name', '')} · {camera_id}",
+                ("server", camera_id),
+            )
+        for device in self._local_devices:
+            self.camera.addItem(f"노트북 웹캠 · {device}", ("local", device))
+        if current is not None:
+            index = self.camera.findData(current)
+            if index >= 0:
+                self.camera.setCurrentIndex(index)
+
     def _local_camera_state(self, state):
         messages = {
             "starting": "노트북 카메라 송출을 시작하는 중입니다.",
@@ -166,30 +152,34 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             self.message.setText(self.local_publisher.failure_message or messages[state])
         elif state in messages and hasattr(self, "message"):
             self.message.setText(messages[state])
-        if hasattr(self, "local_start"):
-            running = state in {"starting", "running"}
-            self.local_start.setEnabled(self._has_local_devices and not running)
-            self.local_stop.setEnabled(running)
-
     def _local_camera_task_failed(self, _message):
-        self.local_start.setEnabled(self._has_local_devices)
-        self.local_stop.setEnabled(False)
+        self.message.setText(_message)
 
-    def start_local_camera(self):
+    def start_local_camera(self, device_name, on_ready=None):
         if not self.api:
             self.message.setText("먼저 서버에 로그인하세요.")
             return
-        camera_id = self.local_camera_id.text().strip()
-        name = self.local_camera_name.currentText().strip()
+        camera_id = "local-camera"
+        name = device_name.strip()
         if not camera_id or not name:
             self.message.setText("카메라 ID와 장치명을 입력하세요.")
             return
-        host, port = self.local_rtsp_host.text().strip(), self.local_rtsp_port.text().strip()
+        owner = self.parent()
+        host = getattr(owner, "rtsp_host", "127.0.0.1")
+        port = getattr(owner, "rtsp_port", 8554)
         try:
             if not 1 <= int(port) <= 65535:
                 raise ValueError
         except ValueError:
             self.message.setText("RTSP 포트는 1~65535 범위여야 합니다.")
+            return
+        already_running = (
+            self.local_publisher.camera_id == camera_id
+            and self.local_publisher.process.state() != QProcess.NotRunning
+        )
+        if already_running:
+            if on_ready is not None:
+                on_ready()
             return
         if any(item.get("camera_id") == camera_id for item in self.parent().cameras):
             answer = QMessageBox.question(
@@ -215,28 +205,30 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             credentials = result.get("publish_credentials") or {}
             try:
                 url = rtsp_publish_url(host, port, camera_id, credentials["username"], credentials["password"])
-                self.local_publisher.start(name, url)
+                self.local_publisher.start(name, url, camera_id=camera_id)
                 current = [item for item in self.parent().cameras if item.get("camera_id") != camera_id]
                 current.append({"camera_id": camera_id, "name": result.get("name", name)})
                 self.parent().cameras = current
-                self.camera.clear()
-                for item in self.parent().cameras:
-                    self.camera.addItem(f"{item.get('name', '')} · {item['camera_id']}", item["camera_id"])
-                self.camera.setCurrentIndex(self.camera.findData(camera_id))
+                self._populate_camera_combo()
+                self.camera.setCurrentIndex(
+                    self.camera.findData(("local", name))
+                )
                 self.message.setText("RTSP 서버에서 웹캠 영상을 확인하는 중입니다…")
-                QTimer.singleShot(0, lambda: self._verify_local_camera(camera_id))
+                QTimer.singleShot(
+                    0,
+                    lambda: self._verify_local_camera(camera_id, on_ready),
+                )
             except Exception as exc:
                 self.message.setText(str(exc))
 
-        self.local_start.setEnabled(False)
-        self.local_stop.setEnabled(False)
         self.execute(register, started)
-        if self.task is not None:
-            self.task.failed.connect(self._local_camera_task_failed)
 
-    def _verify_local_camera(self, camera_id):
+    def _verify_local_camera(self, camera_id, on_ready=None):
         if self.task is not None:
-            QTimer.singleShot(100, lambda: self._verify_local_camera(camera_id))
+            QTimer.singleShot(
+                100,
+                lambda: self._verify_local_camera(camera_id, on_ready),
+            )
             return
 
         def operation():
@@ -269,13 +261,13 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             if not ready:
                 self.local_publisher.stop()
             self.message.setText(message)
+            if ready and on_ready is not None:
+                on_ready()
 
         self.execute(operation, completed)
 
     def stop_local_camera(self):
         self.local_publisher.stop()
-        self.local_start.setEnabled(self._has_local_devices)
-        self.local_stop.setEnabled(False)
         self.message.setText("노트북 카메라 송출을 중지했습니다.")
 
     def login(self):
@@ -305,7 +297,7 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             self.api = api
             owner.api, owner.cameras = self.api, []
             owner.username = username
-            self.camera.clear()
+            self._populate_camera_combo()
             self.refresh_cameras_button.setEnabled(True)
             self.message.setText("로그인했습니다. 카메라 목록 새로고침을 눌러 목록을 불러오세요.")
 
@@ -329,18 +321,31 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
 
     def reload_cameras(self, cameras):
         self.parent().cameras = cameras
-        self.camera.clear()
-        for item in cameras:
-            self.camera.addItem(f"{item.get('name', '')} · {item['camera_id']}", item["camera_id"])
+        self._populate_camera_combo()
         self.message.setText("카메라 목록을 갱신했습니다.")
 
     def save_basic_settings(self):
         if self.task is not None:
             return
-        if not self.api or not self.camera.currentData():
+        selection = self.camera.currentData()
+        if not self.api or not selection:
             self.message.setText("로그인 후 카메라를 선택하세요.")
             return
-        self.selected_source = (self.api, self.camera.currentData())
+        kind, value = selection
+        self.bounding_boxes_enabled = self.bounding_box_checkbox.isChecked()
+        if kind == "local":
+            self.start_local_camera(value, on_ready=self._accept_local_camera)
+            return
+        if (
+            isinstance(self.selected_source, tuple)
+            and self.selected_source[1] == "local-camera"
+        ):
+            self.local_publisher.stop()
+        self.selected_source = (self.api, value)
+        self.accept()
+
+    def _accept_local_camera(self):
+        self.selected_source = (self.api, "local-camera")
         self.accept()
 
     def create_storage_page(self):

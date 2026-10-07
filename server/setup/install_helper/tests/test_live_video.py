@@ -14,7 +14,7 @@ from PyQt5.QtCore import Qt
 from server.setup.install_helper.desktop import video_worker as video
 from server.setup.install_helper.desktop.api import DesktopApi
 from server.setup.install_helper.desktop.local_camera import LocalCameraPublisher
-from server.setup.install_helper.desktop.media import MediaBridge
+from server.setup.install_helper.desktop.media import MediaBridge, hls_resource_type
 
 
 class Clock:
@@ -145,6 +145,43 @@ class PlaybackTests(unittest.TestCase):
         args = publisher.process.start.call_args.args[1]
         self.assertEqual(args[args.index("-g") + 1], "30")
         self.assertEqual(args[args.index("-keyint_min") + 1], "30")
+
+
+class StreamDiagnosticsTests(unittest.TestCase):
+    def test_rtsp_failure_is_logged_before_hls_fallback(self):
+        api = Mock()
+        api.camera.side_effect = [
+            {"url": "rtsp://user:password@example.test:8554/cam-001"},
+            {"hls_url": "/hls/cam-001/index.m3u8"},
+        ]
+        av_module = Mock()
+        hls_stream = Mock()
+        hls_open = Mock()
+        hls_open.__enter__.return_value = hls_stream
+        hls_open.__exit__.return_value = False
+        av_module.open.side_effect = [
+            OSError("connect failed rtsp://user:password@example.test:8554/cam-001"),
+            hls_open,
+        ]
+        bridge = Mock()
+        bridge.__enter__.return_value.url = "http://127.0.0.1/hls"
+        bridge.__exit__.return_value = False
+        with patch.object(video, "MediaBridge", return_value=bridge), self.assertLogs(
+            video.LOGGER, level="WARNING"
+        ) as logs:
+            with video._open_live_stream(api, "cam-001", av_module):
+                pass
+        message = "\n".join(logs.output)
+        self.assertIn("camera=cam-001", message)
+        self.assertIn("OSError", message)
+        self.assertIn("falling back", message)
+        self.assertNotIn("password", message)
+
+    def test_hls_resource_types_are_classified(self):
+        self.assertEqual(hls_resource_type("/hls/cam/index.m3u8"), "playlist")
+        self.assertEqual(hls_resource_type("/hls/cam/segment-1.m4s"), "segment")
+        self.assertEqual(hls_resource_type("/hls/cam/init.mp4"), "initialization segment")
+        self.assertEqual(hls_resource_type("/hls/cam/unknown"), "other")
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is needed to generate HLS")

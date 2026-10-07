@@ -13,7 +13,6 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QFrame,
     QScrollArea,
-    QCheckBox,
 )
 from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
@@ -93,17 +92,12 @@ class CCTVMainWindow(QMainWindow):
         )
         self.btn_resource_monitor.clicked.connect(self.open_resource_monitor)
 
-        self.bounding_box_toggle = QCheckBox("Bounding Box 표시")
-        self.bounding_box_toggle.setChecked(self._overlay_enabled)
-        self.bounding_box_toggle.toggled.connect(self.set_bounding_boxes_enabled)
-
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.btn_start)
         header_layout.addWidget(self.btn_stop)
         header_layout.addWidget(self.btn_setting)
         header_layout.addWidget(self.btn_resource_monitor)
-        header_layout.addWidget(self.bounding_box_toggle)
 
         main_layout.addLayout(header_layout)
 
@@ -286,6 +280,8 @@ class CCTVMainWindow(QMainWindow):
             self.ai_cctv_path = dialog.ai_cctv_path
             self.original_segment_seconds = dialog.original_segment_seconds
             self.clip_max_seconds = dialog.clip_max_seconds
+            if hasattr(dialog, "bounding_boxes_enabled"):
+                self.set_bounding_boxes_enabled(dialog.bounding_boxes_enabled)
 
             self.cam_status.setText(
                 f"● CAM-01 · 입력 설정 완료: {self.video_source}"

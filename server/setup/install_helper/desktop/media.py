@@ -5,10 +5,23 @@ import secrets
 import threading
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 
 LOGGER = logging.getLogger(__name__)
+CLIENT_DISCONNECT_ERRORS = (BrokenPipeError, ConnectionAbortedError, ConnectionResetError)
+
+
+def hls_resource_type(path):
+    path = urlsplit(path).path.lower()
+    if path.endswith(".m3u8"):
+        return "playlist"
+    if path.endswith((".m4s", ".ts")):
+        return "segment"
+    if path.endswith((".mp4", ".aac", ".webm")):
+        return "initialization segment"
+    return "other"
 
 
 class MediaBridge:
@@ -26,8 +39,10 @@ class MediaBridge:
                 if not self.path.startswith(bridge.prefix + "/hls/"):
                     self.send_error(404)
                     return
+                upstream_path = None
                 try:
                     path = bridge.api.media_path(bridge.camera_id, self.path[len(bridge.prefix):])
+                    upstream_path = path
                     content = bridge.api.media(bridge.camera_id, path)
                     playlist = urlsplit(path).path.endswith(".m3u8")
                     if playlist:
@@ -38,9 +53,42 @@ class MediaBridge:
                     self.send_header("Cache-Control", "no-store")
                     self.end_headers()
                     self.wfile.write(content)
+                except CLIENT_DISCONNECT_ERRORS:
+                    LOGGER.debug(
+                        "HLS client disconnected camera=%s resource=%s path=%s",
+                        bridge.camera_id,
+                        hls_resource_type(upstream_path or self.path),
+                        upstream_path or self.path,
+                    )
+                    return
+                except HTTPError as exc:
+                    path = upstream_path or self.path
+                    LOGGER.warning(
+                        "HLS upstream request failed camera=%s resource=%s path=%s status=%s",
+                        bridge.camera_id,
+                        hls_resource_type(path),
+                        path,
+                        exc.code,
+                    )
+                    try:
+                        self.send_error(502, "Media unavailable")
+                    except CLIENT_DISCONNECT_ERRORS:
+                        LOGGER.debug("HLS client disconnected while sending error camera=%s", bridge.camera_id)
                 except Exception as exc:
-                    LOGGER.exception("HLS media request failed: %s", exc)
-                    self.send_error(502, "Media unavailable")
+                    path = upstream_path or self.path
+                    LOGGER.warning(
+                        "HLS media request failed camera=%s resource=%s path=%s "
+                        "error_type=%s error=%s",
+                        bridge.camera_id,
+                        hls_resource_type(path),
+                        path,
+                        type(exc).__name__,
+                        str(exc) or exc.__class__.__name__,
+                    )
+                    try:
+                        self.send_error(502, "Media unavailable")
+                    except CLIENT_DISCONNECT_ERRORS:
+                        LOGGER.debug("HLS client disconnected while sending error camera=%s", bridge.camera_id)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.1})

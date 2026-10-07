@@ -3,6 +3,7 @@
 import threading
 import time
 import logging
+import re
 from contextlib import contextmanager
 from queue import Empty, Full, Queue
 from datetime import datetime, timezone
@@ -36,16 +37,34 @@ OBJECT_POLL_INTERVAL_SECONDS = 0.5
 EVENT_POLL_INTERVAL_SECONDS = 2.0
 
 
+def _safe_stream_error(exc):
+    """Return useful diagnostics without logging credentials or bearer tokens."""
+    message = str(exc) or exc.__class__.__name__
+    message = re.sub(r"(https?://)([^/@\s]+):([^/@\s]+)@", r"\1<redacted>@", message)
+    message = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1<redacted>", message)
+    return message
+
+
 @contextmanager
 def _open_live_stream(api, camera_id, av):
     """Prefer direct RTSP and retain HLS as a compatibility fallback."""
     try:
         live = api.camera(camera_id, "/live?protocol=rtsp")
+        LOGGER.info("RTSP live open attempt camera=%s", camera_id)
         with av.open(live["url"], timeout=(8, 8), options=LIVE_RTSP_OPTIONS) as stream:
+            LOGGER.info("RTSP live open success camera=%s", camera_id)
             yield stream
             return
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning(
+            "RTSP live open failed camera=%s; falling back to authenticated HLS "
+            "error_type=%s error=%s",
+            camera_id,
+            type(exc).__name__,
+            _safe_stream_error(exc),
+        )
         live = api.camera(camera_id, "/live?protocol=hls")
+        LOGGER.info("HLS fallback selected camera=%s", camera_id)
         with MediaBridge(api, camera_id, live["hls_url"]) as bridge:
             with av.open(
                 bridge.url,
