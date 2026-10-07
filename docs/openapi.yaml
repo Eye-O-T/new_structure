@@ -30,7 +30,9 @@ info:
     GET /api/v1/cameras/{camera_id}/live의 url 또는
     GET /api/v1/recordings/{segment_id}/playback의 playback_url을 그대로 사용한다.
     PUBLIC_BASE_URL 설정 시 해당 HTTP(S) 주소의 절대 URL, 없으면 중앙 서버 주소 기준 상대 URL이다.
-    라이브 기본 주소는 /hls/{camera_id}/index.m3u8이고 재생목록과 영상 조각을 받는 HLS이다.
+    라이브는 기본적으로 HLS이며 /api/v1/cameras/{camera_id}/live?protocol=rtsp 요청은
+    권한 확인 후 Server PC용 RTSP URL과 MediaMTX read 인증 정보를 반환한다. RTSP URL은
+    서버 호스트의 8554 포트로만 연결하며 모바일 클라이언트는 기존 HLS를 사용한다.
     중앙 녹화 기본 주소는 /playback/get?path={camera_id}&start={UTC}&duration={초}&format=fmp4다.
     이 두 미디어 경로는 Nginx가 MediaMTX에 중계하며 FastAPI paths에 포함되지 않는다.
     auth.method=cookie는 기본 플레이어 안내다. 네이티브 플레이어의 Bearer도 Nginx가 허용하지만
@@ -57,7 +59,7 @@ info:
     블랙박스로 바꾼 경우에는 unconfigured를 반환한다. 알 수 없는 이벤트 유형·metadata 키도 허용한다.
     objects는 최신 좌표 조회 API이며 영상 프레임과 정확히 동기화된 추적 스트림이 아니다.
     관측 시각·원본 크기로 표시 여부와 좌표를 계산하고 stale=true이면 박스를 지운다.
-    Event 이미지 경로는 공개하지 않으며, 인증된 event-specific 이미지 API를 사용한다.
+    snapshot_path 등 저장소 상대 경로를 공개 이미지 URL로 조합하지 않는다. 이벤트 이미지는 인증된 snapshot·crop·annotated-snapshot API로 조회한다.
 
     ### FCM 수신 계약
     로그인 후 현재 refresh_token과 함께 PUT /api/v1/notifications/devices로 기기를 등록한다.
@@ -177,6 +179,28 @@ paths:
         default:
           $ref: '#/components/responses/ApiError'
       description: 현재 사용자 소유 기기만 해제한다. 없는 등록도 204다. 로그아웃은 현재 refresh를 함께 보내 세션까지 철회한다.
+  /api/v1/features/status:
+    get:
+      summary: AI 기능 상태 조회
+      description: 인증된 사용자가 사람 감지·식별과 이벤트 분석 서비스의 현재 실행 상태를 조회한다. 기능 변경은 서버 PC의 설치 도우미에서만 수행한다.
+      operationId: feature_status_api_v1_features_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                title: Response Feature Status Api V1 Features Status Get
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/ApiError'
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      tags:
+      - features
   /api/v1/admin/system/status:
     get:
       summary: 시스템 상태 조회
@@ -219,36 +243,6 @@ paths:
       - AccessCookie: []
       description: 관리자 전용. External과 Data 상태를 반환한다. 여섯 컨테이너 전체·영상·FCM 수신의 성공 판정은 아니다. /system/status와
         /admin/system/status는 같은 기능이다.
-      tags:
-      - system
-  /api/v1/features/status:
-    get:
-      summary: AI 기능 상태 조회
-      operationId: feature_status_api_v1_features_status_get
-      responses:
-        '200':
-          description: 사람 감지·식별 및 이벤트 분석 서비스의 현재 실행 상태
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  preprocessing:
-                    type: object
-                    properties:
-                      status: {type: string, enum: [enabled, disabled, unavailable]}
-                      enabled: {type: boolean}
-                  analysis:
-                    type: object
-                    properties:
-                      status: {type: string, enum: [enabled, disabled, unavailable]}
-                      enabled: {type: boolean}
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-      security:
-      - HTTPBearer: []
-      - AccessCookie: []
-      description: 인증된 사용자가 현재 상태만 조회한다. 기능 변경은 서버 PC의 설치 도우미에서만 수행한다.
       tags:
       - system
   /api/v1/auth/login:
@@ -367,7 +361,8 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         default:
           $ref: '#/components/responses/ApiError'
-      description: 현재 access와 최신 refresh를 함께 보낸다. 유효한 access는 로그인 계열을 폐기해 그 계열의 토큰·기기 등록·대기 알림을 해제한다. refresh는 제출된 토큰을 폐기한다. access 없이 refresh만 보내면 계열 전체는 폐기되지 않는다. 쿠키는 지우며 이미 FCM에 접수된 알림은 취소되지 않는다.
+      description: 현재 access와 최신 refresh를 함께 보낸다. 유효한 access는 로그인 계열을 폐기해 그 계열의 토큰·기기 등록·대기 알림을 해제한다.
+        refresh는 제출된 토큰을 폐기한다. access 없이 refresh만 보내면 계열 전체는 폐기되지 않는다. 쿠키는 지우며 이미 FCM에 접수된 알림은 취소되지 않는다.
       tags:
       - auth
       security:
@@ -613,6 +608,14 @@ paths:
         schema:
           type: string
           title: Camera Id
+      - name: protocol
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^(hls|rtsp)$
+          default: hls
+          title: Protocol
       responses:
         '200':
           description: Successful Response
@@ -1202,6 +1205,153 @@ paths:
         시각 범위는 from 이상·to 미만이다. 인물 연결·분석 결과는 나중에 갱신될 수 있다.
       tags:
       - events
+  /api/v1/events/{event_id}/snapshot:
+    get:
+      tags:
+      - events
+      summary: Event snapshot
+      description: Returns the event snapshot after the event and camera permission checks.
+      operationId: get_event_snapshot_api_v1_events__event_id__snapshot_get
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Event Id
+      responses:
+        '200':
+          description: Event image
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Camera access denied
+        '404':
+          description: Event or image not found
+        '415':
+          description: Unsupported event image type
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/events/{event_id}/crop:
+    get:
+      tags:
+      - events
+      summary: Event person crop
+      description: Returns the event person crop after the event and camera permission checks.
+      operationId: get_event_crop_api_v1_events__event_id__crop_get
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Event Id
+      responses:
+        '200':
+          description: Event image
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Camera access denied
+        '404':
+          description: Event or image not found
+        '415':
+          description: Unsupported event image type
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/events/{event_id}/annotated-snapshot:
+    get:
+      tags:
+      - events
+      summary: Event annotated snapshot
+      description: Returns the annotated event snapshot after the event and camera permission checks.
+      operationId: get_event_annotated_snapshot_api_v1_events__event_id__annotated_snapshot_get
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Event Id
+      responses:
+        '200':
+          description: Event image
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Camera access denied
+        '404':
+          description: Event or image not found
+        '415':
+          description: Unsupported event image type
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        default:
+          $ref: '#/components/responses/ApiError'
   /api/v1/events/{event_id}:
     get:
       summary: 이벤트 상세
@@ -1223,51 +1373,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EventResponse'
-
-  /api/v1/events/{event_id}/snapshot:
-    get:
-      summary: Get event snapshot
-      security:
-        - HTTPBearer: []
-      responses:
-        '200':
-          description: Event snapshot image
-          content:
-            image/jpeg: {}
-            image/png: {}
-            image/webp: {}
-        '403': {description: Camera access denied}
-        '404': {description: Event or image not found}
-
-  /api/v1/events/{event_id}/crop:
-    get:
-      summary: Get person crop
-      security:
-        - HTTPBearer: []
-      responses:
-        '200':
-          description: Person crop image
-          content:
-            image/jpeg: {}
-            image/png: {}
-            image/webp: {}
-        '403': {description: Camera access denied}
-        '404': {description: Event or image not found}
-
-  /api/v1/events/{event_id}/annotated-snapshot:
-    get:
-      summary: Get annotated event snapshot
-      security:
-        - HTTPBearer: []
-      responses:
-        '200':
-          description: Annotated snapshot image
-          content:
-            image/jpeg: {}
-            image/png: {}
-            image/webp: {}
-        '403': {description: Camera access denied}
-        '404': {description: Event or image not found}
         '422':
           description: Validation Error
           content:
@@ -1278,8 +1383,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/ApiError'
-      description: 푸시의 event_id로도 조회한다. snapshot_path는 공개 URL이 아니다. 연결 녹화는 recording_segment_id 또는 recording_segment_ids로
-        조회한다.
+      description: 푸시의 event_id로도 조회한다. snapshot_path는 공개 URL이 아니며 인증된 이미지 API로 조회한다. 연결 녹화는 recording_segment_id
+        또는 recording_segment_ids로 조회한다.
       tags:
       - events
   /api/v1/admin/users:
@@ -1505,6 +1610,12 @@ components:
             minLength: 1
           - type: 'null'
           title: Edge Device Id
+        edge_mac_address:
+          anyOf:
+          - type: string
+            pattern: ^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$
+          - type: 'null'
+          title: Edge Mac Address
         edge_management_url:
           anyOf:
           - type: string
@@ -1544,22 +1655,28 @@ components:
           title: Camera Id
         protocol:
           type: string
-          const: hls
+          enum:
+          - hls
+          - rtsp
           title: Protocol
         url:
           type: string
           title: Url
         hls_url:
-          type: string
+          anyOf:
+          - type: string
+          - type: 'null'
           title: Hls Url
         auth:
-          $ref: '#/components/schemas/LiveAuthResponse'
+          anyOf:
+          - $ref: '#/components/schemas/LiveAuthResponse'
+          - $ref: '#/components/schemas/RtspAuthResponse'
+          title: Auth
       type: object
       required:
       - camera_id
       - protocol
       - url
-      - hls_url
       - auth
       title: CameraLiveResponse
     CameraPageResponse:
@@ -1611,6 +1728,12 @@ components:
             minLength: 1
           - type: 'null'
           title: Edge Device Id
+        edge_mac_address:
+          anyOf:
+          - type: string
+            pattern: ^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$
+          - type: 'null'
+          title: Edge Mac Address
         edge_management_url:
           anyOf:
           - type: string
@@ -1842,6 +1965,22 @@ components:
       - enabled
       - event_types
       title: DeviceRegistration
+    EventMediaAvailability:
+      properties:
+        snapshot:
+          type: boolean
+          title: Snapshot
+          default: false
+        crop:
+          type: boolean
+          title: Crop
+          default: false
+        annotated_snapshot:
+          type: boolean
+          title: Annotated Snapshot
+          default: false
+      type: object
+      title: EventMediaAvailability
     EventPageResponse:
       properties:
         items:
@@ -1943,19 +2082,6 @@ components:
       - event_type
       - occurred_at
       title: EventResponse
-    EventMediaAvailability:
-      properties:
-        snapshot:
-          type: boolean
-          default: false
-        crop:
-          type: boolean
-          default: false
-        annotated_snapshot:
-          type: boolean
-          default: false
-      type: object
-      title: EventMediaAvailability
     HTTPValidationError:
       properties:
         detail:
@@ -2266,6 +2392,20 @@ components:
       additionalProperties: false
       type: object
       title: RefreshRequest
+    RtspAuthResponse:
+      properties:
+        method:
+          type: string
+          const: basic
+          title: Method
+        username:
+          type: string
+          title: Username
+      type: object
+      required:
+      - method
+      - username
+      title: RtspAuthResponse
     ServiceStatusResponse:
       properties:
         status:

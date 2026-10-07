@@ -1,91 +1,230 @@
 # AI CCTV
 
-AI CCTV는 Raspberry Pi 카메라, 중앙 서버, Android 앱을 연결하는 영상 모니터링 프로젝트입니다. 여러 카메라의 영상을 한곳에서 녹화하고 사람 감지 이벤트를 기록하여, 사용자가 휴대전화로 실시간 영상과 이벤트에 연결된 녹화를 확인할 수 있도록 만드는 것이 목적입니다.
+AI CCTV는 Raspberry Pi 카메라, Windows 중앙 서버, Android 앱을 연결해 영상을
+녹화하고 사람 감지 이벤트와 관련 녹화를 조회하는 영상 모니터링 시스템이다.
 
-카메라는 영상을 보내고, 서버는 녹화·사람 감지를 처리하며, 앱은 영상과 이벤트를 보여줍니다. 현재 기능과 개발 중인 기능의 범위는 [시스템 구조 문서](docs/architecture.md)에서 확인할 수 있습니다.
+## 📑 Table of Contents
 
-## 설치하기
+1. [Project Overview](#-project-overview)
+2. [System Requirements & Hardware Setup](#-system-requirements--hardware-setup)
+3. [Installation & Execution Guide](#-installation--execution-guide)
+4. [System Workflow & Verification](#-system-workflow--verification)
+5. [Documentation Links](#-documentation-links)
+6. [Troubleshooting](#-troubleshooting)
+7. [Team Members & Roles](#-team-members--roles)
+8. [License](#-license)
 
-**중앙 서버 → Raspberry Pi 카메라 → Android 앱** 순서로 설치합니다. 처음에는 세 장치를 같은 공유기의 내부 네트워크에 연결하세요.
+## 📌 Project Overview
 
-[GitHub Releases](https://github.com/Eye-O-T/new_structure/releases)에서 설치할 버전의 **Assets**를 열어 다음 파일을 확인하세요. 해당 파일이 아직 게시되지 않았다면 배포 담당자에게 요청하세요.
+### 1.1 Summary & Objectives
 
-| 설치할 장치 | 받을 파일 |
-|---|---|
-| Windows 서버 PC | `AI_CCTV_Server_Setup_<version>_x64.exe` |
-| Raspberry Pi | `ai-cctv-edge_<version>_arm64.deb`와 `.deb.sha256` |
-| Android 휴대전화 | `app-release.apk` |
+Edge는 카메라 영상을 중앙 MediaMTX로 송출하면서 연결 장애에 대비한 로컬 녹화를
+유지한다. 중앙 서버는 영상 녹화, 사람 감지·추적, 인물 특징 연결, 이벤트·미디어 저장을
+담당한다. Android 앱과 Server Desktop은 로그인한 사용자가 실시간 영상, 이벤트 이미지,
+관련 녹화와 장치 상태를 확인하게 한다.
 
-`<version>`은 배포된 버전 번호입니다. `Source code.zip`은 소스 코드이며 설치 파일이 아닙니다. 설치 파일 사용자는 Python·Flutter·EXE 빌드 도구를 따로 준비할 필요가 없습니다.
+### 1.2 Key Features
 
-### Windows 서버 설치
+- Raspberry Pi 및 로컬 카메라의 RTSP 수신과 중앙 녹화
+- YOLO/ByteTrack 사람 감지·추적과 OSNet 기반 외관 특징 연결
+- Snapshot, Person Crop, 선택적 Annotated Snapshot, 관련 녹화 조회
+- Desktop의 RTSP 우선 재생과 인증 HLS fallback, Android의 인증 HLS 재생
+- Edge 상태 수집, HD/FHD 변경, 장애 구간 녹화 복구
+- 선택적 Firebase Cloud Messaging 알림
+- CPU 실행과 NVIDIA CUDA 실행 정책 지원
 
-Windows x64 PC에 **Docker Desktop을 설치하고 Linux 컨테이너 모드로 실행**해 두세요. 사람 감지용 YOLO 모델과 인물 연결용 OSNet ONNX 모델이 필요합니다. HTTPS를 사용할 때만 서버 접속 주소에 맞는 인증서·개인키가 필요하며, 신뢰할 수 있는 LAN에서는 HTTP를 선택할 수 있습니다. 모델은 서비스가 자동으로 내려받지 않으므로 배포 담당자가 준비한 파일을 받으세요. 설치 파일 조건은 [필수 파일 안내](server/setup/install_helper/README.md#처음-설치), 소스 배포의 OSNet 준비 방법은 [모델 변환 도구](server/tools/README.md)를 참고하세요.
+### 1.3 System Overview
 
-1. 받은 설치 EXE를 실행하고 안내에 따라 설치한 뒤 **AI CCTV 서버 설치 도우미**를 엽니다.
-2. **설치 준비 확인**에서 Docker·Compose·모델·인증서 검사 결과를 확인합니다. 누락된 프로그램이나 파일을 준비하고 **다시 검사**를 누른 뒤 **다음**으로 진행합니다.
-3. **기본 설정**에서 관리자 비밀번호를 4~12자로 입력하고, 카메라와 휴대전화가 접근할 서버 주소를 확인합니다. 기본 관리자 계정은 `admin`입니다.
-4. 저장 위치·포트·녹화 보관 기간은 기본값을 사용할 수 있습니다. 변경이 필요하면 **고급 설정 직접 지정**을 선택하고, 저장 위치는 **변경…**에서 지정합니다.
-5. **설치 내용 확인**에서 **설치 및 시작**을 누릅니다. 최초 실행에는 인터넷 연결이 필요하며, 서버 구성 요소를 내려받아 준비하는 동안 기다립니다.
-6. 관리 화면에서 서버 상태를 확인합니다. **서버 관리자 화면 열기**를 눌러 설치할 때 정한 관리자 계정으로 로그인하세요.
-
-휴대전화 접속 주소는 `http://cctv.example.com` 또는 `https://cctv.example.com`처럼 실제 서버 주소를 사용합니다. HTTPS를 사용할 때는 인증서의 이름과 일치해야 합니다. 기본값과 문제 해결 방법은 [설치 상세 안내](docs/deployment-guide.md#windows-설치)를 참고하세요.
-
-### Raspberry Pi 카메라 설치
-
-카메라를 연결한 **Raspberry Pi OS Bookworm 64비트(ARM64)** 장치를 준비합니다. 받은 DEB와 체크섬 파일을 같은 폴더에 두고 Pi 터미널에서 그 폴더로 이동한 뒤 실행하세요. 아래 `0.3.0`은 받은 버전으로 바꿉니다. 각 명령이 성공했는지 확인한 뒤 다음 명령을 실행하세요.
-
-```bash
-sha256sum -c ai-cctv-edge_0.3.0_arm64.deb.sha256
-sudo apt update
-sudo apt install ./ai-cctv-edge_0.3.0_arm64.deb
-sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001
+```mermaid
+flowchart LR
+    Edge[Raspberry Pi Edge] -->|RTSP publish| Server[Windows Host Server]
+    Server -->|HTTPS REST, HLS, playback| Mobile[Android Mobile]
+    Server -->|Bearer-authenticated HTTP control| Edge
+    Server -->|Bearer-authenticated HTTP recovery| Edge
 ```
 
-1. 마지막 명령은 같은 LAN에 Edge discovery advertisement를 보냅니다. 연결이 끝날 때까지 Pi 터미널을 열어 두고, 여러 장치를 설치하면 `edge-001`과 `cam-001`을 장치마다 다르게 지정하세요.
-2. 서버 PC의 설치 도우미에서 **카메라 연결**을 열고 관리자 계정·비밀번호와 Pi에서 안전하게 전달받은 Edge 운영 인증 토큰을 입력합니다.
-3. **Edge 찾기**를 눌러 장치를 선택하고 **카메라 이름**을 입력한 뒤 **선택한 Edge 연결**을 누릅니다.
-4. 연결이 완료되면 아래 순서로 Android 앱을 설치해 해당 카메라의 영상이 나오는지 확인합니다. 이후 Pi를 재부팅하면 저장된 설정으로 자동 실행됩니다.
+REST 외에도 UDP Discovery, RTSP, HLS가 사용된다. 서비스별 연결과 포트, WSL 2/Docker
+Desktop 경계는 [Architecture & Network Topology](docs/architecture.md)를 따른다.
 
-카메라 인식 확인, 검색 실패 시 조치, 수동 연결 방법은 [카메라 설치 상세 안내](edge/README.md#설치와-연결)를 참고하세요.
+### 1.4 Tech Stack
 
-### Android 앱 설치
+| 영역 | 주요 기술 |
+| --- | --- |
+| Host Server | Windows 10/11 x64, Docker Desktop, Docker Compose v2, Nginx, FastAPI, SQLite, MediaMTX |
+| AI | Python 3.11, YOLO/ByteTrack, ONNX Runtime, OSNet, OpenCV |
+| Edge | Raspberry Pi OS Bookworm ARM64, Python 3.11, systemd, MediaMTX, rpicam/GStreamer |
+| Mobile | Flutter, Dart, Android SDK, HLS, Firebase Cloud Messaging(선택) |
+| Server Desktop | Python 3.11, PyQt5, RTSP/HLS client |
 
-1. 휴대전화에서 받은 `app-release.apk`를 열어 설치합니다. Android가 요청하면 해당 파일을 연 앱의 설치 권한을 허용합니다.
-2. AI CCTV 앱을 열고 서버 설치 때 확인한 **HTTP(S) 접속 주소**와 **관리자 계정·비밀번호**를 입력합니다.
-3. 로그인 후 카메라 목록에서 등록한 카메라를 선택합니다.
+## 🖥 System Requirements & Hardware Setup
 
-서버 주소에는 `/api/v1`을 붙이지 않습니다. 휴대전화의 `localhost`는 휴대전화 자신을 가리키므로 서버 주소로 사용할 수 없습니다. 휴대전화가 서버 인증서를 신뢰해야 연결됩니다. 자세한 내용은 [앱 설치와 로그인](mobile/README.md#앱-설치와-로그인)을 참고하세요.
+### 2.1 Hardware Setup
 
-## 사용하기
+- **Host PC:** Windows 10/11 x64, 중앙 녹화와 모델 실행에 충분한 저장 공간. GPU는 선택이다.
+- **Edge:** Raspberry Pi OS Bookworm ARM64를 실행할 수 있는 Raspberry Pi와 지원 카메라.
+- **Mobile:** 서버의 HTTP(S) 주소에 접근할 수 있는 Android 기기.
+- 최초 Edge 발견·등록 시 Host PC와 Raspberry Pi를 같은 신뢰 IPv4 LAN에 연결한다.
 
-설치가 끝나면 다음 화면에서 시스템을 사용합니다.
+GPIO 센서·액추에이터 배선은 현재 제품 설치 계약에 포함되지 않는다. Edge가 보고하는
+전원·배터리 수치는 운영체제가 제공할 때만 표시되며 센서가 없으면 `null`일 수 있다.
 
-| 하고 싶은 일 | 사용 방법 |
-|---|---|
-| 실시간 영상 보기 | 앱의 **실시간**에서 카메라를 선택합니다. 사람 감지가 동작하면 **사람 위치·ID 표시**로 감지 결과를 확인할 수 있습니다. |
-| 감지 기록과 녹화 보기 | 앱의 **히스토리**에서 날짜·카메라를 선택하고 이벤트를 엽니다. **이벤트 상세**에서 연결된 녹화를 재생합니다. |
-| 카메라 상태·화질 확인 | 앱의 카메라 화면에서 장치 상태를 확인합니다. 관리자 계정은 지원되는 HD/FHD 화질을 변경할 수 있습니다. |
-| 카메라 등록 정보 관리 | 설치 도우미의 **PyQt 서버 관리자 화면 열기**로 로그인합니다. 카메라·Edge 등록 정보와 상태를 관리할 수 있습니다. |
-| 서버 시작·중지·재시작 | 서버 PC에서 설치 도우미를 다시 열고 **서버 시작 / 업데이트 적용**, **중지**, **재시작**을 사용합니다. 기존 설치는 설정을 불러와 관리 화면으로 열립니다. |
-| 이벤트 알림 받기 | Firebase가 설정된 배포본에서 Android 알림 권한을 허용하고 앱의 **설정 → 푸시 알림**을 켭니다. **알림 연결 상태**에서 결과를 확인합니다. |
+### 2.2 Software Prerequisites
 
-처음 연결한 뒤 **실시간 영상 → 새 사람 감지 이벤트 → 연결 녹화 재생** 순서로 확인하세요. 설치 도우미를 닫아도 서버는 계속 동작합니다. PC를 재부팅했다면 Docker Desktop이 실행된 상태에서 도우미로 서버 상태를 확인하고, 필요하면 서버를 시작하세요. 이미 설정한 Pi에는 최초 연결 명령인 `pair`를 다시 실행하지 않습니다.
+| 경로 | 필수 항목 |
+| --- | --- |
+| Server 설치 파일 | Docker Desktop Linux container mode, Docker Compose v2 |
+| Server source | 위 항목 + Git, Python 3.11.x, `uv` |
+| Edge 패키지 | Raspberry Pi OS Bookworm ARM64와 패키지 설치용 네트워크 |
+| Edge 패키지 빌드 | ARM64 Linux, Python 3.11/pip, dpkg 도구, 검증된 ARM64 MediaMTX |
+| Mobile 개발 | 프로젝트 lockfile과 호환되는 Flutter/Dart, Android SDK, JDK 17 |
 
-푸시 알림은 별도의 Firebase 설정이 필요하며, 영상 확인에는 필요하지 않습니다. 알림 설정, 백업·복원, 업데이트, 문제 해결, 소스 실행·개발 및 동작 원리는 **[docs 문서 안내](docs/README.md)**를 참고하세요.
+Docker Desktop은 WSL 2 backend를 사용할 수 있지만 WSL 내부에서 서버를 별도로 실행하는
+방식은 공식 경로가 아니다. Node.js는 현재 Server·Edge·Mobile 빌드 요구사항이 아니다.
 
-## 라이선스
+AI profile에는 YOLO 호환 감지 모델과 OSNet ONNX 모델이 필요하다. HTTPS는 인증서와 PEM
+개인키가 필요하며, 신뢰 LAN에서만 명시적으로 HTTP를 선택할 수 있다. NVIDIA GPU 실행은
+호환 드라이버와 Docker GPU 지원 환경이 추가로 필요하다.
 
-이 프로젝트의 자체 소스 코드는 [MIT License](LICENSE)로 제공합니다. 사용하는 외부 라이브러리와 모델에는 각각의 라이선스가 적용됩니다.
-# Current installation contract
+## 🛠 Installation & Execution Guide
 
-Use a published installer/package only when its GitHub Release asset exists. Otherwise install from source. The supported Server source path is Windows 10/11 x64 with Python 3.11.x, Git, `uv`, Docker Desktop in Linux-container mode, and Docker Compose v2:
+공개 GitHub Release에 실제 설치 자산이 있는 경우에만 해당 자산을 사용한다. 필요한 자산이
+없으면 아래 source/build 경로를 사용한다. GitHub의 자동 `Source code.zip`은 Windows 설치
+파일, Edge DEB 또는 서명된 APK가 아니다.
+
+### 3.1 Host Server Setup
+
+Windows PowerShell에서 저장소를 준비하고 Install Helper를 실행한다.
 
 ```powershell
 git clone https://github.com/Eye-O-T/new_structure.git
 cd new_structure
+python --version
+uv --version
+docker --version
+docker compose version
 uv sync --project server/setup/install_helper --locked
 uv run --project server/setup/install_helper --locked python -m server.setup.install_helper
 ```
 
-Use `uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli --help` for the CLI. AI models, GPU support, TLS, and FFmpeg are conditional requirements; see [User Guide](docs/user-guide.md).
+GUI에서 Docker·Compose·모델·TLS 조건을 검사하고 저장 위치, 공개 주소, 관리자 계정을
+설정한 뒤 **설치 및 시작**을 실행한다. 기본 설치 저장소는
+`C:\ProgramData\AI_CCTV`이고 Compose 환경 파일은
+`C:\ProgramData\AI_CCTV\config\compose.env`다. 저장 위치를 바꿨다면 해당 경로의
+`config\compose.env`를 사용한다.
+
+설치 후 상태와 실시간 로그는 다음처럼 확인한다. `Ctrl+C`는 로그 조회만 종료하며 서버
+컨테이너는 계속 실행된다.
+
+```powershell
+uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli status --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
+uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli logs --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
+```
+
+GUI는 서버 로그를 터미널에 계속 출력하는 명령이 아니다. 개발자가 수동 source 배포를
+구성하지 않았다면 `server/.env`가 존재한다고 가정하지 않는다. 자세한 Install Helper 동작은
+[Server Install Helper](server/setup/install_helper/README.md)를 참고한다.
+
+### 3.2 Edge Setup
+
+Release에 ARM64 DEB와 같은 이름의 checksum이 있으면 Raspberry Pi에서 검증 후 설치한다.
+`<version>`은 실제 파일의 버전으로 바꾼다.
+
+```bash
+sha256sum -c ai-cctv-edge_<version>_arm64.deb.sha256
+test "$(dpkg --print-architecture)" = arm64
+sudo apt update
+sudo apt install ./ai-cctv-edge_<version>_arm64.deb
+sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001
+```
+
+`pair`는 UDP/37020으로 미설정 Edge를 광고하고 TCP/8003에서 최초 설정을 기다린다.
+Server Desktop의 **카메라 연결**에서 **Edge 찾기** → 장치 선택 → 카메라 이름·연결 설정
+확인 → **선택한 Edge 연결** 순서로 진행한다. 현재 구현은 등록 시 32자 이상의 Edge 운영
+인증 토큰을 요구하고, 같은 값을 중앙 등록과 Edge Control/Recovery에 사용한다. 이미 설정된
+장치에는 `pair`를 다시 실행하지 않는다.
+
+Edge는 GPIO 센서 REST client가 아니다. 카메라 캡처·RTSP 송출·로컬 녹화와
+Bearer 인증 Control/Recovery API를 제공하는 systemd 서비스다. 설치·수동 등록·패키지
+빌드는 [Raspberry Pi Edge](edge/README.md)를 참고한다.
+
+### 3.3 Mobile Client Setup
+
+Release에 서명된 `app-release.apk`가 있으면 Android 기기에서 설치한다. 앱 로그인 화면에는
+`https://cctv.example.com`처럼 Host Server의 HTTP(S) base URL과 서버 계정을 입력하고
+`/api/v1`은 붙이지 않는다. 휴대전화의 `localhost`는 Host Server가 아니다.
+
+Source build는 `mobile/`에서 수행한다.
+
+```sh
+cd mobile
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release --dart-define=API_BASE_URL=https://cctv.example.com
+```
+
+Release APK에는 배포용 서명 키가 필요하다. Flutter/Dart 버전, JDK 17, Firebase 설정과
+서명 파일 형식은 [AI CCTV Android](mobile/README.md)를 따른다.
+
+## 🔄 System Workflow & Verification
+
+### 4.1 Startup Sequence
+
+1. Docker Desktop을 시작하고 Install Helper에서 Server 상태가 ready인지 확인한다.
+2. Raspberry Pi Edge 서비스를 시작하고 RTSP 송출·Control/Recovery 상태를 확인한다.
+3. Server Desktop에서 로그인하고 등록된 카메라의 live view를 확인한다.
+4. Android 앱에 Server base URL과 계정을 입력해 로그인한다.
+
+### 4.2 End-to-End Test Scenarios
+
+1. **Live:** Edge 영상이 MediaMTX에 게시되고 Desktop RTSP 및 Mobile HLS에서 재생되는지 확인한다.
+2. **Detection:** 사람이 등장했을 때 객체 좌표와 새 이벤트가 생성되는지 확인한다.
+3. **Event media:** Snapshot, Person Crop, 선택적 Annotated Snapshot과 관련 녹화를 확인한다.
+4. **Control:** 관리자 계정으로 HD/FHD를 변경하고 Edge와 중앙 상태가 같은 profile을 보고하는지 확인한다.
+5. **Recovery:** 중앙 연결을 일시 중단한 뒤 Edge 로컬 조각이 복구되고 크기·SHA-256 검증을 통과하는지 확인한다.
+6. **Mobile:** 로그인·토큰 갱신·HLS·이벤트·녹화 재생을 확인하고, Firebase 사용 시 실제 알림 도착을 별도로 확인한다.
+
+실제 Raspberry Pi 카메라, GPU, WAN, Android 알림은 해당 장비와 외부 구성을 준비해야 검증할
+수 있다. 단위 테스트나 컨테이너 healthcheck만으로 하드웨어 성공을 주장하지 않는다.
+
+## 📚 Documentation Links
+
+- [Architecture & Network Topology](docs/architecture.md)
+- [Unified REST API Specification — OpenAPI 3.1](docs/openapi.yaml)
+- [Server Install Helper](server/setup/install_helper/README.md)
+- [Raspberry Pi Edge](edge/README.md)
+- [Android Mobile](mobile/README.md)
+- [Model Preparation and Release Records](server/tools/README.md)
+- [Preprocessing Service](server/services/preprocessing/README.md)
+- [Analysis Service](server/services/analysis/README.md)
+- [Data Service](server/services/data/README.md)
+- [External API Service](server/services/external/README.md)
+
+## 🧰 Troubleshooting
+
+### 6.1 WSL 2, Docker Desktop, and Host IP
+
+- Mobile과 Edge에는 WSL 2 내부 IP가 아니라 Windows Host의 LAN IP 또는 DNS를 사용한다.
+- `docker info`와 `docker compose version`으로 Linux engine과 Compose를 확인한다.
+- LAN 접근이 필요하면 공개 HTTP(S)와 RTSP bind 주소가 loopback에만 묶여 있지 않은지 확인한다.
+- Windows Defender Firewall에는 필요한 LAN source와 포트만 허용한다. RTSP와 Edge 관리 포트를
+  WAN에 직접 공개하지 않는다.
+
+### 6.2 Raspberry Pi Discovery and HTTP Timeouts
+
+- Host와 Pi가 같은 IPv4 LAN인지, 공유기의 AP isolation이 꺼져 있는지 확인한다.
+- UDP/37020, Pi TCP/8003·8002, Host RTSP/TCP 8554의 방향별 방화벽을 확인한다.
+- Pi에서 `sudo ai-cctv-edge doctor`, `status`, `logs`를 실행한다.
+- 중앙 서버에서는 Install Helper의 `doctor`, `status`, `logs`를 사용한다.
+- IP가 바뀌었다면 중앙에 저장된 management/recovery URL을 갱신한다. MAC은 인증 비밀값이
+  아니며 Control/Recovery는 operational Bearer token으로 인증한다.
+
+## 👥 Team Members & Roles
+
+현재 저장소 문서에는 확정된 팀원 명단과 역할이 선언되어 있지 않다. 이름이나 역할을
+추정해서 기록하지 않으며, 프로젝트 관리자가 확정한 정보가 있을 때 이 절을 갱신한다.
+
+## 📄 License
+
+이 프로젝트의 자체 소스 코드는 [MIT License](LICENSE)로 제공한다. 외부 라이브러리,
+컨테이너 이미지와 AI 모델에는 각각의 라이선스가 적용된다.
