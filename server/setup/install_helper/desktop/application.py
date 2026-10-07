@@ -117,7 +117,7 @@ class CCTVMainWindow(ReferenceWindow):
             now = time.monotonic()
             if now - self._last_render_log >= 5:
                 average_ms = self._render_total_ms / max(1, self._render_count)
-                LOGGER.info(
+                LOGGER.debug(
                     "video render diagnostics: frames=%d average_ms=%.2f last_ms=%.2f",
                     self._render_count,
                     average_ms,

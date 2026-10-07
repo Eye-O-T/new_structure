@@ -46,6 +46,8 @@ class NetworkSettingsTests(unittest.TestCase):
         self.assertIn("DATA_EXTERNAL_TOKEN=keep-token", values)
         self.assertIn("JWT_SECRET=keep-jwt", values)
         self.assertIn("PUBLIC_BIND_ADDRESS=192.168.0.20", values)
+        self.assertIn("RTSP_PUBLIC_HOST=192.168.0.20", values)
+        self.assertIn("RTSP_PUBLIC_PORT=8555", values)
         self.assertIn("NGINX_CONFIG_FILE=", values)
         self.assertTrue((self.env.parent / "compose.env.bak").is_file())
         config = yaml.safe_load(self.config.read_text(encoding="utf-8"))

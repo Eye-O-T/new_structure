@@ -136,6 +136,9 @@ def _atomic_write(path: Path, content: str) -> None:
 def save_network_settings(settings: NetworkSettings, env_file: Path, config_file: Path, server_dir: Path, *, cert_path: Path | None = None, key_path: Path | None = None) -> None:
     validate_network_settings(settings, cert_path=cert_path, key_path=key_path)
     env_content = env_file.read_text(encoding="utf-8")
+    rtsp_public_host = settings.rtsp_bind_address
+    if rtsp_public_host in {"0.0.0.0", "::"}:
+        rtsp_public_host = urlsplit(settings.public_base_url).hostname or "127.0.0.1"
     updates = {
         "PUBLIC_SCHEME": settings.public_scheme,
         "PUBLIC_BIND_ADDRESS": settings.public_bind_address,
@@ -144,6 +147,8 @@ def save_network_settings(settings: NetworkSettings, env_file: Path, config_file
         "PUBLIC_HTTPS_PORT": str(settings.public_https_port),
         "RTSP_BIND_ADDRESS": settings.rtsp_bind_address,
         "RTSP_PORT": str(settings.rtsp_port),
+        "RTSP_PUBLIC_HOST": rtsp_public_host,
+        "RTSP_PUBLIC_PORT": str(settings.rtsp_port),
         "ALLOW_INSECURE_HTTP": str(settings.allow_insecure_http).lower(),
         "COOKIE_SECURE": str(settings.cookie_secure).lower(),
         "NGINX_CONFIG_FILE": str(server_dir / "services" / "nginx" / ("nginx.http.conf" if settings.public_scheme == "http" else "nginx.conf")),

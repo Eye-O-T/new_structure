@@ -611,6 +611,12 @@ def initialize(request: InstallRequest) -> InstallResult:
         "COOKIE_SECURE": str(request.public_scheme == "https").lower(),
         "RTSP_BIND_ADDRESS": request.rtsp_bind_address,
         "RTSP_PORT": request.rtsp_port,
+        "RTSP_PUBLIC_HOST": (
+            urlsplit(request.public_base_url).hostname
+            if request.rtsp_bind_address in {"0.0.0.0", "::"}
+            else request.rtsp_bind_address
+        ) or "127.0.0.1",
+        "RTSP_PUBLIC_PORT": request.rtsp_port,
         "RECORDING_SEGMENT_SECONDS": request.recording_segment_seconds,
     }
     if runtime_identity is not None:

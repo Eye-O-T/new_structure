@@ -40,31 +40,38 @@ EVENT_POLL_INTERVAL_SECONDS = 2.0
 def _safe_stream_error(exc):
     """Return useful diagnostics without logging credentials or bearer tokens."""
     message = str(exc) or exc.__class__.__name__
-    message = re.sub(r"(https?://)([^/@\s]+):([^/@\s]+)@", r"\1<redacted>@", message)
+    message = re.sub(
+        r"([A-Za-z][A-Za-z0-9+.-]*://)([^/@\s]+):([^/@\s]+)@",
+        r"\1<redacted>@",
+        message,
+    )
     message = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1<redacted>", message)
     return message
+
+
+def _rtsp_failure_reason(exc, elapsed_ms):
+    if type(exc).__name__ == "ExitError" and elapsed_ms >= 7_500:
+        return "connection timeout"
+    return type(exc).__name__
 
 
 @contextmanager
 def _open_live_stream(api, camera_id, av):
     """Prefer direct RTSP and retain HLS as a compatibility fallback."""
+    rtsp_started_at = time.monotonic()
     try:
         live = api.camera(camera_id, "/live?protocol=rtsp")
-        LOGGER.info("RTSP live open attempt camera=%s", camera_id)
         with av.open(live["url"], timeout=(8, 8), options=LIVE_RTSP_OPTIONS) as stream:
-            LOGGER.info("RTSP live open success camera=%s", camera_id)
             yield stream
             return
     except Exception as exc:
+        elapsed_ms = (time.monotonic() - rtsp_started_at) * 1000
         LOGGER.warning(
-            "RTSP live open failed camera=%s; falling back to authenticated HLS "
-            "error_type=%s error=%s",
+            "RTSP unavailable camera=%s reason=%s; using HLS fallback",
             camera_id,
-            type(exc).__name__,
-            _safe_stream_error(exc),
+            _rtsp_failure_reason(exc, elapsed_ms),
         )
         live = api.camera(camera_id, "/live?protocol=hls")
-        LOGGER.info("HLS fallback selected camera=%s", camera_id)
         with MediaBridge(api, camera_id, live["hls_url"]) as bridge:
             with av.open(
                 bridge.url,
@@ -141,7 +148,7 @@ class VideoWorker(QThread):
             decoded = self._decoded_frames
             displayed = self._displayed_frames
             dropped = self._dropped_frames
-        LOGGER.info(
+        LOGGER.debug(
             "video diagnostics: decoded=%d displayed=%d dropped=%d queue=%d",
             decoded,
             displayed,

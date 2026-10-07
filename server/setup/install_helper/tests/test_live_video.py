@@ -177,6 +177,18 @@ class StreamDiagnosticsTests(unittest.TestCase):
         self.assertIn("falling back", message)
         self.assertNotIn("password", message)
 
+    def test_stream_error_redacts_credentials_for_supported_url_schemes(self):
+        for scheme in ("http", "https", "rtsp"):
+            value = video._safe_stream_error(
+                RuntimeError(f"{scheme}://user:secret-{scheme}@host/path")
+            )
+            self.assertNotIn("secret-", value)
+            self.assertIn(f"{scheme}://<redacted>@host/path", value)
+
+        value = video._safe_stream_error(RuntimeError("Bearer secret-token"))
+        self.assertNotIn("secret-token", value)
+        self.assertIn("Bearer <redacted>", value)
+
     def test_hls_resource_types_are_classified(self):
         self.assertEqual(hls_resource_type("/hls/cam/index.m3u8"), "playlist")
         self.assertEqual(hls_resource_type("/hls/cam/segment-1.m4s"), "segment")

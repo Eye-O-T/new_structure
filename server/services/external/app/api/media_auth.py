@@ -5,6 +5,8 @@ import asyncio
 import hmac
 import logging
 import re
+import secrets
+import time
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -52,16 +54,60 @@ DUMMY_MEDIA_PASSWORD_HASH = hash_password("invalid-media-credential")
 class _MediaAuthResponse(Response):
     """MediaMTX에 인증 응답을 보낸 뒤 카메라 잠금을 해제한다."""
 
-    def __init__(self, lock: asyncio.Lock) -> None:
+    def __init__(
+        self,
+        lock: asyncio.Lock,
+        *,
+        request_id: str,
+        action: str,
+        protocol: str,
+        camera_id: str,
+        started_at: float,
+        lock_acquired_at: float,
+    ) -> None:
         super().__init__(status_code=204)
         self._camera_lock = lock
+        self._request_id = request_id
+        self._action = action
+        self._protocol = protocol
+        self._camera_id = camera_id
+        self._started_at = started_at
+        self._lock_acquired_at = lock_acquired_at
 
     # 성공 응답 전송이 끝날 때까지 잠금을 보유하고 전송 예외가 발생해도 해제한다.
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         try:
             await super().__call__(scope, receive, send)
+        except BaseException as exc:
+            LOGGER.warning(
+                "MEDIA_AUTH_RESPONSE_FAILED request_id=%s action=%s protocol=%s "
+                "camera_id=%s error_type=%s total_ms=%.1f",
+                self._request_id,
+                self._action,
+                self._protocol,
+                self._camera_id,
+                type(exc).__name__,
+                (time.monotonic() - self._started_at) * 1000,
+            )
+            raise
+        else:
+            LOGGER.info(
+                "MEDIA_AUTH_RESPONSE_SENT request_id=%s action=%s protocol=%s "
+                "camera_id=%s status=204 total_ms=%.1f",
+                self._request_id,
+                self._action,
+                self._protocol,
+                self._camera_id,
+                (time.monotonic() - self._started_at) * 1000,
+            )
         finally:
             self._camera_lock.release()
+            LOGGER.info(
+                "MEDIA_AUTH_LOCK_RELEASED request_id=%s camera_id=%s held_ms=%.1f",
+                self._request_id,
+                self._camera_id,
+                (time.monotonic() - self._lock_acquired_at) * 1000,
+            )
 
 
 # 원래 영상 URI와 요청 선택자의 일치를 확인하고 해당 카메라·녹화·이벤트의 권한을 검사한다.
@@ -185,21 +231,120 @@ async def internal_media_auth(
     if action not in {"publish", "read"}:
         # Playback/API/metrics/pprof는 MediaMTX 인증 대상에서 제외되며 내부 Compose망에만 있다.
         return Response(status_code=204)
+    started_at = time.monotonic()
+    request_id = secrets.token_hex(4)
+    safe_camera_id = (
+        payload.path if CAMERA_ID_PATTERN.fullmatch(payload.path) else "<invalid>"
+    )
+    LOGGER.info(
+        "MEDIA_AUTH_RECEIVED request_id=%s action=%s protocol=%s camera_id=%s",
+        request_id,
+        action,
+        protocol,
+        safe_camera_id,
+    )
     if not CAMERA_ID_PATTERN.fullmatch(payload.path):
+        LOGGER.warning(
+            "MEDIA_AUTH_REJECTED request_id=%s action=%s protocol=%s "
+            "camera_id=%s reason=invalid_camera_id total_ms=%.1f",
+            request_id,
+            action,
+            protocol,
+            safe_camera_id,
+            (time.monotonic() - started_at) * 1000,
+        )
         raise _auth_error("Media authentication failed")
     if action == "read" and protocol != "rtsp":
+        LOGGER.warning(
+            "MEDIA_AUTH_REJECTED request_id=%s action=%s protocol=%s "
+            "camera_id=%s reason=invalid_read_protocol total_ms=%.1f",
+            request_id,
+            action,
+            protocol,
+            safe_camera_id,
+            (time.monotonic() - started_at) * 1000,
+        )
         raise _auth_error("Media authentication failed")
 
     # 카메라 활성 상태 확인부터 인증 응답 전송까지 같은 잠금을 잡는다.
     # 비활성화·키 교체·삭제 도중에 예전 인증으로 새 송출 연결이 끼어드는 것을 막기 위해서다.
     camera_lock = camera_admission_lock(request, payload.path)
-    await camera_lock.acquire()
+    lock_wait_started_at = time.monotonic()
+    LOGGER.info(
+        "MEDIA_AUTH_LOCK_WAIT request_id=%s camera_id=%s",
+        request_id,
+        safe_camera_id,
+    )
     try:
+        await camera_lock.acquire()
+    except BaseException as exc:
+        LOGGER.warning(
+            "MEDIA_AUTH_LOCK_WAIT_FAILED request_id=%s camera_id=%s "
+            "error_type=%s wait_ms=%.1f total_ms=%.1f",
+            request_id,
+            safe_camera_id,
+            type(exc).__name__,
+            (time.monotonic() - lock_wait_started_at) * 1000,
+            (time.monotonic() - started_at) * 1000,
+        )
+        raise
+    lock_acquired_at = time.monotonic()
+    LOGGER.info(
+        "MEDIA_AUTH_LOCK_ACQUIRED request_id=%s camera_id=%s wait_ms=%.1f",
+        request_id,
+        safe_camera_id,
+        (lock_acquired_at - lock_wait_started_at) * 1000,
+    )
+    try:
+        data_lookup_started_at = time.monotonic()
+        LOGGER.info(
+            "MEDIA_AUTH_CAMERA_LOOKUP_START request_id=%s camera_id=%s",
+            request_id,
+            safe_camera_id,
+        )
         try:
             camera = await data.get_camera(payload.path, user_id="0")
         except DataNotFound as exc:
+            LOGGER.warning(
+                "MEDIA_AUTH_REJECTED request_id=%s action=%s protocol=%s "
+                "camera_id=%s reason=camera_not_found data_ms=%.1f total_ms=%.1f",
+                request_id,
+                action,
+                protocol,
+                safe_camera_id,
+                (time.monotonic() - data_lookup_started_at) * 1000,
+                (time.monotonic() - started_at) * 1000,
+            )
             raise _auth_error("Media authentication failed") from exc
+        except BaseException as exc:
+            LOGGER.warning(
+                "MEDIA_AUTH_CAMERA_LOOKUP_FAILED request_id=%s camera_id=%s "
+                "error_type=%s data_ms=%.1f total_ms=%.1f",
+                request_id,
+                safe_camera_id,
+                type(exc).__name__,
+                (time.monotonic() - data_lookup_started_at) * 1000,
+                (time.monotonic() - started_at) * 1000,
+            )
+            raise
+        LOGGER.info(
+            "MEDIA_AUTH_CAMERA_LOOKUP_COMPLETE request_id=%s camera_id=%s "
+            "enabled=%s data_ms=%.1f",
+            request_id,
+            safe_camera_id,
+            bool(camera.get("enabled", True)),
+            (time.monotonic() - data_lookup_started_at) * 1000,
+        )
         if not bool(camera.get("enabled", True)):
+            LOGGER.warning(
+                "MEDIA_AUTH_REJECTED request_id=%s action=%s protocol=%s "
+                "camera_id=%s reason=camera_disabled total_ms=%.1f",
+                request_id,
+                action,
+                protocol,
+                safe_camera_id,
+                (time.monotonic() - started_at) * 1000,
+            )
             raise _auth_error("Media authentication failed")
 
         if action == "read":
@@ -234,8 +379,46 @@ async def internal_media_auth(
                     payload.password, expected_password
                 )
         if not (username_valid and password_valid):
+            LOGGER.warning(
+                "MEDIA_AUTH_REJECTED request_id=%s action=%s protocol=%s "
+                "camera_id=%s reason=credential_mismatch total_ms=%.1f",
+                request_id,
+                action,
+                protocol,
+                safe_camera_id,
+                (time.monotonic() - started_at) * 1000,
+            )
             raise _auth_error("Media authentication failed")
-    except BaseException:
+    except BaseException as exc:
         camera_lock.release()
+        if not isinstance(exc, HTTPException):
+            LOGGER.warning(
+                "MEDIA_AUTH_ABORTED request_id=%s action=%s protocol=%s camera_id=%s "
+                "error_type=%s total_ms=%.1f lock_held_ms=%.1f",
+                request_id,
+                action,
+                protocol,
+                safe_camera_id,
+                type(exc).__name__,
+                (time.monotonic() - started_at) * 1000,
+                (time.monotonic() - lock_acquired_at) * 1000,
+            )
         raise
-    return _MediaAuthResponse(camera_lock)
+    LOGGER.info(
+        "MEDIA_AUTH_ACCEPTED request_id=%s action=%s protocol=%s camera_id=%s "
+        "auth_ms=%.1f",
+        request_id,
+        action,
+        protocol,
+        safe_camera_id,
+        (time.monotonic() - started_at) * 1000,
+    )
+    return _MediaAuthResponse(
+        camera_lock,
+        request_id=request_id,
+        action=action,
+        protocol=protocol,
+        camera_id=safe_camera_id,
+        started_at=started_at,
+        lock_acquired_at=lock_acquired_at,
+    )
