@@ -14,7 +14,6 @@ from ai_cctv_core.time import format_utc, parse_utc
 MATCH_THRESHOLD = 0.97
 MATCH_MARGIN = 0.05
 MAX_OBSERVATION_GAP_SECONDS = 1800
-SAME_CAMERA_EXCLUSION_SECONDS = 30
 MAX_GALLERY_SAMPLES = 5000
 ACTIVE_OBSERVATION_SECONDS = 3
 
@@ -143,16 +142,8 @@ def resolve_identity(
                 MAX_GALLERY_SAMPLES,
             ),
         ).fetchall()
-        blocked_ids = {
-            candidate["global_person_id"]
-            for candidate in candidates
-            if candidate["camera_id"] == row["camera_id"]
-            and (candidate["tracking_session_id"], candidate["person_id"])
-            != (session, row["person_id"])
-            and abs((observed - parse_utc(candidate["observed_at"])).total_seconds())
-            <= SAME_CAMERA_EXCLUSION_SECONDS
-        }
-        blocked_ids.update(conflicting_global_ids(connection, row, session, stamp))
+        # 같은 카메라의 순차적 재등장은 허용하고, 관측 구간이 겹치는 ID만 배제한다.
+        blocked_ids = conflicting_global_ids(connection, row, session, stamp)
         scores: dict[str, float] = {}
         norm = math.hypot(*descriptor.features)
         for candidate in candidates:

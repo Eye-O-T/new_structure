@@ -44,7 +44,7 @@ ONNX Runtime으로 실행하며, 입력은 RGB `float32` NCHW `1×3×256×128`�
 
 `LocalAppearanceIdentity`를 명시적으로 선택하면 기존 동작을 유지한다. 모델 경로가 없거나 빈 문자열일 때는 `appearance-hsv-v1`의 HSV·밝기·질감 392차원 특징을 계산하고, 경로를 지정하면 16~2048차원을 허용하는 기존 범용 ONNX 경로를 사용한다. 이 호환 플러그인의 입력·출력 범위는 기본 OSNet의 정확한 512차원 계약과 다르다.
 
-공통 descriptor 계약은 `{schema_version:1, space_id, features}`이며 `space_id`는 1~128자, features는 유한 실수 16~2048개, L2 norm 허용 오차는 ±0.001이다. 기본 OSNet은 그중 512차원을 사용한다. 벡터는 Data의 비공개 gallery에만 저장되고 공개 이벤트 metadata에 복사되지 않는다. Data는 같은 공간·차원의 관측 중 인물별 최고 cosine 점수를 비교한다. 기본 0.97 이상이고 두 번째 후보와 기본 0.05 이상 차이 날 때만 기존 ID를 사용하며, 후보 없음·낮은 점수·모호함은 새 `person-<uuid>` ID가 된다. 같은 카메라의 다른 추적과 관측 구간이 겹치거나 등장 시각이 ±30초 안인 ID는 후보에서 제외한다. 등장·퇴장·최신 객체 관측으로 구간을 저장하여 지연된 작업에도 적용한다.
+공통 descriptor 계약은 `{schema_version:1, space_id, features}`이며 `space_id`는 1~128자, features는 유한 실수 16~2048개, L2 norm 허용 오차는 ±0.001이다. 기본 OSNet은 그중 512차원을 사용한다. 벡터는 Data의 비공개 gallery에만 저장되고 공개 이벤트 metadata에 복사되지 않는다. Data는 같은 공간·차원의 관측 중 인물별 최고 cosine 점수를 비교한다. 기본 0.97 이상이고 두 번째 후보와 기본 0.05 이상 차이 날 때만 기존 ID를 사용하며, 후보 없음·낮은 점수·모호함은 새 `person-<uuid>` ID가 된다. 같은 카메라의 다른 추적과 관측 구간이 겹치는 ID는 후보에서 제외한다. 관측 구간이 겹치지 않는 재등장은 같은 카메라에서도 특징 비교로 기존 ID를 재사용할 수 있다. 등장·퇴장·최신 객체 관측으로 구간을 저장하여 지연된 작업에도 적용한다.
 
 비교 기준은 **Data 서비스**의 `IDENTITY_MATCH_THRESHOLD`·`IDENTITY_MATCH_MARGIN`으로 조정한다. 기본 0.97·0.05는 기존의 보수적인 값을 유지한 것이며 OSNet이나 설치 현장 데이터로 교정된 기준이 아니다. 임계값을 바꾸기 전에 동일인·유사 복장 타인의 검증 영상을 분리하고 오연결·미연결을 측정한다. gallery의 관측 시각 기준 1,800초·최대 5,000표본 제한은 [Data identity 저장소](../data/app/database/repositories/identity.py)의 상수다. 오래 지난 새 추적은 새로운 ID를 받을 수 있다.
 
