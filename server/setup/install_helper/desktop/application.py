@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QMe
 
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
 from .api import safe_error
+from .camera_view import CameraView
+from .video_worker import VideoWorker
 from ..qt_tasks import BackgroundTask
 
 
@@ -40,10 +42,20 @@ class CCTVMainWindow(ReferenceWindow):
         self._render_count = 0
         self._render_total_ms = 0.0
         self._last_render_log = time.monotonic()
+        self._workers = {}
+        self._views = {}
+        self._camera_metrics = {}
+        self._camera_events = {}
+        self._view_mode = "single"
+        self._selected_camera_id = None
+        self._updating_camera_picker = False
+        self._monitoring = False
         super().__init__()
         self.ai_cctv_path = self.storage_root_path = str(storage_path)
         self.setMinimumSize(900, 600)
         self.video_label.setMinimumSize(320, 180)
+        self.video_grid.removeWidget(self.video_label)
+        self.video_label.hide()
         self.storage_label.setText(f"서버 저장소\n{storage_path or '서버에서 관리'}\n\n모니터링 중지는 화면 연결만 종료합니다.\n서버 녹화는 계속됩니다.")
         self.cam_status.setText("설정에서 로그인하세요.")
         self.cam_status.setWordWrap(True)
@@ -58,76 +70,252 @@ class CCTVMainWindow(ReferenceWindow):
                 label.setText("서버 카메라 · 실시간 영상")
         self.btn_stop.setEnabled(False)
 
-    def start_video(self):
-        if self.worker is not None:
+    def _camera_name(self, camera_id):
+        for camera in self.cameras:
+            if camera.get("camera_id") == camera_id:
+                return str(camera.get("name") or camera_id)
+        return camera_id
+
+    def _available_camera_ids(self):
+        return [str(camera["camera_id"]) for camera in self.cameras if camera.get("enabled", True)]
+
+    def _refresh_camera_picker(self):
+        selected = self._selected_camera_id
+        self._updating_camera_picker = True
+        self.camera_picker.clear()
+        for camera_id in self._available_camera_ids():
+            self.camera_picker.addItem(f"{self._camera_name(camera_id)} · {camera_id}", camera_id)
+        index = self.camera_picker.findData(selected)
+        if index >= 0:
+            self.camera_picker.setCurrentIndex(index)
+        self._updating_camera_picker = False
+        enabled = bool(self._available_camera_ids())
+        self.camera_picker.setEnabled(enabled)
+        self.btn_grid.setEnabled(enabled)
+
+    def _display_ids(self):
+        available = self._available_camera_ids()
+        if self._selected_camera_id not in available:
+            self._selected_camera_id = available[0] if available else None
+        if self._view_mode == "single" or not self._selected_camera_id:
+            return [self._selected_camera_id] if self._selected_camera_id else []
+        start = available.index(self._selected_camera_id)
+        return (available[start:] + available[:start])[:4]
+
+    def _clear_video_grid(self):
+        while self.video_grid.count():
+            item = self.video_grid.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+
+    def _show_views(self):
+        camera_ids = self._display_ids()
+        self._clear_video_grid()
+        for index, camera_id in enumerate(camera_ids):
+            view = self._views.get(camera_id)
+            if view is None:
+                view = CameraView(camera_id, self._camera_name(camera_id), self)
+                view.selected.connect(self.select_camera)
+                view.activated.connect(self.open_single_camera)
+                self._views[camera_id] = view
+            view.set_overlay_enabled(self._overlay_enabled)
+            view.set_selected(camera_id == self._selected_camera_id)
+            if self._view_mode == "grid":
+                self.video_grid.addWidget(view, index // 2, index % 2)
+            else:
+                self.video_grid.addWidget(view, 0, 0)
+            view.show()
+        self.camera_title.setText(
+            "서버 카메라 · 2×2 실시간 영상" if self._view_mode == "grid"
+            else f"{self._selected_camera_id or '카메라'} · 실시간 영상"
+        )
+        self._sync_workers(camera_ids)
+
+    def _sync_workers(self, camera_ids):
+        wanted = set(camera_ids)
+        for camera_id, worker in list(self._workers.items()):
+            if camera_id not in wanted:
+                worker.stop()
+        if not self._monitoring:
             return
+        for camera_id in camera_ids:
+            if camera_id not in self._workers:
+                self._start_camera_worker(camera_id)
+
+    def _start_camera_worker(self, camera_id):
+        worker = VideoWorker(source=(self.api, camera_id))
+        self._workers[camera_id] = worker
+        worker.frame_ready.connect(lambda frame, cid=camera_id, current=worker: self._on_frame(cid, current, frame))
+        worker.objects_ready.connect(lambda payload, cid=camera_id, current=worker: self._on_objects(cid, current, payload))
+        worker.metrics_ready.connect(lambda metrics, cid=camera_id, current=worker: self._on_metrics(cid, current, metrics))
+        worker.event_ready.connect(lambda event, cid=camera_id, current=worker: self._on_event(cid, current, event))
+        worker.loading_ready.connect(lambda message, cid=camera_id, current=worker: self._on_loading(cid, current, message))
+        worker.finished.connect(lambda cid=camera_id, current=worker: self._on_worker_finished(cid, current))
+        view = self._views.get(camera_id)
+        if view:
+            view.show_loading("서버 영상 연결 중…")
+        worker.start()
+
+    def _is_current_worker(self, camera_id, worker):
+        return self._workers.get(camera_id) is worker
+
+    def _on_frame(self, camera_id, worker, frame):
+        try:
+            if self._is_current_worker(camera_id, worker) and not self._stopping:
+                view = self._views.get(camera_id)
+                if view:
+                    view.set_frame(frame)
+                if camera_id == self._selected_camera_id:
+                    self.cam_status.setText(f"● {camera_id} · LIVE")
+        finally:
+            worker.acknowledge_frame()
+
+    def _on_objects(self, camera_id, worker, payload):
+        if not self._is_current_worker(camera_id, worker):
+            return
+        view = self._views.get(camera_id)
+        if view:
+            view.set_objects(payload)
+
+    def _on_metrics(self, camera_id, worker, metrics):
+        if not self._is_current_worker(camera_id, worker):
+            return
+        self._camera_metrics[camera_id] = metrics
+        if camera_id == self._selected_camera_id:
+            self._render_selected_summary()
+
+    def _on_event(self, camera_id, worker, event):
+        if not self._is_current_worker(camera_id, worker):
+            return
+        event = {**event, "camera_id": camera_id}
+        self._camera_events.setdefault(camera_id, []).insert(0, event)
+        del self._camera_events[camera_id][30:]
+        if event.get("type") in {"error", "network_failure"}:
+            view = self._views.get(camera_id)
+            if view:
+                view.show_error(event.get("message", "영상 연결 오류"))
+        if camera_id == self._selected_camera_id:
+            self._render_selected_summary()
+
+    def _on_loading(self, camera_id, worker, message):
+        if self._is_current_worker(camera_id, worker):
+            view = self._views.get(camera_id)
+            if view:
+                view.show_loading(message)
+
+    def _on_worker_finished(self, camera_id, worker):
+        if not self._is_current_worker(camera_id, worker):
+            worker.deleteLater()
+            return
+        self._workers.pop(camera_id, None)
+        worker.deleteLater()
+        view = self._views.get(camera_id)
+        if view and not self._stopping:
+            view.set_status("연결 종료 — 재시도하려면 시작", "#ef4444")
+        if self._stopping and not self._workers:
+            self._finish_stopping()
+        elif self._monitoring and camera_id in self._display_ids():
+            # Do not leave a tile blank when a deselected worker finishes after
+            # that camera has already been selected again.
+            self._start_camera_worker(camera_id)
+
+    def _render_selected_summary(self):
+        camera_id = self._selected_camera_id
+        metrics = self._camera_metrics.get(camera_id, {})
+        self.metric_current["value"].setText(str(metrics.get("current_objects", 0)))
+        self.metric_total["value"].setText(str(metrics.get("tracked_total", 0)))
+        events = self._camera_events.get(camera_id, [])
+        self.appear_count = self.disappear_count = 0
+        while self.event_list.count():
+            item = self.event_list.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for event in reversed(events):
+            ReferenceWindow.add_event(self, event)
+        self.metric_appear["value"].setText(str(self.appear_count))
+        self.metric_disappear["value"].setText(str(self.disappear_count))
+
+    def select_camera_from_picker(self, _index):
+        if not self._updating_camera_picker:
+            self.select_camera(self.camera_picker.currentData())
+
+    def select_camera(self, camera_id):
+        if not camera_id or camera_id == self._selected_camera_id:
+            return
+        self._selected_camera_id = camera_id
+        self._refresh_camera_picker()
+        self._show_views()
+        self._render_selected_summary()
+
+    def open_single_camera(self, camera_id):
+        self._selected_camera_id = camera_id
+        self._view_mode = "single"
+        self.btn_grid.setChecked(False)
+        self._refresh_camera_picker()
+        self._show_views()
+        self._render_selected_summary()
+
+    def toggle_grid_view(self, checked):
+        self._view_mode = "grid" if checked else "single"
+        self._show_views()
+
+    def cameras_updated(self, cameras):
+        """Accept a settings-dialog refresh without disturbing unchanged views."""
+        self.cameras = cameras
+        available = set(self._available_camera_ids())
+        for camera_id, worker in list(self._workers.items()):
+            if camera_id not in available:
+                worker.stop()
+        self._refresh_camera_picker()
+        self._show_views()
+
+    def start_video(self):
         if not self.api or not isinstance(self.video_source, tuple) or self.video_source[0] is not self.api:
             self.open_settings()
         if not self.api or not isinstance(self.video_source, tuple) or self.video_source[0] is not self.api:
             return
-        self.appear_count = self.disappear_count = 0
-        for metric in (self.metric_current, self.metric_total, self.metric_appear, self.metric_disappear):
-            metric["value"].setText("0")
-        while self.event_list.count():
-            widget = self.event_list.takeAt(0).widget()
-            if widget:
-                widget.deleteLater()
+        if not self.cameras:
+            self.cameras = self.api.cameras()
+        if not self._selected_camera_id:
+            self._selected_camera_id = self.video_source[1]
+        self._monitoring = True
         self._stopping = False
-        super().start_video()
+        self._refresh_camera_picker()
+        self._show_views()
         self.btn_start.setEnabled(False)
-        self.btn_setting.setEnabled(False)
         self.btn_stop.setEnabled(True)
-        self.cam_status.setText(f"● {self.video_source[1]} · 로딩 중")
+        self.btn_setting.setEnabled(False)
 
     def stop_video(self):
-        if self.worker is not None:
-            self._stopping = True
-            self.worker.stop()
-            self.cam_status.setText("영상 연결을 정리하고 있습니다…")
-            self.btn_stop.setEnabled(False)
-        else:
-            self.show_idle_screen()
-
-    def handle_worker_finished(self):
-        worker = self.worker
-        if worker is None:
+        if not self._workers:
+            self._finish_stopping()
             return
-        self.worker = None
-        worker.deleteLater()
-        self.btn_start.setEnabled(True)
-        self.btn_setting.setEnabled(True)
+        self._stopping = True
         self.btn_stop.setEnabled(False)
-        self.cam_status.setText("모니터링 중지됨" if self._stopping else "영상 연결 종료 — 모니터링 시작으로 재시도")
-        self.show_idle_screen()
+        self.cam_status.setText("영상 연결을 정리하고 있습니다…")
+        for worker in list(self._workers.values()):
+            worker.stop()
+
+    def _finish_stopping(self):
+        self._monitoring = False
+        self._stopping = False
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_setting.setEnabled(True)
+        self.cam_status.setText("모니터링 중지됨")
+        for view in self._views.values():
+            view.set_status("중지됨", "#ef4444")
         if self._closing:
             QTimer.singleShot(0, self.close)
 
-    def update_frame(self, frame):
-        if self.worker is None:
-            return
-        started = time.perf_counter()
-        try:
-            if not self._stopping:
-                super().update_frame(frame)
-                self.cam_status.setText(f"● {self.video_source[1]} · LIVE")
-        finally:
-            elapsed_ms = (time.perf_counter() - started) * 1000
-            self._render_count += 1
-            self._render_total_ms += elapsed_ms
-            now = time.monotonic()
-            if now - self._last_render_log >= 5:
-                average_ms = self._render_total_ms / max(1, self._render_count)
-                LOGGER.debug(
-                    "video render diagnostics: frames=%d average_ms=%.2f last_ms=%.2f",
-                    self._render_count,
-                    average_ms,
-                    elapsed_ms,
-                )
-                self._last_render_log = now
-            self.worker.acknowledge_frame()
+    def set_bounding_boxes_enabled(self, enabled):
+        super().set_bounding_boxes_enabled(enabled)
+        for view in self._views.values():
+            view.set_overlay_enabled(enabled)
 
     def open_settings(self):
-        if self.worker is not None:
+        if self._workers:
             return
         if self.resource_monitor_window is not None:
             self.resource_monitor_window.close()
@@ -137,7 +325,9 @@ class CCTVMainWindow(ReferenceWindow):
         super().open_settings()
         if isinstance(self.video_source, tuple):
             camera_id = self.video_source[1]
-            self.camera_title.setText(f"{camera_id} · 실시간 영상")
+            self._selected_camera_id = camera_id
+            self._refresh_camera_picker()
+            self._show_views()
             self.cam_status.setText(f"● {camera_id} · 준비됨")
         self.storage_label.setText(f"서버 저장소\n{self.ai_cctv_path or '서버에서 관리'}\n\n모니터링 중지는 화면 연결만 종료합니다.\n서버 녹화는 계속됩니다.")
 
@@ -149,26 +339,6 @@ class CCTVMainWindow(ReferenceWindow):
 
     def _build_resource_monitor_url(self, source):
         return self.server_url
-
-    def add_event(self, event):
-        if self._stopping:
-            return
-        if event.get("type") == "network_failure" and isinstance(self.video_source, tuple):
-            camera_id = self.video_source[1]
-            publisher = getattr(self, "local_publisher", None)
-            if publisher is not None and camera_id == publisher.camera_id and (
-                publisher.process.state() == QProcess.NotRunning
-            ):
-                event = {
-                    **event,
-                    "message": "노트북 카메라 송출이 실행 중이 아닙니다. 설정에서 송출 시작을 확인하세요.",
-                }
-        super().add_event(event)
-        # Plain text prevents server-provided labels from becoming rich-text links.
-        for label in self.event_list.itemAt(0).widget().findChildren(QLabel):
-            label.setTextFormat(Qt.PlainText)
-        if event.get("type") == "network_failure" and isinstance(self.video_source, tuple):
-            self.cam_status.setText(f"● {self.video_source[1]} · 연결 확인 중")
 
     def open_event_detail(self, event):
         event_id = event.get("id")
@@ -297,7 +467,7 @@ class CCTVMainWindow(ReferenceWindow):
                 event.ignore()
                 return
         self._closing = True
-        if self.worker is not None:
+        if self._workers:
             self.stop_video()
             event.ignore()
             return

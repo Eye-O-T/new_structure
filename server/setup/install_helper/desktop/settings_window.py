@@ -322,6 +322,9 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
     def reload_cameras(self, cameras):
         self.parent().cameras = cameras
         self._populate_camera_combo()
+        updated = getattr(self.parent(), "cameras_updated", None)
+        if updated is not None:
+            updated(cameras)
         self.message.setText("카메라 목록을 갱신했습니다.")
 
     def save_basic_settings(self):

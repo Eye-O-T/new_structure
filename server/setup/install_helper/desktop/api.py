@@ -47,13 +47,19 @@ class DesktopApi(ServerApiClient):
     def _request(self, method, path, payload=None, *, authenticated=True):
         if not path.startswith("/api/v1/") or "#" in path:
             raise ValueError("Invalid API path")
+        # Keep network requests concurrent: object/event polls from one camera
+        # must not wait for another camera's slow response.  The lock protects
+        # only token state and makes a simultaneous 401 refresh happen once.
         with self._lock:
-            try:
-                return super()._request(method, path, payload, authenticated=authenticated)
-            except ServerApiError as exc:
-                if exc.status_code != 401 or not authenticated:
-                    raise
-                self._refresh()
+            token_used = self._access_token
+        try:
+            return super()._request(method, path, payload, authenticated=authenticated)
+        except ServerApiError as exc:
+            if exc.status_code != 401 or not authenticated:
+                raise
+            with self._lock:
+                if self._access_token == token_used:
+                    self._refresh()
                 return super()._request(method, path, payload, authenticated=authenticated)
 
     def login(self, username, password):

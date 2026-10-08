@@ -13,6 +13,8 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QFrame,
     QScrollArea,
+    QComboBox,
+    QGridLayout,
 )
 from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
@@ -85,6 +87,15 @@ class CCTVMainWindow(QMainWindow):
         )
         self.btn_setting.clicked.connect(self.open_settings)
 
+        self.camera_picker = QComboBox()
+        self.camera_picker.setMinimumWidth(180)
+        self.camera_picker.setEnabled(False)
+        self.camera_picker.currentIndexChanged.connect(self.select_camera_from_picker)
+        self.btn_grid = QPushButton("2×2 보기")
+        self.btn_grid.setCheckable(True)
+        self.btn_grid.setEnabled(False)
+        self.btn_grid.clicked.connect(self.toggle_grid_view)
+
         self.btn_resource_monitor = QPushButton("리소스 모니터링")
         self.btn_resource_monitor.setStyleSheet(
             "background-color: #0e7490; color: white; padding: 8px 20px; "
@@ -96,6 +107,8 @@ class CCTVMainWindow(QMainWindow):
         header_layout.addStretch()
         header_layout.addWidget(self.btn_start)
         header_layout.addWidget(self.btn_stop)
+        header_layout.addWidget(self.camera_picker)
+        header_layout.addWidget(self.btn_grid)
         header_layout.addWidget(self.btn_setting)
         header_layout.addWidget(self.btn_resource_monitor)
 
@@ -141,7 +154,10 @@ class CCTVMainWindow(QMainWindow):
             "font-size: 28px; color: #334155; font-weight: bold;"
         )
         self.video_label.setMinimumSize(320, 180)
-        center_layout.addWidget(self.video_label, stretch=1)
+        self.video_grid = QGridLayout()
+        self.video_grid.setContentsMargins(0, 0, 0, 0)
+        self.video_grid.addWidget(self.video_label, 0, 0)
+        center_layout.addLayout(self.video_grid, stretch=1)
 
         metrics_layout = QHBoxLayout()
 
