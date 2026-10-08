@@ -210,7 +210,7 @@ services:
 
   # 외부 HTTPS와 내부 HTTP 중계 역할을 함께 맡지만 8080은 호스트에 공개하지 않는다.
   nginx:
-    image: ${NGINX_IMAGE:-nginx:1.27.2-alpine}
+    image: ${NGINX_IMAGE:-nginx:1.27.3-alpine}
     init: true
     restart: unless-stopped
     ports:
