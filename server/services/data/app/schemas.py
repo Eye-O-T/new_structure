@@ -351,7 +351,7 @@ class EventCreate(StrictModel):
     event_type: EventType | str = Field(min_length=1, max_length=128)
     occurred_at: datetime
     person_id: str | None = Field(default=None, max_length=256)
-    global_person_id: str | None = Field(default=None, max_length=256)
+    global_person_id: int | None = Field(default=None, ge=1)
     confidence: float | None = Field(default=None, ge=0, le=1)
     recording_segment_id: int | None = Field(default=None, ge=1)
     recording_segment_ids: list[int] = Field(default_factory=list)

@@ -6,7 +6,7 @@ CREATE UNIQUE INDEX idx_events_source_event_id
 -- 특징 벡터는 공개 이벤트 metadata와 분리한다. 각 특징 공간에서 track당 최신 표본만 둔다.
 CREATE TABLE identity_gallery (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    global_person_id TEXT NOT NULL,
+    global_person_id INTEGER NOT NULL,
     space_id TEXT NOT NULL,
     camera_id TEXT NOT NULL REFERENCES cameras(camera_id) ON UPDATE CASCADE ON DELETE CASCADE,
     tracking_session_id TEXT NOT NULL,

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-import uuid
 from datetime import timedelta
 
 from ai_cctv_core.contracts.objects import IdentityDescriptor
@@ -17,6 +16,14 @@ MAX_OBSERVATION_GAP_SECONDS = 1800
 SAME_CAMERA_EXCLUSION_SECONDS = 30
 MAX_GALLERY_SAMPLES = 5000
 ACTIVE_OBSERVATION_SECONDS = 3
+
+
+def _allocate_global_person_id(connection: sqlite3.Connection, stamp: str) -> int:
+    connection.execute(
+        "INSERT INTO global_persons(created_at) VALUES (?)",
+        (stamp,),
+    )
+    return int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
 
 
 def note_track_observation(
@@ -178,7 +185,7 @@ def resolve_identity(
         ):
             global_id, decision = ranked[0][0], "matched"
         else:
-            global_id, decision = "person-" + uuid.uuid4().hex, "new"
+            global_id, decision = _allocate_global_person_id(connection, stamp), "new"
 
     # 원본 벡터는 이 테이블에만 저장하고 이벤트에는 아래의 요약만 전달한다.
     # 늦게 완료된 같은 track의 과거 작업은 더 최근 특징을 덮어쓰지 않는다.

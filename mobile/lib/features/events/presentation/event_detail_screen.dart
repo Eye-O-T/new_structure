@@ -57,7 +57,7 @@ class EventDetailScreen extends ConsumerWidget {
             'person_appeared',
             'person_disappeared',
           }.contains(value.eventType);
-          final globalPersonId = value.globalPersonId?.trim();
+          final globalPersonId = value.globalPersonId?.toString();
           final imageKind = preferredEventImageKind(value);
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),

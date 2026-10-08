@@ -254,7 +254,7 @@ OPERATIONS = {
 
 
 class PublicLiveObject(LiveObject):
-    global_person_id: str | None
+    global_person_id: int | None
 
 
 class FreshLiveObjects(LiveObjects):

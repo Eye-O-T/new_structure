@@ -2044,7 +2044,7 @@ components:
           title: Person Id
         global_person_id:
           anyOf:
-          - type: string
+          - type: integer
           - type: 'null'
           title: Global Person Id
         confidence:
@@ -2700,7 +2700,7 @@ components:
           type: number
         global_person_id:
           anyOf:
-          - type: string
+          - type: integer
           - type: 'null'
           title: Global Person Id
       required:

@@ -55,7 +55,7 @@ class ObjectJobCompletion(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lease_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     outcome: Literal["complete", "retry", "failed", "unconfigured"]
-    global_person_id: str | None = Field(default=None, min_length=1, max_length=256)
+    global_person_id: int | None = Field(default=None, ge=1)
     identity_descriptor: IdentityDescriptor | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

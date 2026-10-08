@@ -19,7 +19,7 @@ CREATE TABLE person_identity_links (
     camera_id TEXT NOT NULL REFERENCES cameras(camera_id) ON UPDATE CASCADE ON DELETE CASCADE,
     tracking_session_id TEXT NOT NULL,
     person_id TEXT NOT NULL,
-    global_person_id TEXT NOT NULL,
+    global_person_id INTEGER NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY(camera_id,tracking_session_id,person_id)
 );

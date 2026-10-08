@@ -215,7 +215,7 @@ class EventResponse(PublicResponse):
     event_type: str
     occurred_at: datetime
     person_id: str | None = None
-    global_person_id: str | None = None
+    global_person_id: int | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
     recording_segment_id: int | None = None
     recording_segment_ids: list[int] = Field(default_factory=list)

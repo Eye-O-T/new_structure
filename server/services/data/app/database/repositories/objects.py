@@ -150,8 +150,10 @@ class ObjectRepositoryMixin:
             ).fetchone()
             if row is None:
                 return False
-            if stage != "identity" and completion.global_person_id is not None:
-                raise ValueError("Only identity jobs may assign a global person ID")
+            if completion.global_person_id is not None:
+                raise ValueError(
+                    "Data assigns global person IDs; submit an identity descriptor"
+                )
             if stage != "identity" and completion.identity_descriptor is not None:
                 raise ValueError("Only identity jobs may submit identity features")
             state = completion.outcome

@@ -6,5 +6,5 @@ SET metadata_json = json_set(metadata_json, '$.legacy_person_id', person_id)
 WHERE track_id IS NOT NULL AND person_id IS NOT NULL AND track_id != person_id;
 
 UPDATE events SET person_id = COALESCE(track_id, person_id);
-ALTER TABLE events ADD COLUMN global_person_id TEXT;
+ALTER TABLE events ADD COLUMN global_person_id INTEGER;
 ALTER TABLE events DROP COLUMN track_id;

@@ -7,7 +7,7 @@ class Event {
   final String eventType;
   final DateTime occurredAt;
   final String? personId;
-  final String? globalPersonId;
+  final int? globalPersonId;
   final double? confidence;
   final List<String> recordingIds;
   final Map<String, dynamic> metadata;
@@ -41,7 +41,7 @@ class Event {
       eventType: json['event_type'] as String,
       occurredAt: DateTime.parse(json['occurred_at'] as String).toUtc(),
       personId: json['person_id'] as String?,
-      globalPersonId: json['global_person_id'] as String?,
+      globalPersonId: json['global_person_id'] as int?,
       confidence: (json['confidence'] as num?)?.toDouble(),
       recordingIds: ids.toList(),
       metadata: Map<String, dynamic>.from((json['metadata'] as Map?) ?? {}),
