@@ -1,6 +1,6 @@
 # AI CCTV
 
-AI CCTV는 Raspberry Pi 카메라, Windows 중앙 서버, Android 앱을 연결해 영상을
+AI CCTV는 Raspberry Pi + Pi 카메라, Windows 중앙 서버, Android 앱을 연결해 영상을
 녹화하고 사람 감지 이벤트와 관련 녹화를 조회하는 영상 모니터링 시스템이다.
 
 ## 📑 Table of Contents
