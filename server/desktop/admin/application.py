@@ -13,7 +13,7 @@ from .legacy_gui import CCTVMainWindow as ReferenceWindow
 from .api import safe_error
 from .camera_view import CameraView
 from .video_worker import VideoWorker
-from ..qt_tasks import BackgroundTask
+from server.desktop.common.tasks import BackgroundTask
 
 
 LOGGER = logging.getLogger(__name__)
@@ -501,14 +501,22 @@ class CCTVMainWindow(ReferenceWindow):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="AI CCTV PyQt 관리자")
     parser.add_argument("--server-url", default="https://localhost")
+    parser.add_argument("--username", default="admin")
+    parser.add_argument("--storage-path", default="")
     parser.add_argument("--ca-file")
     parser.add_argument("--allow-insecure-http", action="store_true")
+    parser.add_argument("--rtsp-host", default="127.0.0.1")
+    parser.add_argument("--rtsp-port", type=int, default=8554)
     args = parser.parse_args(argv)
     app = QApplication.instance() or QApplication(sys.argv[:1])
     window = CCTVMainWindow(
         args.server_url,
+        username=args.username,
+        storage_path=args.storage_path,
         ca_file=args.ca_file,
         allow_insecure_http=args.allow_insecure_http,
+        rtsp_host=args.rtsp_host,
+        rtsp_port=args.rtsp_port,
     )
     window.show()
     return app.exec_()

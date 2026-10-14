@@ -1,4 +1,4 @@
-# Windows GUI 실행 파일의 PyInstaller 빌드 정의다.
+# 최초 설치 전용 Windows GUI 실행 파일의 PyInstaller 빌드 정의다.
 # 빌드 명령: pyinstaller server/setup/install_helper/packaging/ai_cctv_install_helper.spec
 from pathlib import Path
 
@@ -11,7 +11,7 @@ hiddenimports = collect_submodules("pydantic") + collect_submodules("av")
 
 # 루트 패키지와 lib를 분석 경로에 넣어 설치 도우미 및 공유 설정 모듈을 함께 수집한다.
 a = Analysis(
-    [str(repository_root / "server" / "setup" / "install_helper" / "gui_entry.py")],
+    [str(repository_root / "server" / "installer" / "gui_entry.py")],
     pathex=[str(repository_root), str(repository_root / "lib")],
     binaries=[],
     datas=[],
@@ -24,7 +24,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="AI_CCTV_Server_Install_Helper",
+    name="AI_CCTV_Server_Installer",
     # GUI는 별도 콘솔 창을 열지 않으며 보호된 운영 설정을 쓰기 위해 관리자 권한을 요청한다.
     console=False,
     uac_admin=True,

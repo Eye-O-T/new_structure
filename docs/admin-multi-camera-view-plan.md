@@ -6,7 +6,7 @@
 
 관리자가 설정 창을 반복해서 열지 않고 카메라를 전환하여 시청하거나, 여러 카메라를 그리드로 동시에 시청하도록 한다.
 
-- 대상은 `server/setup/install_helper/desktop`의 PyQt 관리자 데스크톱이다. 이 경로의 README가 관리자 화면으로 명시하고 있다.
+- 대상은 `server/desktop/admin`의 독립 실행 PyQt 관리자 데스크톱이다.
 - “개별로 이동”은 카메라 간 화면 전환으로 해석한다. 물리적인 팬·틸트·줌(PTZ) 제어를 뜻한다면 별도 요구사항으로 다뤄야 한다. 조사한 server/edge/mobile/docs 코드에서는 PTZ/ONVIF 제어 경로를 찾지 못했다.
 - 1차 제안: 단일 보기 + 최대 4대의 2×2 그리드. 등록 카메라가 4대보다 많으면 목록에서 표시 대상을 바꾸거나 이전/다음 묶음으로 이동한다.
 - 3×3 이상, 자동 순환, 드래그 배치, 서버 영상 합성, 모바일 그리드는 1차 범위에 포함하지 않는다. 동시 시청 대수는 사용자 요구와 대상 PC 성능에 따라 최종 확정한다.
@@ -17,14 +17,14 @@
 
 | 확인 지점 | 현재 동작 | 수정이 필요한 이유 |
 | --- | --- | --- |
-| `server/setup/install_helper/desktop/application.py` — `start_video`, `open_settings`, `closeEvent` | `self.worker` 하나를 관리하고 재생 중 설정을 차단한다. 종료 시 한 worker를 정리한 뒤 로그아웃한다. | 시청 중 카메라 전환, 복수 재생 작업 및 전체 종료 처리가 필요하다. |
-| `server/setup/install_helper/desktop/legacy_gui.py:55` — `init_ui` | 중앙 `video_label` 한 개와 공용 상태·통계·이벤트 패널을 생성한다. | 중앙 영역에 단일/그리드 표시와 카메라 선택 UI가 필요하다. |
-| `server/setup/install_helper/desktop/legacy_gui.py:218` — `start_video` | worker 신호를 공용 `update_frame`, `update_objects`, `update_metrics`, `add_event`로 연결한다. | 다중 worker 신호를 그대로 연결하면 서로의 화면·통계를 덮어쓴다. |
-| `server/setup/install_helper/desktop/legacy_gui.py:332` — 렌더링·오버레이 메서드 | 영상 및 객체 좌표가 창 전체의 단일 상태다. | 카메라별 영상, 오버레이, 수신 시각, 로딩·오류 상태로 분리해야 한다. |
-| `server/setup/install_helper/desktop/settings_window.py` — `save_basic_settings` | 카메라 하나를 `(api, camera_id)`로 저장한다. 로컬 카메라에서 서버 카메라로 변경하면 `local_publisher.stop()`을 호출한다. | 일상적인 시청 선택을 로그인·설정 저장과 분리하고 시청 전환이 송출을 중지하지 않도록 해야 한다. |
-| `server/setup/install_helper/desktop/video_worker.py:117` — `VideoWorker` | 카메라별 source를 이미 받을 수 있다. worker마다 Qt 스레드 외에 폴링·디코딩 스레드를 실행한다. | 기존 worker를 카메라별로 재사용할 수 있으나 종료·신호 식별·자원 사용을 보완해야 한다. |
-| `server/setup/install_helper/desktop/api.py` — `_request` | 공유 `RLock`을 잡은 채 API 통신과 401 갱신을 실행한다. 일반 API 제한 시간은 90초다. | 한 요청 지연이 다른 카메라의 객체·이벤트·연결 요청까지 지연시킬 수 있다. |
-| `server/setup/install_helper/desktop/media.py` — `MediaBridge` | HLS 주소를 같은 서버·카메라 경로로 제한하고 인증을 적용한다. | 카메라별 브리지를 유지하고 종료 시 서버·스레드를 함께 회수해야 한다. |
+| `server/desktop/admin/application.py` — `start_video`, `open_settings`, `closeEvent` | `self.worker` 하나를 관리하고 재생 중 설정을 차단한다. 종료 시 한 worker를 정리한 뒤 로그아웃한다. | 시청 중 카메라 전환, 복수 재생 작업 및 전체 종료 처리가 필요하다. |
+| `server/desktop/admin/legacy_gui.py:55` — `init_ui` | 중앙 `video_label` 한 개와 공용 상태·통계·이벤트 패널을 생성한다. | 중앙 영역에 단일/그리드 표시와 카메라 선택 UI가 필요하다. |
+| `server/desktop/admin/legacy_gui.py:218` — `start_video` | worker 신호를 공용 `update_frame`, `update_objects`, `update_metrics`, `add_event`로 연결한다. | 다중 worker 신호를 그대로 연결하면 서로의 화면·통계를 덮어쓴다. |
+| `server/desktop/admin/legacy_gui.py:332` — 렌더링·오버레이 메서드 | 영상 및 객체 좌표가 창 전체의 단일 상태다. | 카메라별 영상, 오버레이, 수신 시각, 로딩·오류 상태로 분리해야 한다. |
+| `server/desktop/admin/settings_window.py` — `save_basic_settings` | 카메라 하나를 `(api, camera_id)`로 저장한다. 로컬 카메라에서 서버 카메라로 변경하면 `local_publisher.stop()`을 호출한다. | 일상적인 시청 선택을 로그인·설정 저장과 분리하고 시청 전환이 송출을 중지하지 않도록 해야 한다. |
+| `server/desktop/admin/video_worker.py:117` — `VideoWorker` | 카메라별 source를 이미 받을 수 있다. worker마다 Qt 스레드 외에 폴링·디코딩 스레드를 실행한다. | 기존 worker를 카메라별로 재사용할 수 있으나 종료·신호 식별·자원 사용을 보완해야 한다. |
+| `server/desktop/admin/api.py` — `_request` | 공유 `RLock`을 잡은 채 API 통신과 401 갱신을 실행한다. 일반 API 제한 시간은 90초다. | 한 요청 지연이 다른 카메라의 객체·이벤트·연결 요청까지 지연시킬 수 있다. |
+| `server/desktop/admin/media.py` — `MediaBridge` | HLS 주소를 같은 서버·카메라 경로로 제한하고 인증을 적용한다. | 카메라별 브리지를 유지하고 종료 시 서버·스레드를 함께 회수해야 한다. |
 | `server/services/external/app/api/cameras.py:466` — `get_camera_live` | 카메라 접근 권한과 enabled 상태를 확인한 뒤 RTSP/HLS 주소를 반환한다. | 기존 API를 카메라별 호출하는 방식으로 시작할 수 있다. |
 | `server/services/mediamtx/mediamtx.yml` | 카메라별 경로로 스트림을 제공하며 `maxReaders: 0`이다. WebRTC는 꺼져 있다. | 그리드를 위해 새 전송 프로토콜이나 합성 서버를 도입할 필요는 없다. 실제 처리 용량은 별도 측정해야 한다. |
 
@@ -44,7 +44,7 @@
 
 ### 4.1 카메라별 영상 타일
 
-신규 `server/setup/install_helper/desktop/camera_view.py`에 영상 표시 위젯을 둔다.
+신규 `server/desktop/admin/camera_view.py`에 영상 표시 위젯을 둔다.
 
 - 기존 화면의 영상 비율 유지·여백·객체 오버레이·로딩·오류 표시를 필요한 범위만 옮긴다.
 - 타일마다 카메라 ID, 최근 프레임, 객체 좌표와 수신 시각을 보유한다. 카메라 변경 즉시 이전 영상·좌표를 비운다.
@@ -110,7 +110,7 @@
 ## 6. 검증 계획
 
 - 기존 `test_live_video.py`, `test_overlay.py`, `test_desktop_event_detail_contract.py`, `test_server_api_policy.py`를 변경 범위에 맞춰 실행한다.
-- 신규 테스트는 카메라 간 신호 격리, 오래된 worker 콜백 무시, 표시 집합 차이만 시작·중지, 동시 401 갱신, 느린 요청 격리, 종료 후 내부 스레드·브리지 회수를 검증한다. 테스트 파일은 `server/setup/install_helper/tests/`에 둔다.
+- 신규 테스트는 카메라 간 신호 격리, 오래된 worker 콜백 무시, 표시 집합 차이만 시작·중지, 동시 401 갱신, 느린 요청 격리, 종료 후 내부 스레드·브리지 회수를 검증한다. 테스트 파일은 `server/tests/desktop/admin/`에 둔다.
 - Qt 통합 시나리오: 반복 전환, 단일↔그리드 반복, 전체 중지·재시작, 카메라 삭제·비활성화, 로그아웃/재로그인, 재연결 중 창 닫기, 로컬 웹캠이 포함된 그리드에서 다른 카메라로 전환.
 - 실제 환경: RTSP 4대, HLS fallback 4대, RTSP/HLS 혼합, 한 카메라 단절을 각각 확인한다. 서버 녹화 지속과 이벤트 상세·리소스 창 동작도 확인한다.
 - 대상 PC와 입력 해상도·FPS를 기록하고 1대/4대 각각 30분 동안 CPU, 메모리, 수신량, 카메라별 표시 FPS·지연, 드롭, UI 응답성을 측정한다. 전환 반복 후 스레드·연결 수가 원래 수준으로 돌아오고 메모리가 계속 증가하지 않아야 한다.

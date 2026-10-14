@@ -6,7 +6,11 @@ from urllib.error import HTTPError
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
 
-from ..server_api import ServerApiClient, ServerApiError, _NoRedirectHandler
+from server.edge_onboarding.server_api import (
+    ServerApiClient,
+    ServerApiError,
+    _NoRedirectHandler,
+)
 
 
 DESKTOP_REQUEST_TIMEOUT_SECONDS = 90

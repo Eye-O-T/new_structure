@@ -13,7 +13,10 @@ dependencies = ["ai-cctv-core==0.3.0", "ai-cctv-server-setup==0.3.0", "PyQt5==5.
 build = ["PyInstaller==6.11.1"]
 
 [project.scripts]
-ai-cctv-server = "server.setup.install_helper.cli:main"
+ai-cctv-server-installer = "server.installer.gui_entry:run"
+ai-cctv-server = "server.cli:main"
+ai-cctv-server-manager = "server.desktop.server_manager.application:main"
+ai-cctv-admin = "server.desktop.admin.application:main"
 
 [tool.uv.sources]
 ai-cctv-core = { path = "../../../lib", editable = true }
@@ -25,5 +28,21 @@ required-environments = ["sys_platform == 'win32' and platform_machine == 'AMD64
 
 # 호스트 도구만 설치하며 컨테이너 서비스는 포함하지 않는다.
 [tool.setuptools]
-packages = ["server.setup.install_helper", "server.setup.install_helper.desktop"]
-package-dir = { "server.setup.install_helper" = "." }
+packages = [
+    "server",
+    "server.setup.install_helper",
+    "server.setup.install_helper.desktop",
+    "server.operations",
+    "server.edge_onboarding",
+    "server.desktop",
+    "server.desktop.common",
+    "server.desktop.admin",
+    "server.desktop.server_manager",
+]
+
+[tool.setuptools.package-dir]
+"server" = "../.."
+"server.setup.install_helper" = "."
+"server.operations" = "../../operations"
+"server.edge_onboarding" = "../../edge_onboarding"
+"server.desktop" = "../../desktop"

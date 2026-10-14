@@ -1,6 +1,6 @@
 import unittest
 
-from server.setup.install_helper.server_api import ServerApiClient
+from server.edge_onboarding.server_api import ServerApiClient
 
 
 class EdgeMacContractTests(unittest.TestCase):

@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtWidgets import QApplication
 
-from server.setup.install_helper.desktop.application import CCTVMainWindow
+from server.desktop.admin.application import CCTVMainWindow
 
 
 class MultiCameraViewTests(unittest.TestCase):

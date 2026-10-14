@@ -13,5 +13,15 @@ dependencies = ["ai-cctv-core==0.3.0", "argon2-cffi==23.1.0"]
 ai-cctv-core = { path = "../../lib", editable = true }
 
 [tool.setuptools]
-packages = ["server.setup", "server.setup.tools"]
-package-dir = { "server.setup" = ".", "server.setup.tools" = "tools" }
+packages = [
+    "server.setup",
+    "server.setup.tools",
+    "server.deployment",
+    "server.installer",
+]
+
+[tool.setuptools.package-dir]
+"server.setup" = "."
+"server.setup.tools" = "tools"
+"server.deployment" = "../deployment"
+"server.installer" = "../installer"

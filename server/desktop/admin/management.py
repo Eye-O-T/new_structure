@@ -8,7 +8,11 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QPlainTextEdit, QFileDialog, QMessageBox, QScrollArea,
 )
 
-from ..server_api import prepare_private_output, redact_for_display, write_publish_credentials
+from server.edge_onboarding.server_api import (
+    prepare_private_output,
+    redact_for_display,
+    write_publish_credentials,
+)
 from .tasks import TaskOwner
 
 

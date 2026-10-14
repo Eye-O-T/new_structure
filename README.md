@@ -93,7 +93,7 @@ AI profile에는 YOLO 호환 감지 모델과 OSNet ONNX 모델이 필요하다.
 
 ### 3.1 Host Server Setup
 
-Windows PowerShell에서 저장소를 준비하고 Install Helper를 실행한다.
+Windows PowerShell에서 저장소를 준비하고 Server Installer를 실행한다. 설치 이후의 운영은 Server Manager, CCTV 사용은 Admin에서 수행한다.
 
 ```powershell
 git clone https://github.com/Eye-O-T/new_structure.git
@@ -103,7 +103,7 @@ uv --version
 docker --version
 docker compose version
 uv sync --project server/setup/install_helper --locked
-uv run --project server/setup/install_helper --locked python -m server.setup.install_helper
+uv run --project server/setup/install_helper --locked python -m server.installer
 ```
 
 GUI에서 Docker·Compose·모델·TLS 조건을 검사하고 저장 위치, 공개 주소, 관리자 계정을
@@ -116,13 +116,13 @@ GUI에서 Docker·Compose·모델·TLS 조건을 검사하고 저장 위치, 공
 컨테이너는 계속 실행된다.
 
 ```powershell
-uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli status --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
-uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli logs --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
+uv run --project server/setup/install_helper --locked python -m server.cli status --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
+uv run --project server/setup/install_helper --locked python -m server.cli logs --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
 ```
 
 GUI는 서버 로그를 터미널에 계속 출력하는 명령이 아니다. 개발자가 수동 source 배포를
-구성하지 않았다면 `server/.env`가 존재한다고 가정하지 않는다. 자세한 Install Helper 동작은
-[Server Install Helper](server/setup/install_helper/README.md)를 참고한다.
+구성하지 않았다면 `server/.env`가 존재한다고 가정하지 않는다. 호스트 도구의 책임과 실행 방법은
+[Server Host Tools](server/README.md)를 참고한다.
 
 ### 3.2 Edge Setup
 
@@ -170,7 +170,7 @@ Release APK에는 배포용 서명 키가 필요하다. Flutter/Dart 버전, JDK
 
 ### 4.1 Startup Sequence
 
-1. Docker Desktop을 시작하고 Install Helper에서 Server 상태가 ready인지 확인한다.
+1. Docker Desktop을 시작하고 Server Manager에서 Server 상태가 ready인지 확인한다.
 2. Raspberry Pi Edge 서비스를 시작하고 RTSP 송출·Control/Recovery 상태를 확인한다.
 3. Server Desktop에서 로그인하고 등록된 카메라의 live view를 확인한다.
 4. Android 앱에 Server base URL과 계정을 입력해 로그인한다.
@@ -191,7 +191,7 @@ Release APK에는 배포용 서명 키가 필요하다. Flutter/Dart 버전, JDK
 
 - [Architecture & Network Topology](docs/architecture.md)
 - [Unified REST API Specification — OpenAPI 3.1](docs/openapi.yaml)
-- [Server Install Helper](server/setup/install_helper/README.md)
+- [Server Host Tools](server/README.md)
 - [Raspberry Pi Edge](edge/README.md)
 - [Android Mobile](mobile/README.md)
 - [Model Preparation and Release Records](server/tools/README.md)
@@ -215,7 +215,7 @@ Release APK에는 배포용 서명 키가 필요하다. Flutter/Dart 버전, JDK
 - Host와 Pi가 같은 IPv4 LAN인지, 공유기의 AP isolation이 꺼져 있는지 확인한다.
 - UDP/37020, Pi TCP/8003·8002, Host RTSP/TCP 8554의 방향별 방화벽을 확인한다.
 - Pi에서 `sudo ai-cctv-edge doctor`, `status`, `logs`를 실행한다.
-- 중앙 서버에서는 Install Helper의 `doctor`, `status`, `logs`를 사용한다.
+- 중앙 서버에서는 Server Manager 또는 `server.cli`의 `doctor`, `status`, `logs`를 사용한다.
 - IP가 바뀌었다면 중앙에 저장된 management/recovery URL을 갱신한다. MAC은 인증 비밀값이
   아니며 Control/Recovery는 operational Bearer token으로 인증한다.
 

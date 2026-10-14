@@ -1,4 +1,19 @@
-# 서버 설치 도우미
+# 이전 Install Helper 호환 경로
+
+이 디렉터리는 한 릴리스 동안 기존 실행·import 경로를 유지하기 위한 compatibility wrapper와 Windows 패키징 자산만 보관합니다. 실제 구현의 책임은 다음 위치로 이동했습니다.
+
+| 책임 | 신규 경로 |
+|---|---|
+| 최초 설치 | `server/installer/` |
+| Compose·네트워크·진단 | `server/operations/` |
+| 배포 설정 모델 | `server/deployment/` |
+| CCTV 관리자 | `server/desktop/admin/` |
+| 서버 관리자 | `server/desktop/server_manager/` |
+| Edge 검색·pairing | `server/edge_onboarding/` |
+
+새 개발 코드에서는 `python -m server.installer`, `python -m server.desktop.server_manager`, `python -m server.desktop.admin`, `python -m server.cli`를 사용합니다.
+
+# 이전 설치 도우미 안내
 
 Windows에서 서버 설치와 최초 Edge 연결을 돕는 GUI·CLI다. 설정 생성과 공통 검증은 상위 `server/setup/`을 호출하며, 창을 닫아도 서버 컨테이너는 계속 동작한다. 설치 파일 사용자는 [사용자 안내](../../../docs/user-guide.md)를 따른다.
 
@@ -121,10 +136,10 @@ python -m compileall -q server/setup/install_helper server/setup/config_core.py
 
 가상환경은 `server/setup/install_helper/.venv`다. 이 폴더의 `uv.lock`은 도우미와 로컬 `server/setup/`·`lib/` 의존성을 함께 고정한다. 상위 setup 패키지는 GUI 의존성 없이 설치할 수 있으며, GUI·CLI와 해당 개발 의존성은 하위 install_helper 프로젝트에서 관리한다.
 
-소스 CLI는 설치 안내의 `AI_CCTV_CLI.exe`를 `uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli`로 바꿔 실행한다. 전체 명령은 뒤에 `--help`를 붙여 확인한다. 다음은 개발용 `server/.env`의 상태만 조회하는 예시다.
+소스 CLI는 설치 안내의 `AI_CCTV_CLI.exe`를 `uv run --project server/setup/install_helper --locked python -m server.cli`로 바꿔 실행한다. 전체 명령은 뒤에 `--help`를 붙여 확인한다. 다음은 개발용 `server/.env`의 상태만 조회하는 예시다.
 
 ```powershell
-uv run --project server/setup/install_helper --locked python -m server.setup.install_helper.cli status --env-file server/.env
+uv run --project server/setup/install_helper --locked python -m server.cli status --env-file server/.env
 ```
 
 사용자 진단은 설치본 CLI의 `doctor`와 소스 모듈 `server.setup.install_helper.doctor`로 모은다. 둘 다 `server/setup/validation.py`의 공통 검증을 사용한다. 다음은 컨테이너 기동 전 배포 파일·인증·Compose 구성만 검사하는 명령이며 모델 파일과 실행 중 컨테이너 검사는 생략한다.
@@ -147,7 +162,7 @@ powershell -ExecutionPolicy Bypass -File .\server\setup\install_helper\packaging
 
 Python이 PATH에 없거나 다른 버전이면 `-PythonExecutable 'C:\실제경로\python.exe'`, Inno Setup을 찾지 못하면 `-InnoCompiler 'C:\실제경로\ISCC.exe'`를 추가한다.
 
-빌드는 잠금 파일에 따라 `build/windows-installer/.venv`에 환경을 만들고 실행 파일·설치 파일을 생성한다. GUI는 `AI_CCTV_Server_Install_Helper.exe`, CLI는 `AI_CCTV_CLI.exe`다. 설치 파일과 체크섬은 `dist/installer/`에 생성된다. 실제 Windows에서 설치·업데이트·제거를 확인하고 실행 파일 서명을 준비한다.
+빌드는 잠금 파일에 따라 `build/windows-installer/.venv`에 환경을 만들고 네 실행 파일과 설치 파일을 생성한다. 실행 파일은 `AI_CCTV_Server_Installer.exe`, `AI_CCTV_Server_Manager.exe`, `AI_CCTV_Admin.exe`, `AI_CCTV_CLI.exe`다. 설치 파일과 체크섬은 `dist/installer/`에 생성된다. 실제 Windows에서 설치·업데이트·제거를 확인하고 실행 파일 서명을 준비한다.
 
 설치본에는 [운영·복원 절차](../../../docs/operations.md)와 릴리스 기록 도구도 같은 상대
 경로로 포함한다. `server/secrets/` 전체와 `.bak` 백업은 배포에서 제외하고, 서비스별

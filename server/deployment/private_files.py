@@ -1,0 +1,46 @@
+# 비밀 파일을 설치 계정과 관리자만 읽을 수 있게 제한한다.
+# Linux의 0600 권한과 Windows의 DACL(사용자별 접근 목록)은 설정 방법이 다르다.
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+
+# 파일 생성 후 호출한다. Windows에서는 chmod만으로 부족하므로 상속 권한도 제거한다.
+def restrict_private_file(path: Path) -> None:
+    os.chmod(path, 0o600)
+    if os.name != "nt":
+        return
+    try:
+        identity = subprocess.run(
+            ["whoami"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise OSError("could not identify the Windows installation account") from exc
+    if not identity or "\n" in identity or "\r" in identity:
+        raise OSError("could not identify the Windows installation account")
+    try:
+        subprocess.run(
+            [
+                "icacls",
+                str(path),
+                # 상위 폴더의 넓은 권한을 끊고 현재 계정·SYSTEM·관리자에게만 권한을 부여한다.
+                "/inheritance:r",
+                "/grant:r",
+                f"{identity}:(F)",
+                "*S-1-5-18:(F)",
+                "*S-1-5-32-544:(F)",
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise OSError("could not apply the private Windows file ACL") from exc

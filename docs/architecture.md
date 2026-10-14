@@ -26,8 +26,9 @@ Edge는 영상을 MediaMTX로 송출하고, Host Server는 Edge의 관리·복�
 ```mermaid
 flowchart LR
     Mobile[Android Mobile]
-    Desktop[Server Desktop]
-    Helper[Install Helper]
+    Admin[CCTV Admin]
+    Installer[Server Installer]
+    Manager[Server Manager]
     Edge[Raspberry Pi Edge]
     Local[Local USB Camera]
 
@@ -43,13 +44,15 @@ flowchart LR
 
     Mobile -->|HTTPS REST| Nginx
     Mobile -->|HTTPS HLS and playback| Nginx
-    Desktop -->|HTTPS REST| Nginx
-    Desktop -->|RTSP preferred| Media
-    Desktop -.->|Authenticated HLS fallback| Nginx
+    Admin -->|HTTPS REST| Nginx
+    Admin -->|RTSP preferred| Media
+    Admin -.->|Authenticated HLS fallback| Nginx
 
     Edge -->|RTSP publish| Media
     Local -->|RTSP publish| Media
-    Helper <-.->|UDP discovery and HTTP provisioning| Edge
+    Admin <-.->|UDP discovery and HTTP provisioning| Edge
+    Installer -.->|Initial configuration| Nginx
+    Manager -.->|Compose lifecycle and diagnostics| Nginx
     External -->|Bearer-authenticated HTTP control| Edge
     Data -->|Bearer-authenticated HTTP recovery| Edge
 
@@ -104,7 +107,7 @@ flowchart TB
 - Nginx의 HTTP/HTTPS와 MediaMTX의 RTSP만 Compose `ports`로 Host에 게시된다. Data,
   External, Preprocessing, Analysis의 포트는 Compose network 내부에서만 사용한다.
 - 기본 예시는 `PUBLIC_BIND_ADDRESS=127.0.0.1`과 `RTSP_BIND_ADDRESS=127.0.0.1`이다.
-  다른 LAN 장치가 접근해야 하면 설치 도우미에서 실제 LAN bind 주소를 선택하고 필요한
+  다른 LAN 장치가 접근해야 하면 Server Manager에서 실제 LAN bind 주소를 선택하고 필요한
   포트만 Windows Defender Firewall에 허용한다.
 - Docker Desktop이 게시 포트를 Windows Host에 연결하므로 정상 Compose 배포에 임의의
   `netsh interface portproxy` 규칙을 추가하지 않는다. 별도 NAT·방화벽 구성이 필요한
@@ -227,8 +230,9 @@ sequenceDiagram
 | MediaMTX | Edge/Local Camera RTSP 수신, 중앙 녹화, Desktop RTSP, Mobile HLS와 playback 제공 |
 | Preprocessing | RTSP frame 소비, YOLO/ByteTrack 감지·추적, snapshot/crop 생성, OSNet 특징 추출, event outbox |
 | Analysis | Data job 소비, person crop 추가 분석, 결과 보고 |
-| Install Helper | 배포 설정·검증·Compose 관리, 미설정 Edge UDP 발견과 최초 설정 전달, Server Desktop 실행 |
-| Server Desktop | 관리자 로그인, 카메라·Edge 관리, RTSP 우선 live view와 인증 HLS fallback, event media 조회 |
+| Server Installer | 최초 배포 설정·검증, 모델·TLS 준비, 최초 서버 기동 |
+| Server Manager | Compose 수명주기, AI 서비스 토글, 네트워크 변경·rollback, 로컬 진단 |
+| CCTV Admin | 관리자 로그인, 카메라·Edge 관리, RTSP 우선 live view와 인증 HLS fallback, event media 조회 |
 | Raspberry Pi Edge daemon | 카메라 캡처, MediaMTX RTSP publish, 로컬 장애 녹화, Control/Recovery API, 최초 discovery/pairing |
 | Android Mobile | 공개 API 로그인, 카메라·이벤트 조회, 인증 HLS live view, playback, client-side object overlay, push 설정 |
 

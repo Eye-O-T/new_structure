@@ -2,7 +2,7 @@ import unittest
 from email.message import Message
 from urllib.error import HTTPError
 
-from server.setup.install_helper.desktop.api import DesktopApi
+from server.desktop.admin.api import DesktopApi
 
 
 class _Response:

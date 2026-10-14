@@ -1,15 +1,19 @@
 import tempfile
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
+from unittest.mock import patch
 
 import yaml
 
-from server.setup.install_helper.network_settings import (
+from server.operations.network import (
     NetworkSettings,
+    apply_network_settings,
     load_network_settings,
     save_network_settings,
     validate_network_settings,
 )
+from server.deployment.context import DeploymentContext
 
 
 class NetworkSettingsTests(unittest.TestCase):
@@ -69,6 +73,63 @@ class NetworkSettingsTests(unittest.TestCase):
         settings = load_network_settings(self.env, self.server)
         self.assertEqual(settings.public_scheme, "http")
         self.assertEqual(settings.rtsp_port, 8554)
+
+    def test_apply_restores_files_when_compose_validation_fails(self):
+        original_env = self.env.read_text(encoding="utf-8")
+        original_config = self.config.read_text(encoding="utf-8")
+        deployment = DeploymentContext(
+            data_root=self.root,
+            env_file=self.env,
+            config_file=self.config,
+            public_url="http://192.168.0.10",
+            rtsp_host="192.168.0.10",
+            rtsp_port=8554,
+            admin_username="admin",
+            allow_insecure_http=True,
+        )
+        settings = NetworkSettings(
+            "http", "http://192.168.0.20:8080", "192.168.0.20", 8080,
+            8443, "192.168.0.20", 8555, True, False, Path(),
+        )
+        failed_config = CompletedProcess([], 1, stdout="", stderr="invalid compose")
+        with patch("server.operations.network.ComposeAdapter.run", return_value=failed_config), patch(
+            "server.operations.services.run_service_action", return_value="restored"
+        ) as restart:
+            with self.assertRaisesRegex(RuntimeError, "invalid compose"):
+                apply_network_settings(settings, deployment, self.server, lambda _message: None)
+        self.assertEqual(self.env.read_text(encoding="utf-8"), original_env)
+        self.assertEqual(self.config.read_text(encoding="utf-8"), original_config)
+        restart.assert_not_called()
+
+    def test_apply_restarts_previous_deployment_after_start_failure(self):
+        original_env = self.env.read_text(encoding="utf-8")
+        original_config = self.config.read_text(encoding="utf-8")
+        deployment = DeploymentContext(
+            data_root=self.root,
+            env_file=self.env,
+            config_file=self.config,
+            public_url="http://192.168.0.10",
+            rtsp_host="192.168.0.10",
+            rtsp_port=8554,
+            admin_username="admin",
+            allow_insecure_http=True,
+        )
+        settings = NetworkSettings(
+            "http", "http://192.168.0.20:8080", "192.168.0.20", 8080,
+            8443, "192.168.0.20", 8555, True, False, Path(),
+        )
+        with patch(
+            "server.operations.network.ComposeAdapter.run",
+            return_value=CompletedProcess([], 0, stdout="", stderr=""),
+        ), patch(
+            "server.operations.services.run_service_action",
+            side_effect=[RuntimeError("start failed"), "previous deployment restored"],
+        ) as restart:
+            with self.assertRaisesRegex(RuntimeError, "start failed"):
+                apply_network_settings(settings, deployment, self.server, lambda _message: None)
+        self.assertEqual(self.env.read_text(encoding="utf-8"), original_env)
+        self.assertEqual(self.config.read_text(encoding="utf-8"), original_config)
+        self.assertEqual(restart.call_count, 2)
 
 
 if __name__ == "__main__":

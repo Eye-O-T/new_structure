@@ -5,7 +5,7 @@ import json
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit
 
-from ..server_api import redact_for_display
+from server.edge_onboarding.server_api import redact_for_display
 from .resource_cards import ResourceCard
 from .tasks import TaskOwner
 

@@ -11,10 +11,10 @@ from unittest.mock import Mock, patch
 import av
 from PyQt5.QtCore import Qt
 
-from server.setup.install_helper.desktop import video_worker as video
-from server.setup.install_helper.desktop.api import DesktopApi
-from server.setup.install_helper.desktop.local_camera import LocalCameraPublisher
-from server.setup.install_helper.desktop.media import MediaBridge, hls_resource_type
+from server.desktop.admin import video_worker as video
+from server.desktop.admin.api import DesktopApi
+from server.desktop.admin.local_camera import LocalCameraPublisher
+from server.desktop.admin.media import MediaBridge, hls_resource_type
 
 
 class Clock:

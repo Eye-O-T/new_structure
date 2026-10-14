@@ -1,6 +1,6 @@
 import unittest
 
-from server.setup.install_helper.desktop.overlay import overlay_items, scale_bbox_to_widget
+from server.desktop.admin.overlay import overlay_items, scale_bbox_to_widget
 
 
 class OverlayGeometryTests(unittest.TestCase):

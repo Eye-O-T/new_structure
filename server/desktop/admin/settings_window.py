@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .api import DesktopApi
-from ..server_api import ServerApiError
+from server.edge_onboarding.server_api import ServerApiError
 from .legacy_settings import SettingsWindow as LegacySettingsWindow
 from .tasks import TaskOwner
 from .local_camera import LocalCameraPublisher, list_camera_devices, rtsp_publish_url

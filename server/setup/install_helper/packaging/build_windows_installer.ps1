@@ -20,6 +20,8 @@ $distRoot = Join-Path $repositoryRoot 'dist'
 $installerDist = Join-Path $distRoot 'installer'
 $helperRoot = Join-Path $repositoryRoot 'server\setup\install_helper'
 $guiSpec = Join-Path $packagingRoot 'ai_cctv_install_helper.spec'
+$managerSpec = Join-Path $packagingRoot 'ai_cctv_server_manager.spec'
+$adminSpec = Join-Path $packagingRoot 'ai_cctv_admin.spec'
 $cliSpec = Join-Path $packagingRoot 'ai_cctv_cli.spec'
 $innoScript = Join-Path $packagingRoot 'AI_CCTV_Server.iss'
 
@@ -85,6 +87,8 @@ if ($env:OS -ne 'Windows_NT') {
 # 빌드가 시작되기 전에 배포 소스·문서·잠금 파일이 모두 있는지 확인해 불완전한 설치 파일을 막는다.
 foreach ($requiredFile in @(
     $guiSpec,
+    $managerSpec,
+    $adminSpec,
     $cliSpec,
     $innoScript,
     (Join-Path $repositoryRoot 'lib\pyproject.toml'),
@@ -150,7 +154,7 @@ finally {
 Push-Location $repositoryRoot
 try {
     # GUI와 CLI는 콘솔 사용 여부가 달라 각각의 실행 파일로 묶는다.
-    foreach ($spec in @($guiSpec, $cliSpec)) {
+    foreach ($spec in @($guiSpec, $managerSpec, $adminSpec, $cliSpec)) {
         Invoke-Checked $buildPython @(
             '-m', 'PyInstaller', '--clean', '--noconfirm',
             '--distpath', $distRoot,
@@ -159,7 +163,12 @@ try {
         )
     }
 
-    foreach ($executable in @('AI_CCTV_Server_Install_Helper.exe', 'AI_CCTV_CLI.exe')) {
+    foreach ($executable in @(
+        'AI_CCTV_Server_Installer.exe',
+        'AI_CCTV_Server_Manager.exe',
+        'AI_CCTV_Admin.exe',
+        'AI_CCTV_CLI.exe'
+    )) {
         $path = Join-Path $distRoot $executable
         if (-not (Test-Path -LiteralPath $path)) {
             throw "PyInstaller did not create the expected executable: $path"

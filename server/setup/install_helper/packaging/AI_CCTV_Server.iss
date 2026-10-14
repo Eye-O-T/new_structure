@@ -4,7 +4,9 @@
   #define MyAppVersion "0.3.0"
 #endif
 #define MyAppPublisher "AI CCTV"
-#define MyGuiExeName "AI_CCTV_Server_Install_Helper.exe"
+#define MyInstallerExeName "AI_CCTV_Server_Installer.exe"
+#define MyManagerExeName "AI_CCTV_Server_Manager.exe"
+#define MyAdminExeName "AI_CCTV_Admin.exe"
 #define MyCliExeName "AI_CCTV_CLI.exe"
 
 [Setup]
@@ -23,7 +25,7 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-UninstallDisplayIcon={app}\{#MyGuiExeName}
+UninstallDisplayIcon={app}\{#MyManagerExeName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -47,7 +49,9 @@ Name: "addtopath"; Description: "AI CCTV CLI를 시스템 PATH에 추가"; Group
 Name: "{commonappdata}\AI_CCTV"; Flags: uninsneveruninstall
 
 [Files]
-Source: "..\..\..\..\dist\AI_CCTV_Server_Install_Helper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\..\..\dist\AI_CCTV_Server_Installer.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\..\..\dist\AI_CCTV_Server_Manager.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\..\..\dist\AI_CCTV_Admin.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\dist\AI_CCTV_CLI.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\.dockerignore"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\lib\*"; DestDir: "{app}\lib"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,*.pyc,*.pyo,*.egg-info\*,build\*,dist\*"
@@ -64,7 +68,7 @@ Source: "..\..\..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\mobile\README.md"; DestDir: "{app}\mobile"; Flags: ignoreversion
 Source: "..\..\..\..\server\setup\install_helper\README.md"; DestDir: "{app}\server\setup\install_helper"; Flags: ignoreversion
-Source: "..\..\..\..\server\setup\install_helper\desktop\README.md"; DestDir: "{app}\server\setup\install_helper\desktop"; Flags: ignoreversion
+Source: "..\..\..\..\server\desktop\admin\README.md"; DestDir: "{app}\server\desktop\admin"; Flags: ignoreversion
 Source: "..\..\..\..\edge\README.md"; DestDir: "{app}\edge"; Flags: ignoreversion
 Source: "..\..\..\..\docs\README.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\..\..\docs\deployment-guide.md"; DestDir: "{app}\docs"; Flags: ignoreversion
@@ -76,6 +80,7 @@ Source: "..\..\..\..\docs\openapi.yaml"; DestDir: "{app}\docs"; Flags: ignorever
 [InstallDelete]
 ; 이름이 바뀐 실행 파일과 바로가기를 정리하며 운영 데이터는 유지한다.
 Type: files; Name: "{app}\AI_CCTV_Configurator.exe"
+Type: files; Name: "{app}\AI_CCTV_Server_Install_Helper.exe"
 Type: files; Name: "{group}\AI CCTV Configurator.lnk"
 Type: files; Name: "{autodesktop}\AI CCTV Configurator.lnk"
 Type: files; Name: "{app}\configurator\README.md"
@@ -93,15 +98,17 @@ Type: files; Name: "{app}\server\scripts\backup_database.py"
 Type: dirifempty; Name: "{app}\server\scripts"
 
 [Icons]
-Name: "{group}\AI CCTV Server Install Helper"; Filename: "{app}\{#MyGuiExeName}"; WorkingDir: "{app}"
+Name: "{group}\AI CCTV Server Installer"; Filename: "{app}\{#MyInstallerExeName}"; WorkingDir: "{app}"
+Name: "{group}\AI CCTV Server Manager"; Filename: "{app}\{#MyManagerExeName}"; WorkingDir: "{app}"
+Name: "{group}\AI CCTV Admin"; Filename: "{app}\{#MyAdminExeName}"; WorkingDir: "{app}"
 Name: "{group}\AI CCTV CLI Console"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoExit -Command ""& '{app}\{#MyCliExeName}' --help"""; WorkingDir: "{app}"
 Name: "{group}\Installation guide"; Filename: "{sys}\notepad.exe"; Parameters: """{app}\README.md"""
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\AI CCTV Server Install Helper"; Filename: "{app}\{#MyGuiExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\AI CCTV Server Manager"; Filename: "{app}\{#MyManagerExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 ; 보호된 운영 설정을 저장하기 위해 GUI는 관리자 권한을 요청한다.
-Filename: "{app}\{#MyGuiExeName}"; Description: "AI CCTV Server Install Helper를 열어 모델 경로와 서버 설정 지정"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyInstallerExeName}"; Description: "AI CCTV Server Installer로 최초 배포 구성"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 컨테이너와 네트워크를 중지·제거하되 호스트의 운영 데이터는 남긴다.

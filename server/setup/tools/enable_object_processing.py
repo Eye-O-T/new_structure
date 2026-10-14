@@ -12,8 +12,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from server.setup.tools.generate_secrets import atomic_write, single_quote  # noqa: E402
-from server.setup.validation import deployment_path, read_deployment_env  # noqa: E402
-from server.setup.model_manager import (  # noqa: E402
+from server.deployment.validation import deployment_path, read_deployment_env  # noqa: E402
+from server.installer.models import (  # noqa: E402
     GENERIC_IDENTITY_PLUGIN,
     IDENTITY_PLUGIN,
     IDENTITY_MODEL_CONTAINER_PATH,

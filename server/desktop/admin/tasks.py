@@ -1,6 +1,6 @@
 """Keep widgets alive until their bounded network operations finish."""
 
-from ..qt_tasks import BackgroundTask
+from server.desktop.common.tasks import BackgroundTask
 from .api import safe_error
 
 

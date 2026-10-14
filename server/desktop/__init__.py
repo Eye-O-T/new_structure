@@ -1,0 +1,1 @@
+"""Windows host desktop applications."""
