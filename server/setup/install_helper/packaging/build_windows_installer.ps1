@@ -23,6 +23,8 @@ $guiSpec = Join-Path $packagingRoot 'ai_cctv_install_helper.spec'
 $managerSpec = Join-Path $packagingRoot 'ai_cctv_server_manager.spec'
 $adminSpec = Join-Path $packagingRoot 'ai_cctv_admin.spec'
 $cliSpec = Join-Path $packagingRoot 'ai_cctv_cli.spec'
+$hostHelperSpec = Join-Path $packagingRoot 'ai_cctv_host_helper.spec'
+$localCameraSpec = Join-Path $packagingRoot 'ai_cctv_local_camera.spec'
 $innoScript = Join-Path $packagingRoot 'AI_CCTV_Server.iss'
 
 function Invoke-Checked {
@@ -90,6 +92,8 @@ foreach ($requiredFile in @(
     $managerSpec,
     $adminSpec,
     $cliSpec,
+    $hostHelperSpec,
+    $localCameraSpec,
     $innoScript,
     (Join-Path $repositoryRoot 'lib\pyproject.toml'),
     (Join-Path $repositoryRoot 'server\setup\install_helper\pyproject.toml'),
@@ -154,7 +158,7 @@ finally {
 Push-Location $repositoryRoot
 try {
     # GUI와 CLI는 콘솔 사용 여부가 달라 각각의 실행 파일로 묶는다.
-    foreach ($spec in @($guiSpec, $managerSpec, $adminSpec, $cliSpec)) {
+    foreach ($spec in @($guiSpec, $managerSpec, $adminSpec, $cliSpec, $hostHelperSpec, $localCameraSpec)) {
         Invoke-Checked $buildPython @(
             '-m', 'PyInstaller', '--clean', '--noconfirm',
             '--distpath', $distRoot,
@@ -167,7 +171,9 @@ try {
         'AI_CCTV_Server_Installer.exe',
         'AI_CCTV_Server_Manager.exe',
         'AI_CCTV_Admin.exe',
-        'AI_CCTV_CLI.exe'
+        'AI_CCTV_CLI.exe',
+        'AI_CCTV_Host_Helper.exe',
+        'AI_CCTV_Local_Camera.exe'
     )) {
         $path = Join-Path $distRoot $executable
         if (-not (Test-Path -LiteralPath $path)) {

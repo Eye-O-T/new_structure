@@ -21,7 +21,8 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         self.api = parent.api
         self.local_publisher = getattr(parent, "local_publisher", None)
         if self.local_publisher is None:
-            self.local_publisher = LocalCameraPublisher(parent)
+            data_root = getattr(parent, "storage_root_path", "") or None
+            self.local_publisher = LocalCameraPublisher(parent, data_root=data_root)
             parent.local_publisher = self.local_publisher
         self.local_publisher.state_changed.connect(self._local_camera_state)
         super().__init__(parent, **kwargs)
@@ -339,11 +340,6 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         if kind == "local":
             self.start_local_camera(value, on_ready=self._accept_local_camera)
             return
-        if (
-            isinstance(self.selected_source, tuple)
-            and self.selected_source[1] == "local-camera"
-        ):
-            self.local_publisher.stop()
         self.selected_source = (self.api, value)
         self.accept()
 

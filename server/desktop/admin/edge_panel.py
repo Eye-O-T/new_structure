@@ -24,11 +24,14 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from server.edge_onboarding.discovery import DiscoveredEdge, discover_edges
+from server.edge_onboarding.discovery import DiscoveredEdge
+from server.edge_onboarding.host_helper import (
+    discover_edges_via_helper,
+    pair_edge_via_helper,
+    probe_edge_via_helper,
+)
 from server.edge_onboarding.pairing import (
     EdgePairingError,
-    complete_edge_pairing,
-    probe_edge_connection,
     validate_pairing_settings,
 )
 from server.desktop.common.tasks import BackgroundTask
@@ -316,7 +319,7 @@ class EdgePanel(QWidget):
         def discover(progress):
             progress("같은 LAN에서 discovery 광고를 보내는 Edge를 찾는 중입니다…")
             try:
-                return discover_edges(timeout=3.0)
+                return discover_edges_via_helper(timeout=3.0)
             except Exception as exc:
                 raise RuntimeError(
                     "장치 검색을 시작하지 못했습니다. 네트워크와 방화벽을 확인하세요."
@@ -366,7 +369,7 @@ class EdgePanel(QWidget):
         def probe(progress):
             progress("선택한 Edge의 응답과 장치 정보를 확인하는 중입니다…")
             try:
-                probe_edge_connection(edge)
+                probe_edge_via_helper(edge)
             except Exception as exc:
                 raise RuntimeError(_connection_error(exc)) from exc
             return "Edge 응답과 장치 정보가 일치합니다. 이제 선택한 Edge를 연결할 수 있습니다."
@@ -479,7 +482,7 @@ class EdgePanel(QWidget):
                 if edge is not None:
                     progress("Edge에 영상 연결 설정을 전달하는 중입니다…")
                     try:
-                        complete_edge_pairing(
+                        pair_edge_via_helper(
                             edge,
                             server_response=response,
                             operational_token=token,
@@ -488,7 +491,7 @@ class EdgePanel(QWidget):
                             video_profile=profile,
                             backup_root=backup_root,
                         )
-                    except EdgePairingError:
+                    except (EdgePairingError, RuntimeError):
                         pass
                     else:
                         return (

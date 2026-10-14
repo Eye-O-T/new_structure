@@ -17,6 +17,8 @@ ai-cctv-server-installer = "server.installer.gui_entry:run"
 ai-cctv-server = "server.cli:main"
 ai-cctv-server-manager = "server.desktop.server_manager.application:main"
 ai-cctv-admin = "server.desktop.admin.application:main"
+ai-cctv-host-helper = "server.host_helper.__main__:main"
+ai-cctv-local-camera = "server.local_camera_publisher.__main__:main"
 
 [tool.uv.sources]
 ai-cctv-core = { path = "../../../lib", editable = true }
@@ -38,6 +40,8 @@ packages = [
     "server.desktop.common",
     "server.desktop.admin",
     "server.desktop.server_manager",
+    "server.host_helper",
+    "server.local_camera_publisher",
 ]
 
 [tool.setuptools.package-dir]

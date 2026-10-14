@@ -458,9 +458,6 @@ class CCTVMainWindow(ReferenceWindow):
             QMessageBox.warning(self, "녹화 재생", f"재생 주소를 열 수 없습니다: {safe_error(exc)}")
 
     def closeEvent(self, event):
-        local_publisher = getattr(self, "local_publisher", None)
-        if local_publisher is not None:
-            local_publisher.stop()
         if self.resource_monitor_window is not None:
             self.resource_monitor_window.close()
             if self.resource_monitor_window is not None:

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,15 @@ from server.desktop.launcher import (
     server_manager_arguments,
 )
 from server.operations.doctor import checks
+from server.operations.local_camera import (
+    list_camera_devices,
+    load_device_setting,
+    publisher_status,
+    start_publisher,
+    stop_publisher,
+)
+from server.operations.services import run_service_action
+from server.edge_onboarding.host_helper import run_host_helper
 from server.edge_onboarding.server_api import (
     ServerApiClient,
     ServerApiError,
@@ -65,6 +75,138 @@ def _launch_admin(args: argparse.Namespace) -> int:
         print(f"[ERROR] DESKTOP_LAUNCH_FAILED: {exc}")
         return 1
     print(f"CCTV Admin started (PID {process.pid}).")
+    return 0
+
+
+def _installed_deployment(args: argparse.Namespace):
+    deployment = inspect_installation(args.data_root, args.server_dir)
+    if deployment is None:
+        raise ValueError("no installed deployment was found; run the installer first")
+    return deployment
+
+
+def _managed_service_command(args: argparse.Namespace, action: str) -> int:
+    """Use the same guarded service operation as Server Manager."""
+
+    try:
+        deployment = _installed_deployment(args)
+        message = run_service_action(args.server_dir, deployment, action, print)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"[ERROR] SERVICE_ACTION_FAILED: {exc}")
+        return 1
+    print(message)
+    return 0
+
+
+def _local_camera_command(args: argparse.Namespace) -> int:
+    if args.local_camera_action == "devices":
+        print(json.dumps({"devices": list_camera_devices()}, ensure_ascii=False))
+        return 0
+    if args.local_camera_action == "status":
+        try:
+            status = publisher_status(args.data_root)
+        except OSError as exc:
+            print(f"[ERROR] LOCAL_CAMERA_FAILED: {exc}")
+            return 1
+        print(json.dumps(status, ensure_ascii=False))
+        return 0
+    if args.local_camera_action == "off":
+        try:
+            stopped = stop_publisher(args.data_root)
+        except OSError as exc:
+            print(f"[ERROR] LOCAL_CAMERA_FAILED: {exc}")
+            return 1
+        print("Local camera publisher stopped." if stopped else "Local camera publisher is not running.")
+        return 0
+    try:
+        current = publisher_status(args.data_root)
+        if current["status"] == "running":
+            requested = args.device or load_device_setting(args.data_root)
+            if requested and requested != current.get("device_name"):
+                raise RuntimeError(
+                    "a different local camera is already publishing; stop it first"
+                )
+            print(json.dumps(current, ensure_ascii=False))
+            return 0
+        deployment = _installed_deployment(args)
+        device = args.device or load_device_setting(args.data_root)
+        if not device:
+            raise ValueError(
+                "a camera device must be selected with --device on the first start"
+            )
+        password = (
+            _secret_from_file(args.password_file, "administrator password")
+            if args.password_file is not None
+            else getpass.getpass("Server administrator password: ")
+        )
+        # Import lazily so ordinary CLI service commands do not load desktop dependencies.
+        from server.desktop.admin.api import DesktopApi
+        from server.desktop.admin.local_camera import rtsp_publish_url
+
+        certificate = deployment.data_root / "certs" / "tls.crt"
+        api = DesktopApi(
+            deployment.public_url,
+            ca_file=certificate if certificate.is_file() else None,
+            allow_insecure_http=deployment.allow_insecure_http,
+        )
+        api.login(args.username, password)
+        try:
+            try:
+                result = api.register_local_camera("local-camera", device)
+            except ServerApiError as exc:
+                if exc.status_code != 409:
+                    raise
+                api.camera(
+                    "local-camera",
+                    method="PATCH",
+                    payload={"name": device, "enabled": True},
+                )
+                result = api.camera(
+                    "local-camera", "/publish-credentials/rotate", "POST"
+                )
+            credentials = result.get("publish_credentials") or {}
+            url = rtsp_publish_url(
+                deployment.rtsp_host,
+                deployment.rtsp_port,
+                "local-camera",
+                credentials["username"],
+                credentials["password"],
+            )
+            status = start_publisher(
+                args.data_root,
+                device_name=device,
+                camera_id="local-camera",
+                stream_url=url,
+            )
+        finally:
+            api.logout()
+    except (KeyError, OSError, ValueError, RuntimeError, ServerApiError) as exc:
+        print(f"[ERROR] LOCAL_CAMERA_FAILED: {exc}")
+        return 1
+    print(json.dumps(status, ensure_ascii=False))
+    return 0
+
+
+def _edge_helper_command(args: argparse.Namespace) -> int:
+    try:
+        payload = None
+        if args.edge_action in {"probe", "pair"}:
+            if args.input is not None:
+                if args.input.stat().st_size > 1024 * 1024:
+                    raise ValueError("Host Helper input is too large")
+                raw = args.input.read_text(encoding="utf-8")
+            else:
+                raw = sys.stdin.read(1024 * 1024 + 1)
+                if len(raw) > 1024 * 1024:
+                    raise ValueError("Host Helper input is too large")
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise ValueError("Host Helper input must be a JSON object")
+        result = run_host_helper(args.edge_action, payload, timeout=args.timeout)
+    except (OSError, UnicodeError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        print(f"[ERROR] HOST_HELPER_FAILED: {exc}")
+        return 1
+    print(json.dumps(result, ensure_ascii=False))
     return 0
 
 
@@ -424,6 +566,32 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("start", "stop", "restart", "status", "logs"):
         service = sub.add_parser(command)
         service.add_argument("--env-file", type=Path, default=argparse.SUPPRESS)
+        service.add_argument("--data-root", type=Path, default=default_data_root())
+
+    for service_name in ("preprocessing", "analysis"):
+        service = sub.add_parser(service_name)
+        service.add_argument("state", choices=("on", "off"))
+        service.add_argument("--data-root", type=Path, default=default_data_root())
+
+    local_camera = sub.add_parser("local-camera")
+    local_camera.add_argument(
+        "local_camera_action", choices=("on", "off", "status", "devices")
+    )
+    local_camera.add_argument("--data-root", type=Path, default=default_data_root())
+    local_camera.add_argument("--device", help="exact DirectShow camera device name")
+    local_camera.add_argument("--username", default="admin")
+    local_camera.add_argument("--password-file", type=Path)
+
+    edge = sub.add_parser("edge")
+    edge_sub = edge.add_subparsers(dest="edge_action", required=True)
+    edge_discover = edge_sub.add_parser("discover")
+    edge_discover.add_argument("--timeout", type=float, default=3.0)
+    for action, default_timeout in (("probe", 5.0), ("pair", 10.0)):
+        edge_action = edge_sub.add_parser(action)
+        edge_action.add_argument(
+            "--input", type=Path, help="JSON input file; defaults to standard input"
+        )
+        edge_action.add_argument("--timeout", type=float, default=default_timeout)
 
     manager = sub.add_parser("manager", help="start Server Manager without Compose actions")
     manager.add_argument("--data-root", type=Path, default=default_data_root())
@@ -483,6 +651,24 @@ def main(argv: list[str] | None = None) -> int:
         return _launch_manager(args)
     if args.command == "admin":
         return _launch_admin(args)
+    if args.command in {"preprocessing", "analysis"}:
+        return _managed_service_command(args, f"{args.command}-{args.state}")
+    if args.command == "local-camera":
+        return _local_camera_command(args)
+    if args.command == "edge":
+        return _edge_helper_command(args)
+
+    if args.command in {"start", "stop", "restart", "status"}:
+        try:
+            if args.command == "stop":
+                stop_publisher(args.data_root)
+            deployment = inspect_installation(args.data_root, args.server_dir)
+        except (OSError, ValueError) as exc:
+            print(f"[ERROR] SERVICE_ACTION_FAILED: {exc}")
+            return 1
+        # An explicit env file preserves the legacy raw Compose CLI contract.
+        if deployment is not None and args.env_file is None:
+            return _managed_service_command(args, args.command)
 
     adapter = ComposeAdapter(args.server_dir, args.env_file)
     try:

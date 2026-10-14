@@ -13,10 +13,14 @@ from server.deployment.context import DeploymentContext
 _EXECUTABLES = {
     "server_manager": "AI_CCTV_Server_Manager.exe",
     "admin": "AI_CCTV_Admin.exe",
+    "host_helper": "AI_CCTV_Host_Helper.exe",
+    "local_camera": "AI_CCTV_Local_Camera.exe",
 }
 _MODULES = {
     "server_manager": "server.desktop.server_manager",
     "admin": "server.desktop.admin",
+    "host_helper": "server.host_helper",
+    "local_camera": "server.local_camera_publisher",
 }
 
 

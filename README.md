@@ -120,6 +120,26 @@ uv run --project server/setup/install_helper --locked python -m server.cli statu
 uv run --project server/setup/install_helper --locked python -m server.cli logs --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
 ```
 
+Windows의 통합 실행 스크립트는 같은 Server Manager 서비스 제어 로직을 사용한다.
+
+```powershell
+.\ai_cctv.ps1 gui
+.\ai_cctv.ps1 gui -LocalCamera on -Preprocessing on -Analysis on
+.\ai_cctv.ps1 cli start
+.\ai_cctv.ps1 cli status
+.\ai_cctv.ps1 cli preprocessing on
+.\ai_cctv.ps1 cli analysis off
+.\ai_cctv.ps1 cli local-camera status
+.\ai_cctv.ps1 cli local-camera devices
+.\ai_cctv.ps1 cli edge discover
+.\ai_cctv.ps1 cli stop
+```
+
+로컬 카메라의 첫 CLI 시작은 정확한 DirectShow 장치명을
+`local-camera on --device '<장치명>'`으로 지정해야 한다. 이후에는 저장한 장치명을
+재사용한다. `cli stop`은 로컬 카메라 Publisher를 먼저 종료한 뒤 Docker 서비스를
+종료한다. Admin 창만 닫으면 서버와 Publisher는 계속 실행된다.
+
 GUI는 서버 로그를 터미널에 계속 출력하는 명령이 아니다. 개발자가 수동 source 배포를
 구성하지 않았다면 `server/.env`가 존재한다고 가정하지 않는다. 호스트 도구의 책임과 실행 방법은
 [Server Host Tools](server/README.md)를 참고한다.

@@ -8,6 +8,8 @@
 #define MyManagerExeName "AI_CCTV_Server_Manager.exe"
 #define MyAdminExeName "AI_CCTV_Admin.exe"
 #define MyCliExeName "AI_CCTV_CLI.exe"
+#define MyHostHelperExeName "AI_CCTV_Host_Helper.exe"
+#define MyLocalCameraExeName "AI_CCTV_Local_Camera.exe"
 
 [Setup]
 AppId={{9C5AB807-BB88-4929-982C-D5C7B92D62EA}
@@ -53,6 +55,9 @@ Source: "..\..\..\..\dist\AI_CCTV_Server_Installer.exe"; DestDir: "{app}"; Flags
 Source: "..\..\..\..\dist\AI_CCTV_Server_Manager.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\dist\AI_CCTV_Admin.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\dist\AI_CCTV_CLI.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\..\..\dist\AI_CCTV_Host_Helper.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\..\..\dist\AI_CCTV_Local_Camera.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\..\..\ai_cctv.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\.dockerignore"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\..\lib\*"; DestDir: "{app}\lib"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "__pycache__\*,*.pyc,*.pyo,*.egg-info\*,build\*,dist\*"
 ; 여섯 서비스의 실행 코드를 포함하고 개발·테스트 도구와 실제 운영 데이터는 제외한다.
