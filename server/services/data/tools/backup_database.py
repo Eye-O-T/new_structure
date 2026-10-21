@@ -1,5 +1,5 @@
 # Data 컨테이너의 백업 API로 실행 중인 SQLite의 일관된 복사본을 만든다.
-# 영상·모델·설정은 포함하지 않으며 이 도구는 server-dir 아래 .env를 사용한다.
+# 개발·설치 배포가 공유하는 Compose 경로 선택을 사용한다.
 
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import textwrap
 from pathlib import Path
+
+from server.operations.compose import ComposeAdapter
 
 
 CONTAINER_SCRIPT = textwrap.dedent(
@@ -45,12 +47,29 @@ CONTAINER_SCRIPT = textwrap.dedent(
 ).strip()
 
 
-# 소스 배포의 Compose 디렉터리를 기본값으로 사용하고 백업 파일명만 선택적으로 받는다.
+# 저장소 소스 또는 설치본에서 Compose 디렉터리를 찾고 필요하면 env 경로를 재정의한다.
+def default_server_dir() -> Path:
+    # 저장소 원본과 설치본의 server/scripts 배치에서 compose.yml을 찾아 선택한다.
+    candidates = (
+        Path(__file__).resolve().parents[3],
+        Path(__file__).resolve().parents[1],
+        Path(__file__).resolve().parents[2],
+    )
+    for candidate in candidates:
+        if (candidate / "compose.yml").is_file():
+            return candidate
+    return candidates[0]
+
+
 def parse_args() -> argparse.Namespace:
-    server_dir = Path(__file__).resolve().parents[3]
     parser = argparse.ArgumentParser()
     parser.add_argument("--filename")
-    parser.add_argument("--server-dir", type=Path, default=server_dir)
+    parser.add_argument("--server-dir", type=Path, default=default_server_dir())
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="Compose env file (defaults to the installed or development configuration)",
+    )
     return parser.parse_args()
 
 
@@ -67,19 +86,17 @@ def main() -> int:
     if docker is None:
         raise SystemExit("Docker CLI was not found on PATH")
     server_dir = args.server_dir.expanduser().resolve()
+    deployment = ComposeAdapter(server_dir, args.env_file)
     command = [
         docker,
-        "compose",
-        "--env-file",
-        str(server_dir / ".env"),
-        "-f",
-        str(server_dir / "compose.yml"),
-        "exec",
-        "-T",
-        "data",
-        "python",
-        "-c",
-        CONTAINER_SCRIPT,
+        *deployment.command(
+            "exec",
+            "-T",
+            "data",
+            "python",
+            "-c",
+            CONTAINER_SCRIPT,
+        ),
     ]
     result = subprocess.run(
         command,

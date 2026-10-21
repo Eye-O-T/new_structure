@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from queue import Empty, Queue
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import av
 from PyQt5.QtCore import Qt
@@ -136,15 +136,23 @@ class PlaybackTests(unittest.TestCase):
         self.assertEqual(self.worker._dropped_frames, 60)
         self.assertEqual(self.clock.now, 0)  # No producer backpressure waits.
 
-    def test_local_camera_requests_one_second_keyframes(self):
-        publisher = LocalCameraPublisher()
-        publisher.process = Mock()
-        publisher.process.state.return_value = 0
-        with patch.object(publisher, "ffmpeg_path", return_value="ffmpeg"):
-            publisher.start("test", "rtsp://localhost:8554/test", fps=30)
-        args = publisher.process.start.call_args.args[1]
-        self.assertEqual(args[args.index("-g") + 1], "30")
-        self.assertEqual(args[args.index("-keyint_min") + 1], "30")
+    def test_local_camera_uses_detached_publisher(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_root = Path(directory)
+            publisher = LocalCameraPublisher(data_root=data_root)
+            stream_url = "rtsp://localhost:8554/test"
+            with patch("server.desktop.admin.local_camera.start_publisher") as start:
+                publisher.start("test", stream_url, camera_id="cam-1", fps=30)
+
+        start.assert_called_once_with(
+            data_root,
+            device_name="test",
+            camera_id="cam-1",
+            stream_url=stream_url,
+            width=1280,
+            height=720,
+            fps=30,
+        )
 
 
 class StreamDiagnosticsTests(unittest.TestCase):
@@ -156,7 +164,7 @@ class StreamDiagnosticsTests(unittest.TestCase):
         ]
         av_module = Mock()
         hls_stream = Mock()
-        hls_open = Mock()
+        hls_open = MagicMock()
         hls_open.__enter__.return_value = hls_stream
         hls_open.__exit__.return_value = False
         av_module.open.side_effect = [

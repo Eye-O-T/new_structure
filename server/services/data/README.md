@@ -35,7 +35,7 @@
 
 운영체제가 종료·강제 종료 요청 후에도 자식을 살아 있는 상태로 보고하면 복구 worker는 `RECOVERY_PROCESS_DID_NOT_STOP` 오류와 readiness 503을 유지하며 후속 작업 claim을 중단한다. 실행 중 파일과 작업 상태를 보존해 중복 쓰기를 막는다. 운영자는 해당 프로세스와 저장장치 상태를 확인하여 종료한 뒤 Data 서비스를 재시작해야 한다.
 
-Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/operations.md#운영과-백업)을 따른다. 온라인 DB 백업 도구는 Data 서비스가 소유하며 저장소 루트에서 `python server/services/data/tools/backup_database.py`로 실행한다. 기본 `server/.env` 또는 `--server-dir` 아래 `.env`를 사용하고 결과는 `DATABASE_DIR/backups`에 저장한다. 설치 도우미의 `config/compose.env`를 자동으로 선택하지 않으며 영상·설정·비밀 파일은 이 백업에 포함하지 않는다.
+Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/operations.md#데이터베이스-백업)을 따른다. 온라인 DB 백업 도구는 Data 서비스가 소유하며 저장소 루트에서 `python server/services/data/tools/backup_database.py`로 실행한다. 개발 환경은 `server/.env`, 설치 환경은 `--server-dir`과 `--env-file`로 Compose 경로를 지정할 수 있다. 결과는 `DATABASE_DIR/backups`에 저장되며 영상·설정·비밀 파일은 포함하지 않는다.
 
 ## 보관과 조회
 

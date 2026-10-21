@@ -76,10 +76,10 @@ Source: "..\..\..\..\server\setup\install_helper\README.md"; DestDir: "{app}\ser
 Source: "..\..\..\..\server\desktop\admin\README.md"; DestDir: "{app}\server\desktop\admin"; Flags: ignoreversion
 Source: "..\..\..\..\edge\README.md"; DestDir: "{app}\edge"; Flags: ignoreversion
 Source: "..\..\..\..\docs\README.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\..\..\docs\user-guide.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\..\..\docs\deployment-guide.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\..\..\docs\operations.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\..\..\docs\architecture.md"; DestDir: "{app}\docs"; Flags: ignoreversion
-Source: "..\..\..\..\docs\assets\architecture\*.svg"; DestDir: "{app}\docs\assets\architecture"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\..\..\docs\openapi.yaml"; DestDir: "{app}\docs"; Flags: ignoreversion
 
 [InstallDelete]
