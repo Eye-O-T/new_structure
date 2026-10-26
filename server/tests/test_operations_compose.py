@@ -2,7 +2,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from server.operations.compose import ComposeAdapter, START_ARGUMENTS
+from server.operations.compose import ComposeAdapter, START_ARGUMENTS, default_server_dir
+
+
+class DefaultServerDirTests(unittest.TestCase):
+    def test_source_checkout_points_to_server_directory(self):
+        server_dir = default_server_dir()
+
+        self.assertEqual(server_dir, Path(__file__).resolve().parents[1])
+        self.assertTrue((server_dir / "compose.yml").is_file())
 
 
 class ComposeAdapterCommandTests(unittest.TestCase):

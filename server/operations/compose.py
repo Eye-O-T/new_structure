@@ -61,7 +61,7 @@ def migrate_detection_model(env_file: Path) -> bool:
 def default_server_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent / "server"
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[1]
 
 
 # 명시한 저장소를 우선하고 기본값은 실행 코드와 분리된 OS별 영구 데이터 위치로 정한다.
