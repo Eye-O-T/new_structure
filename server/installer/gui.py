@@ -371,10 +371,10 @@ class InstallerWindow(QWidget):
         self.management_output = QTextEdit()
         self.management_output.setReadOnly(True)
         layout.addWidget(self.management_output, 1)
-        self.open_manager_button = QPushButton("서버 관리자 열기")
+        self.open_manager_button = QPushButton("서버 제어판 열기")
         self.open_manager_button.clicked.connect(self.open_manager)
         layout.addWidget(self.open_manager_button)
-        self.open_admin_button = QPushButton("CCTV 관리자 화면 열기")
+        self.open_admin_button = QPushButton("CCTV 관제 화면 열기")
         self.open_admin_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.open_admin_button.clicked.connect(self.open_admin)
         layout.addWidget(self.open_admin_button)
@@ -482,7 +482,7 @@ class InstallerWindow(QWidget):
             return
         if self.installation is not None:
             self.management_output.setPlainText(
-                "기존 설치를 찾았습니다. 서버 상태와 운영 설정은 서버 관리자에서 확인하세요."
+                "기존 설치를 찾았습니다. 서버 상태와 운영 설정은 서버 제어판에서 확인하세요."
             )
         else:
             self.check_prerequisites()
@@ -693,7 +693,7 @@ class InstallerWindow(QWidget):
         self.preferences.setValue("storage_root", str(installed.data_root))
         self.preferences.sync()
         self.management_info.setText(
-            "저장된 설치를 확인했습니다. 이후 변경은 서버 관리자에서 수행하세요.\n"
+            "저장된 설치를 확인했습니다. 이후 변경은 서버 제어판에서 수행하세요.\n"
             f"접속 주소: {installed.public_url or '설정되지 않음'}\n"
             f"설정: {installed.env_file}"
         )
@@ -708,7 +708,7 @@ class InstallerWindow(QWidget):
                 server_manager_arguments(self.server_dir, self.installation.data_root),
             )
         except OSError as exc:
-            self._show_notice("서버 관리자 실행 실패", str(exc))
+            self._show_notice("서버 제어판 실행 실패", str(exc))
 
     # 스레드 수명과 busy 상태를 관리하며 필요하면 실패 후 저장소를 다시 읽어 중단 설치를 감지한다.
     def _start_task(
@@ -762,7 +762,7 @@ class InstallerWindow(QWidget):
         def completed(output):
             self.management_output.setPlainText(output)
             self.activity.setText(
-                "서버 실행 명령을 마쳤습니다. 이후 운영은 서버 관리자에서 수행하세요."
+                "서버 실행 명령을 마쳤습니다. 이후 운영은 서버 제어판에서 수행하세요."
             )
 
         self._start_task(
@@ -776,7 +776,7 @@ class InstallerWindow(QWidget):
             try:
                 launch_desktop("admin", admin_arguments(self.installation))
             except OSError as exc:
-                self._show_notice("CCTV 관리자 실행 실패", str(exc))
+                self._show_notice("CCTV 관제 화면 실행 실패", str(exc))
 
     # 설치 또는 Edge 작업 중에는 창 종료를 보류해 작업 객체가 실행 도중 파괴되지 않게 한다.
     def closeEvent(self, event):

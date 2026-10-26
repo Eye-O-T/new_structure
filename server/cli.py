@@ -61,7 +61,7 @@ def _launch_manager(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as exc:
         print(f"[ERROR] DESKTOP_LAUNCH_FAILED: {exc}")
         return 1
-    print(f"Server Manager started (PID {process.pid}).")
+    print(f"서버 제어판 실행됨 (PID {process.pid}).")
     return 0
 
 
@@ -74,7 +74,7 @@ def _launch_admin(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as exc:
         print(f"[ERROR] DESKTOP_LAUNCH_FAILED: {exc}")
         return 1
-    print(f"CCTV Admin started (PID {process.pid}).")
+    print(f"CCTV 관제 화면 실행됨 (PID {process.pid}).")
     return 0
 
 
@@ -593,9 +593,9 @@ def build_parser() -> argparse.ArgumentParser:
         )
         edge_action.add_argument("--timeout", type=float, default=default_timeout)
 
-    manager = sub.add_parser("manager", help="start Server Manager without Compose actions")
+    manager = sub.add_parser("manager", help="서버 제어판 실행")
     manager.add_argument("--data-root", type=Path, default=default_data_root())
-    admin = sub.add_parser("admin", help="start CCTV Admin without Compose actions")
+    admin = sub.add_parser("admin", help="CCTV 관제 화면 실행")
     admin.add_argument("--data-root", type=Path, default=default_data_root())
 
     edge_register = sub.add_parser("edge-register")

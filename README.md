@@ -20,7 +20,7 @@ AI CCTV는 Raspberry Pi + Pi 카메라, Windows 중앙 서버, Android 앱을 �
 
 Edge는 카메라 영상을 중앙 MediaMTX로 송출하면서 연결 장애에 대비한 로컬 녹화를
 유지한다. 중앙 서버는 영상 녹화, 사람 감지·추적, 인물 특징 연결, 이벤트·미디어 저장을
-담당한다. Android 앱과 Server Desktop은 로그인한 사용자가 실시간 영상, 이벤트 이미지,
+담당한다. Android 앱과 CCTV 관제 화면은 로그인한 사용자가 실시간 영상, 이벤트 이미지,
 관련 녹화와 장치 상태를 확인하게 한다.
 
 ### 1.2 Key Features
@@ -54,7 +54,7 @@ Desktop 경계는 [Architecture & Network Topology](docs/architecture.md)를 따
 | AI | Python 3.11, YOLO/ByteTrack, ONNX Runtime, OSNet, OpenCV |
 | Edge | Raspberry Pi OS Bookworm ARM64, Python 3.11, systemd, MediaMTX, rpicam/GStreamer |
 | Mobile | Flutter, Dart, Android SDK, HLS, Firebase Cloud Messaging(선택) |
-| Server Desktop | Python 3.11, PyQt5, RTSP/HLS client |
+| CCTV 관제 화면 | Python 3.11, PyQt5, RTSP/HLS client |
 
 ## 🖥 System Requirements & Hardware Setup
 
@@ -93,7 +93,7 @@ AI profile에는 YOLO 호환 감지 모델과 OSNet ONNX 모델이 필요하다.
 
 ### 3.1 Host Server Setup
 
-Windows PowerShell에서 저장소를 준비하고 Server Installer를 실행한다. 설치 이후의 운영은 Server Manager, CCTV 사용은 Admin에서 수행한다.
+Windows PowerShell에서 저장소를 준비하고 서버 설치 도우미를 실행한다. 설치 이후의 운영은 서버 제어판, 영상과 카메라 관리는 CCTV 관제 화면에서 수행한다.
 
 ```powershell
 git clone https://github.com/Eye-O-T/new_structure.git
@@ -120,7 +120,7 @@ uv run --project server/setup/install_helper --locked python -m server.cli statu
 uv run --project server/setup/install_helper --locked python -m server.cli logs --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
 ```
 
-Windows의 통합 실행 스크립트는 같은 Server Manager 서비스 제어 로직을 사용한다.
+Windows의 통합 실행 스크립트는 같은 서버 제어판 서비스 제어 로직을 사용한다.
 
 ```powershell
 .\ai_cctv.ps1 gui
@@ -138,7 +138,7 @@ Windows의 통합 실행 스크립트는 같은 Server Manager 서비스 제어 
 로컬 카메라의 첫 CLI 시작은 정확한 DirectShow 장치명을
 `local-camera on --device '<장치명>'`으로 지정해야 한다. 이후에는 저장한 장치명을
 재사용한다. `cli stop`은 로컬 카메라 Publisher를 먼저 종료한 뒤 Docker 서비스를
-종료한다. Admin 창만 닫으면 서버와 Publisher는 계속 실행된다.
+종료한다. CCTV 관제 화면을 닫아도 서버와 Publisher는 계속 실행된다.
 
 GUI는 서버 로그를 터미널에 계속 출력하는 명령이 아니다. 개발자가 수동 source 배포를
 구성하지 않았다면 `server/.env`가 존재한다고 가정하지 않는다. 호스트 도구의 책임과 실행 방법은
@@ -158,7 +158,7 @@ sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001
 ```
 
 `pair`는 UDP/37020으로 미설정 Edge를 광고하고 TCP/8003에서 최초 설정을 기다린다.
-Server Desktop의 **카메라 연결**에서 **Edge 찾기** → 장치 선택 → 카메라 이름·연결 설정
+서버 제어판의 **카메라 연결**에서 **Edge 찾기** → 장치 선택 → 카메라 이름·연결 설정
 확인 → **선택한 Edge 연결** 순서로 진행한다. 현재 구현은 등록 시 32자 이상의 Edge 운영
 인증 토큰을 요구하고, 같은 값을 중앙 등록과 Edge Control/Recovery에 사용한다. 이미 설정된
 장치에는 `pair`를 다시 실행하지 않는다.
@@ -190,9 +190,9 @@ Release APK에는 배포용 서명 키가 필요하다. Flutter/Dart 버전, JDK
 
 ### 4.1 Startup Sequence
 
-1. Docker Desktop을 시작하고 Server Manager에서 Server 상태가 ready인지 확인한다.
+1. Docker Desktop을 시작하고 서버 제어판에서 CCTV 서버 상태가 ready인지 확인한다.
 2. Raspberry Pi Edge 서비스를 시작하고 RTSP 송출·Control/Recovery 상태를 확인한다.
-3. Server Desktop에서 로그인하고 등록된 카메라의 live view를 확인한다.
+3. CCTV 관제 화면에서 로그인하고 등록된 카메라의 live view를 확인한다.
 4. Android 앱에 Server base URL과 계정을 입력해 로그인한다.
 
 ### 4.2 End-to-End Test Scenarios
@@ -235,7 +235,7 @@ Release APK에는 배포용 서명 키가 필요하다. Flutter/Dart 버전, JDK
 - Host와 Pi가 같은 IPv4 LAN인지, 공유기의 AP isolation이 꺼져 있는지 확인한다.
 - UDP/37020, Pi TCP/8003·8002, Host RTSP/TCP 8554의 방향별 방화벽을 확인한다.
 - Pi에서 `sudo ai-cctv-edge doctor`, `status`, `logs`를 실행한다.
-- 중앙 서버에서는 Server Manager 또는 `server.cli`의 `doctor`, `status`, `logs`를 사용한다.
+- 중앙 서버에서는 서버 제어판 또는 `server.cli`의 `doctor`, `status`, `logs`를 사용한다.
 - IP가 바뀌었다면 중앙에 저장된 management/recovery URL을 갱신한다. MAC은 인증 비밀값이
   아니며 Control/Recovery는 operational Bearer token으로 인증한다.
 

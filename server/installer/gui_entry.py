@@ -16,10 +16,10 @@ def run() -> int:
 
         from server.installer.gui import InstallerWindow
     except ImportError as exc:
-        raise RuntimeError("설치 관리자 GUI 의존성을 설치해 주세요.") from exc
+        raise RuntimeError("서버 설치 도우미 GUI 의존성을 설치해 주세요.") from exc
 
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("AI CCTV 서버 설치 관리자")
+    app.setApplicationName("AI CCTV 서버 설치 도우미")
     window = InstallerWindow()
     window.show()
     return app.exec_()

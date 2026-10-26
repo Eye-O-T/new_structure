@@ -28,7 +28,7 @@ class CCTVMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Intelligent CCTV Control Center")
+        self.setWindowTitle("AI CCTV 관제 화면")
         self.setGeometry(100, 100, 1280, 720)
         self.setStyleSheet(
             "background-color: #0f172a; color: #f8fafc; font-family: Arial;"
@@ -64,7 +64,7 @@ class CCTVMainWindow(QMainWindow):
 
         header_layout = QHBoxLayout()
 
-        title_label = QLabel("Intelligent CCTV Control Center")
+        title_label = QLabel("AI CCTV 관제 화면")
         title_label.setStyleSheet("font-size: 28px; font-weight: bold;")
 
         self.btn_start = QPushButton("모니터링 시작")

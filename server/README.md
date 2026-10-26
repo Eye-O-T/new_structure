@@ -4,9 +4,9 @@ Windows 호스트 도구는 Docker 서비스와 수명주기가 분리되어 있
 
 | 프로그램 | 책임 | 실행 |
 |---|---|---|
-| Server Installer | 최초 설치, 설정·모델·TLS 준비, 최초 기동 | `python -m server.installer` |
-| Server Manager | Compose 수명주기, AI 서비스 토글, 네트워크 설정, 진단 | `python -m server.desktop.server_manager` |
-| CCTV Admin | 카메라, 영상, 이벤트, Edge 온보딩 | `python -m server.desktop.admin` |
+| 서버 설치 도우미 | 최초 설치, 설정·모델·TLS 준비, 최초 기동 | `python -m server.installer` |
+| 서버 제어판 | Compose 수명주기, AI 서비스 토글, 네트워크 설정, 진단 | `python -m server.desktop.server_manager` |
+| CCTV 관제 화면 | 카메라, 영상, 이벤트, Edge 온보딩 | `python -m server.desktop.admin` |
 | Host Helper | Edge Discovery·Probe·Pairing | `python -m server.host_helper {discover,probe,pair}` |
 | Local Camera Publisher | DirectShow 웹캠의 RTSP 송출 | CLI에서 시작·중지 |
 
@@ -22,9 +22,9 @@ uv run --project server/setup/install_helper --locked python -m server.desktop.a
 ```
 
 일반 운영에서는 저장소 루트의 `ai_cctv.ps1`을 사용합니다. `gui`는 기본 Docker
-서비스를 준비한 뒤 선택한 AI 서비스와 Local Camera Publisher를 적용하고 Admin을
-실행합니다. `cli stop`만 Publisher와 Docker 서비스를 함께 종료하며, Admin 창을
-닫는 동작은 둘을 종료하지 않습니다.
+서비스를 준비한 뒤 선택한 AI 서비스와 Local Camera Publisher를 적용하고 CCTV 관제 화면을
+실행합니다. `cli stop`만 Publisher와 Docker 서비스를 함께 종료하며, 관제 화면을
+닫아도 둘은 종료되지 않습니다.
 
 ```powershell
 .\ai_cctv.ps1 gui -Preprocessing on -Analysis on

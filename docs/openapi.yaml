@@ -182,7 +182,7 @@ paths:
   /api/v1/features/status:
     get:
       summary: AI 기능 상태 조회
-      description: 인증된 사용자가 사람 감지·식별과 이벤트 분석 서비스의 현재 실행 상태를 조회한다. 기능 변경은 서버 PC의 Server Manager에서만 수행한다.
+      description: 인증된 사용자가 사람 감지·식별과 이벤트 분석 서비스의 현재 실행 상태를 조회한다. 기능 변경은 서버 PC의 서버 제어판에서 수행한다.
       operationId: feature_status_api_v1_features_status_get
       responses:
         '200':

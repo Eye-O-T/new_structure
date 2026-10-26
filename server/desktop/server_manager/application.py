@@ -48,10 +48,10 @@ class ServerManagerWindow(QWidget):
         self.deployment = inspect_installation(self.data_root, self.server_dir)
         if self.deployment is None:
             raise ValueError(
-                "설치된 서버 설정이 없습니다. 먼저 AI CCTV Server Installer를 실행하세요."
+                "설치된 서버 설정이 없습니다. 먼저 서버 설치 도우미를 실행하세요."
             )
         self._task: BackgroundTask | None = None
-        self.setWindowTitle("AI CCTV 서버 관리자")
+        self.setWindowTitle("AI CCTV 서버 제어판")
         self.resize(760, 720)
 
         layout = QVBoxLayout(self)
@@ -100,9 +100,9 @@ class ServerManagerWindow(QWidget):
         return group
 
     def _desktop_group(self) -> QGroupBox:
-        group = QGroupBox("Desktop tools")
+        group = QGroupBox("CCTV 관제")
         layout = QHBoxLayout(group)
-        button = QPushButton("Open CCTV Admin")
+        button = QPushButton("CCTV 관제 화면 열기")
         button.clicked.connect(self._open_admin)
         layout.addWidget(button)
         return group
@@ -111,9 +111,9 @@ class ServerManagerWindow(QWidget):
         try:
             process = launch_desktop("admin", admin_arguments(self.deployment))
         except OSError as exc:
-            self.output.setPlainText(f"Unable to start CCTV Admin: {exc}")
+            self.output.setPlainText(f"CCTV 관제 화면 실행 실패: {exc}")
             return
-        self.activity.setText(f"CCTV Admin started (PID {process.pid})")
+        self.activity.setText(f"CCTV 관제 화면 실행됨 (PID {process.pid})")
 
     def _network_group(self) -> QGroupBox:
         group = QGroupBox("네트워크 설정")
@@ -314,7 +314,7 @@ class ServerManagerWindow(QWidget):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="AI CCTV 서버 관리자")
+    parser = argparse.ArgumentParser(description="AI CCTV 서버 제어판")
     parser.add_argument("--server-dir", type=Path, default=default_server_dir())
     parser.add_argument("--data-root", type=Path, default=default_data_root())
     args = parser.parse_args(argv)

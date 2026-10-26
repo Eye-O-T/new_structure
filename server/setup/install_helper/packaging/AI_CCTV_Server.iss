@@ -84,6 +84,10 @@ Source: "..\..\..\..\docs\openapi.yaml"; DestDir: "{app}\docs"; Flags: ignorever
 
 [InstallDelete]
 ; 이름이 바뀐 실행 파일과 바로가기를 정리하며 운영 데이터는 유지한다.
+Type: files; Name: "{group}\AI CCTV Server Manager.lnk"
+Type: files; Name: "{group}\AI CCTV Admin.lnk"
+Type: files; Name: "{group}\AI CCTV Server Installer.lnk"
+Type: files; Name: "{autodesktop}\AI CCTV Server Manager.lnk"
 Type: files; Name: "{app}\AI_CCTV_Configurator.exe"
 Type: files; Name: "{app}\AI_CCTV_Server_Install_Helper.exe"
 Type: files; Name: "{group}\AI CCTV Configurator.lnk"
@@ -103,17 +107,17 @@ Type: files; Name: "{app}\server\scripts\backup_database.py"
 Type: dirifempty; Name: "{app}\server\scripts"
 
 [Icons]
-Name: "{group}\AI CCTV Server Installer"; Filename: "{app}\{#MyInstallerExeName}"; WorkingDir: "{app}"
-Name: "{group}\AI CCTV Server Manager"; Filename: "{app}\{#MyManagerExeName}"; WorkingDir: "{app}"
-Name: "{group}\AI CCTV Admin"; Filename: "{app}\{#MyAdminExeName}"; WorkingDir: "{app}"
+Name: "{group}\AI CCTV 서버 설치 도우미"; Filename: "{app}\{#MyInstallerExeName}"; WorkingDir: "{app}"
+Name: "{group}\AI CCTV 서버 제어판"; Filename: "{app}\{#MyManagerExeName}"; WorkingDir: "{app}"
+Name: "{group}\AI CCTV 관제 화면"; Filename: "{app}\{#MyAdminExeName}"; WorkingDir: "{app}"
 Name: "{group}\AI CCTV CLI Console"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoExit -Command ""& '{app}\{#MyCliExeName}' --help"""; WorkingDir: "{app}"
 Name: "{group}\Installation guide"; Filename: "{sys}\notepad.exe"; Parameters: """{app}\README.md"""
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\AI CCTV Server Manager"; Filename: "{app}\{#MyManagerExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\AI CCTV 서버 제어판"; Filename: "{app}\{#MyManagerExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 ; 보호된 운영 설정을 저장하기 위해 GUI는 관리자 권한을 요청한다.
-Filename: "{app}\{#MyInstallerExeName}"; Description: "AI CCTV Server Installer로 최초 배포 구성"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyInstallerExeName}"; Description: "AI CCTV 서버 설치 도우미로 최초 배포 구성"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 컨테이너와 네트워크를 중지·제거하되 호스트의 운영 데이터는 남긴다.

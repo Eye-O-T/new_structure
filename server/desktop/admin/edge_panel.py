@@ -495,7 +495,7 @@ class EdgePanel(QWidget):
                         pass
                     else:
                         return (
-                            "Edge 연결이 완료되었습니다. 서버 관리자 화면에서 장치 상태를, "
+                            "Edge 연결이 완료되었습니다. CCTV 관제 화면에서 장치 상태를, "
                             "앱에서 실제 영상을 확인하세요."
                         )
                 # 수동 등록 또는 자동 전달 실패 시 일회성 계정을 파일에 남겨 Pi에서 이어서 적용하게 한다.
@@ -510,7 +510,7 @@ class EdgePanel(QWidget):
                 if registered:
                     raise RuntimeError(
                         "중앙 카메라는 등록되었지만 설정 전달을 완료하지 못했습니다. "
-                        "서버 관리자 화면에서 게시 계정을 재발급해 Pi에 적용하세요. "
+                        "CCTV 관제 화면에서 게시 계정을 재발급해 Pi에 적용하세요. "
                         "카메라를 다시 등록하지 마세요."
                     ) from exc
                 raise RuntimeError(_connection_error(exc)) from exc

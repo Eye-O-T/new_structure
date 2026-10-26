@@ -1,6 +1,6 @@
-# AI CCTV 관리자 데스크톱 화면
+# AI CCTV 관제 화면
 
-Server Installer·Server Manager와 독립적으로 실행되는 PyQt 기반 CCTV 관리자 화면입니다.
+서버 설치 도우미·서버 제어판과 독립적으로 실행되는 PyQt 기반 CCTV 관제 화면입니다.
 
 - `application.py`: 서버 연결 기반 메인 창
 - `settings_window.py`: 관리자 로그인과 모니터링 카메라 선택
