@@ -1,0 +1,62 @@
+name: Project checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-and-server:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install host packages and test runner
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest==8.3.4
+          python -m pip install -e ./lib -e ./server/setup -e ./server/setup/install_helper
+          python -m pip install fastapi==0.115.8 httpx==0.28.1 PyJWT==2.10.1 python-multipart==0.0.20
+      - name: Run desktop and host tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: .;lib
+        run: python -m pytest server/tests server/setup/install_helper/tests server/services/data server/services/external/tests -q
+
+  edge:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install Edge package and test runner
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest==8.3.4 -e ./lib -e ./edge
+      - name: Run Edge tests
+        env:
+          PYTHONPATH: .:lib:edge/src
+        run: python -m pytest edge/tests -q
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.2"
+          channel: stable
+      - name: Resolve locked Flutter packages
+        working-directory: mobile
+        run: flutter pub get
+      - name: Analyze Android client
+        working-directory: mobile
+        run: flutter analyze
+      - name: Run Android client tests
+        working-directory: mobile
+        run: flutter test

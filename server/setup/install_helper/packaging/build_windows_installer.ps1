@@ -112,6 +112,9 @@ foreach ($requiredFile in @(
     (Join-Path $repositoryRoot 'server\services\external\tools\bootstrap_admin.py'),
     (Join-Path $repositoryRoot 'README.md'),
     (Join-Path $repositoryRoot 'mobile\README.md'),
+    (Join-Path $repositoryRoot 'docs\README.md'),
+    (Join-Path $repositoryRoot 'docs\user-guide.md'),
+    (Join-Path $repositoryRoot 'docs\deployment-guide.md'),
     (Join-Path $repositoryRoot 'docs\architecture.md'),
     (Join-Path $repositoryRoot 'docs\operations.md'),
     (Join-Path $repositoryRoot 'docs\openapi.yaml')

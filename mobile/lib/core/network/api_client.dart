@@ -441,10 +441,35 @@ class ApiClient extends ChangeNotifier {
   Future<Uint8List> getBytes(String path, {ApiCancellation? cancellation}) async {
     final generation = _generation;
     final token = await accessToken();
-    var response = await _raw('GET', path, token: token, cancellation: cancellation);
-    if (response.statusCode == 401 && _access == token) {
-      await refreshSession();
-      response = await _raw('GET', path, token: _access, cancellation: cancellation);
+    var response = await _raw(
+      'GET',
+      path,
+      token: token,
+      cancellation: cancellation,
+    );
+    cancellation?.check();
+    if (_generation != generation) {
+      throw const ApiException(401, '세션이 변경되었습니다.');
+    }
+    if (response.statusCode == 401) {
+      // 다른 요청이 먼저 갱신했으면 그 토큰을 쓰고, 아니면 갱신을 하나로 합친다.
+      if (_access == token) await refreshSession();
+      cancellation?.check();
+      if (_generation != generation || !signedIn) {
+        throw const ApiException(401, '세션이 변경되었습니다.');
+      }
+      response = await _raw(
+        'GET',
+        path,
+        token: _access,
+        cancellation: cancellation,
+      );
+      cancellation?.check();
+      if (response.statusCode == 401) {
+        await _serializeSession(() async {
+          if (_generation == generation) await _clearSession();
+        });
+      }
     }
     if (_generation != generation) throw const ApiException(401, 'Session changed.');
     if (response.statusCode < 200 || response.statusCode >= 300) {

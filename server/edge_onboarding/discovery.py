@@ -46,7 +46,7 @@ class DiscoveredEdge:
     advertised_ip: str
 
 
-# 키 순서·공백·인코딩을 고정해 Edge와 설치 도우미가 동일한 바이트에 서명하도록 한다.
+# 키 순서·공백·인코딩을 고정해 Edge 광고를 일관된 JSON으로 직렬화한다.
 def _canonical_payload(message: dict[str, object]) -> bytes:
     return json.dumps(
         message,
@@ -57,7 +57,7 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
     ).encode("utf-8")
 
 
-# 광고를 곧바로 신뢰하지 않고 크기·필드·시각·서명을 검증한다. 오래된 광고의 재사용도 거부한다.
+# 광고를 곧바로 신뢰하지 않고 크기·필드·시각을 확인하며 오래된 광고의 재사용을 거부한다.
 def parse_advertisement(
     data: bytes,
     peer_address: str,

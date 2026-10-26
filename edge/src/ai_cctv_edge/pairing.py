@@ -1,5 +1,5 @@
 # 같은 LAN에서 Edge를 발견하고 중앙 주소·송출 인증을 한 번 등록하는 절차를 제공한다.
-# UDP 광고의 HMAC 서명은 변조를 확인하기 위한 것이며 광고 내용 자체를 암호화하지 않는다.
+# UDP 발견 광고에는 인증 비밀값이나 암호학적 서명이 없다. 신뢰 LAN에서 장치를 찾는 용도다.
 from __future__ import annotations
 
 import json
@@ -36,7 +36,7 @@ MAX_DISCOVERY_PACKET = 8192
 
 
 def _canonical_payload(message: dict[str, object]) -> bytes:
-    # 양쪽에서 JSON 키 순서와 공백을 같게 만들어야 같은 내용에 동일한 서명이 계산된다.
+    # UDP 광고를 일정한 JSON 형식으로 직렬화해 수신 측에서 같은 구조로 해석하게 한다.
     return json.dumps(
         message,
         ensure_ascii=False,
@@ -47,7 +47,7 @@ def _canonical_payload(message: dict[str, object]) -> bytes:
 
 
 # 파일 끝의 개행만 허용하며 공백·제어 문자로 의미가 달라질 수 있는 연결 키는 거부한다.
-# 장치 식별·서비스 포트·지원 프로필에 시각과 UUID를 붙여 서명된 발견 패킷을 만든다.
+# 장치 식별·서비스 포트·지원 프로필에 시각과 UUID를 넣은 발견 패킷을 만든다.
 def build_advertisement(
     *,
     device_id: str,
