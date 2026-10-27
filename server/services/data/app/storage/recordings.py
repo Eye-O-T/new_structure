@@ -14,6 +14,29 @@ from ..errors import ApiError
 from ..schemas import RecordingSegmentCreate
 from .paths import normalize_hook_segment_path, normalize_relative_path
 
+
+def has_active_recording_file(camera_id: str, settings: Settings) -> bool:
+    """카메라 저장 경로에 최근 생성·갱신된 녹화 파일이 존재하는지 확인한다."""
+
+    camera_dir = settings.storage_root / camera_id
+    if not camera_dir.is_dir():
+        return False
+    max_age = max(float(settings.central_recording_segment_seconds) * 2.0, 120.0)
+    now_ts = utc_now().timestamp()
+    for path in camera_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in {".mp4", ".fmp4", ".ts", ".mpegts"}:
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if stat.st_size > 0 and (now_ts - stat.st_mtime) <= max_age:
+            return True
+    return False
+
+
 # 완료 파일의 이름·크기와 통지된 길이로 중앙 녹화 메타데이터 및 재전송 키를 만든다.
 def prepare_recording_hook(
     *,

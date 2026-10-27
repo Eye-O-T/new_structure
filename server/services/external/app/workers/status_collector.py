@@ -10,8 +10,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from ..api.cameras import sync_camera_recording_paths
 from ..clients.data import DataClient
 from ..clients.edge import EdgeControlError, EdgeHttpClient
+from ..clients.mediamtx import MediaMtxClient
 from ..config import Settings
 
 LOGGER = logging.getLogger("ai_cctv.external.status_collector")
@@ -39,6 +41,7 @@ class StatusCollector:
         data_client: DataClient,
         edge_client_factory: Callable[[dict[str, Any]], EdgeHttpClient] | None = None,
         camera_lock_factory: Callable[[str], Any] | None = None,
+        media_client_factory: Callable[[], MediaMtxClient] | None = None,
     ) -> None:
         self.settings = settings
         self.data = data_client
@@ -46,12 +49,20 @@ class StatusCollector:
         self._camera_lock_factory = camera_lock_factory or (
             lambda _camera_id: _unlocked_camera()
         )
+        self._media_client_factory = media_client_factory
 
     def _new_edge_client(self, target: dict[str, Any]) -> EdgeHttpClient:
         return EdgeHttpClient(
             base_url=str(target["management_url"]),
             auth_token=str(target["auth_token"]),
             timeout_seconds=self.settings.edge_status_timeout_seconds,
+        )
+
+    async def sync_recording_paths(self) -> dict[str, int]:
+        return await sync_camera_recording_paths(
+            self.settings,
+            self.data,
+            media_client_factory=self._media_client_factory,
         )
 
     # Data의 목록·페이지 응답을 수집 대상 객체 목록으로 통일한다.
@@ -476,6 +487,11 @@ class StatusCollector:
 
     # 카메라를 병렬 수집하되 개별 실패를 격리하여 나머지 결과와 회차 통계를 반환한다.
     async def collect_once(self) -> dict[str, int]:
+        if hasattr(self.data, "list_cameras"):
+            try:
+                await self.sync_recording_paths()
+            except Exception:
+                LOGGER.exception("MediaMTX recording path sync failed")
         targets = self._targets(await self.data.list_camera_control_targets())
         results = await asyncio.gather(
             *(self._collect_target(target) for target in targets),

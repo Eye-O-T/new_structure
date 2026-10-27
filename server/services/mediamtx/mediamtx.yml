@@ -54,11 +54,12 @@ webrtc: no
 srt: no
 
 # 경로 하나가 카메라 하나에 대응한다. 서버가 영상을 당겨오지 않고 Edge가 게시한다.
+# 기본값은 녹화 중지(record: no)로 두고 카메라별 녹화 설정은 External이 제어 API로 동기화한다.
 pathDefaults:
   source: publisher
   sourceOnDemand: no
   maxReaders: 0
-  record: yes
+  record: no
   recordPath: /recordings/%path/%Y/%m/%d/%Y%m%dT%H%M%S-%fZ
   recordFormat: fmp4
   recordPartDuration: 1s

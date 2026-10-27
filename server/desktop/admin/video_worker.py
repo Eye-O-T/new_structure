@@ -7,6 +7,7 @@ import re
 from contextlib import contextmanager
 from queue import Empty, Full, Queue
 from datetime import datetime, timezone
+from urllib.error import HTTPError
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
@@ -16,6 +17,12 @@ from .media import MediaBridge
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+class CameraOfflineError(RuntimeError):
+    """The camera is registered, but no media is being published."""
+
+
 LIVE_FRAME_QUEUE_SIZE = 30  # One complete HLS segment at the default 30 fps.
 LIVE_OPEN_OPTIONS = {
     "protocol_whitelist": "http,tcp,crypto",
@@ -65,6 +72,15 @@ def _open_live_stream(api, camera_id, av):
             yield stream
             return
     except Exception as exc:
+        if type(exc).__name__ == "HTTPNotFoundError":
+            live = api.camera(camera_id, "/live?protocol=hls")
+            path = api.media_path(camera_id, live["hls_url"])
+            try:
+                api.media(camera_id, path)
+            except HTTPError as media_error:
+                if media_error.code == 404:
+                    raise CameraOfflineError("카메라 영상이 송출되지 않고 있습니다.") from None
+                raise
         elapsed_ms = (time.monotonic() - rtsp_started_at) * 1000
         LOGGER.warning(
             "RTSP unavailable camera=%s reason=%s; using HLS fallback",
@@ -267,6 +283,7 @@ class VideoWorker(QThread):
         except Exception as exc:
             self.event_ready.emit({"type": "error", "message": safe_error(exc)})
             return
+        offline = False
         while not self._stop.is_set():
             try:
                 session = object()
@@ -277,8 +294,10 @@ class VideoWorker(QThread):
                             self._dropped_frames += 1
                     except Empty:
                         break
-                self.loading_ready.emit("서버 영상 연결 중...")
+                if not offline:
+                    self.loading_ready.emit("서버 영상 연결 중...")
                 with _open_live_stream(api, camera_id, av) as stream:
+                    offline = False
                     for frame in stream.decode(video=0):
                         if self._stop.is_set():
                             return
@@ -307,6 +326,14 @@ class VideoWorker(QThread):
                                     pass
                 if not self._stop.is_set():
                     raise RuntimeError("Stream ended")
+            except CameraOfflineError:
+                if not offline and not self._stop.is_set():
+                    self.event_ready.emit({
+                        "type": "network_failure",
+                        "message": "카메라 송출이 중지되었습니다. 송출을 시작하면 자동으로 연결됩니다.",
+                    })
+                offline = True
+                self._stop.wait(3)
             except Exception as exc:
                 if not self._stop.is_set():
                     self.event_ready.emit({

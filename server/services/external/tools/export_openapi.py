@@ -138,6 +138,18 @@ OPERATIONS = {
         "카메라 등록",
         "stream_path는 생략하거나 camera_id와 같아야 한다. Edge 연동 시 edge_device_id, edge_management_url, edge_recovery_url, edge_auth_token을 모두 보낸다. 활성 카메라 최대 4개. publish_credentials 비밀번호는 이 응답에서만 받으므로 일치하는 Edge에 안전하게 전달한다.",
     ),
+    "list_cameras_recording": (
+        "전체 카메라 녹화 상태 조회",
+        "현재 사용자가 볼 수 있는 카메라의 녹화 희망 상태와 실제 MediaMTX·저장소 녹화 상태(recording·waiting·stopped·error)를 조회한다.",
+    ),
+    "start_all_cameras_recording": (
+        "전체 활성 카메라 녹화 시작",
+        "현재 등록된 활성 카메라 전체에 대해 녹화를 시작하고 카메라별 성공·실패 결과를 반환한다.",
+    ),
+    "stop_all_cameras_recording": (
+        "전체 활성 카메라 녹화 중지",
+        "현재 등록된 활성 카메라 전체에 대해 녹화를 중지하고 카메라별 성공·실패 결과를 반환한다.",
+    ),
     "update_camera": (
         "카메라 설정 변경",
         "변경할 필드만 보낸다. enabled=false는 새 송출과 Live를 차단하고 기존 송출 연결을 끊는다. Media 제어 실패 시 차단 상태를 유지하므로 상태를 확인하고 재시도한다.",
@@ -153,6 +165,18 @@ OPERATIONS = {
     "get_camera": (
         "카메라 조회",
         "현재 사용자에게 해당 카메라의 열람 권한이 있어야 한다.",
+    ),
+    "get_camera_recording": (
+        "개별 카메라 녹화 상태 조회",
+        "해당 카메라의 녹화 희망 설정과 현재 녹화 상태(recording·waiting·stopped·error)를 반환한다.",
+    ),
+    "start_camera_recording": (
+        "개별 카메라 녹화 시작",
+        "해당 활성 카메라의 녹화 설정을 켜고 MediaMTX 경로 녹화를 활성화한다. 송출이 없으면 waiting, 송출 중이면 recording 상태가 된다.",
+    ),
+    "stop_camera_recording": (
+        "개별 카메라 녹화 중지",
+        "해당 카메라의 녹화 설정만 끄고 실시간 영상 송출·재생 연결은 유지한다.",
     ),
     "get_camera_live": (
         "실시간 영상 주소",

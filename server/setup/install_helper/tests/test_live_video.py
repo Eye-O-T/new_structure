@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from queue import Empty, Queue
+from urllib.error import HTTPError
 from unittest.mock import MagicMock, Mock, patch
 
 import av
@@ -15,6 +16,7 @@ from server.desktop.admin import video_worker as video
 from server.desktop.admin.api import DesktopApi
 from server.desktop.admin.local_camera import LocalCameraPublisher
 from server.desktop.admin.media import MediaBridge, hls_resource_type
+from server.desktop.admin.settings_window import SettingsWindow
 
 
 class Clock:
@@ -154,8 +156,49 @@ class PlaybackTests(unittest.TestCase):
             fps=30,
         )
 
+    def test_reopened_settings_reuses_running_local_camera_without_rotating_credentials(self):
+        settings = Mock()
+        settings.api = Mock()
+        settings.local_publisher.data_root = Path("unused")
+        settings.local_publisher.camera_id = ""
+        settings.parent.return_value.cameras = [{"camera_id": "local-camera"}]
+        settings.parent.return_value.rtsp_port = 8554
+        ready = Mock()
+        running = {
+            "status": "running",
+            "camera_id": "local-camera",
+            "device_name": "720p HD Camera",
+        }
+
+        with patch("server.desktop.admin.settings_window.publisher_status", return_value=running):
+            SettingsWindow.start_local_camera(settings, "720p HD Camera", on_ready=ready)
+
+        ready.assert_called_once_with()
+        settings.execute.assert_not_called()
+
 
 class StreamDiagnosticsTests(unittest.TestCase):
+    def test_unpublished_camera_skips_hls_bridge_and_fallback_warning(self):
+        api = Mock()
+        api.camera.side_effect = [
+            {"url": "rtsp://example.test/cam-001"},
+            {"hls_url": "/hls/cam-001/index.m3u8"},
+        ]
+        api.media_path.return_value = "/hls/cam-001/index.m3u8"
+        api.media.side_effect = HTTPError("http://example.test/hls", 404, "Not Found", {}, None)
+        av_module = Mock()
+        av_module.open.side_effect = type("HTTPNotFoundError", (OSError,), {})()
+
+        with patch.object(video, "MediaBridge") as bridge, patch.object(
+            video.LOGGER, "warning"
+        ) as warning, self.assertRaises(video.CameraOfflineError):
+            with video._open_live_stream(api, "cam-001", av_module):
+                pass
+
+        api.media.assert_called_once_with("cam-001", "/hls/cam-001/index.m3u8")
+        bridge.assert_not_called()
+        warning.assert_not_called()
+
     def test_rtsp_failure_is_logged_before_hls_fallback(self):
         api = Mock()
         api.camera.side_effect = [

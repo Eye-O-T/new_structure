@@ -90,8 +90,9 @@ class CamerasRepositoryMixin:
                 """
                 INSERT INTO cameras(
                     camera_id, name, stream_path, edge_device_id, source_url,
-                    enabled, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    enabled, recording_enabled, recording_last_error_code,
+                    status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["camera_id"],
@@ -100,6 +101,8 @@ class CamerasRepositoryMixin:
                     edge_device_id,
                     values.get("source_url"),
                     int(values.get("enabled", True)),
+                    int(values.get("recording_enabled", False)),
+                    values.get("recording_last_error_code"),
                     values.get("status", "offline"),
                     now,
                     now,
@@ -205,11 +208,15 @@ class CamerasRepositoryMixin:
             "edge_mac_address",
             "source_url",
             "enabled",
+            "recording_enabled",
+            "recording_last_error_code",
             "status",
         }
         changes = {key: value for key, value in values.items() if key in allowed}
         if "enabled" in changes:
             changes["enabled"] = int(changes["enabled"])
+        if "recording_enabled" in changes:
+            changes["recording_enabled"] = int(changes["recording_enabled"])
         now = _now()
         changes["updated_at"] = now
         assignments = ", ".join(f"{column} = ?" for column in changes)
@@ -350,7 +357,7 @@ class CamerasRepositoryMixin:
                 ON CONFLICT(edge_device_id) DO UPDATE SET
                     management_url = excluded.management_url,
                     recovery_url = excluded.recovery_url,
-                auth_token = excluded.auth_token,
+                    auth_token = excluded.auth_token,
                     updated_at = excluded.updated_at
                 """,
                 (edge_device_id, mac_address, management_url, recovery_url, auth_token, now, now),

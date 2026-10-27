@@ -3,7 +3,7 @@
 from time import sleep
 from urllib.error import HTTPError
 
-from PyQt5.QtCore import QProcess, QTimer, Qt
+from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QMessageBox, QScrollArea, QCheckBox, QSizePolicy,
@@ -13,7 +13,7 @@ from .api import DesktopApi
 from server.edge_onboarding.server_api import ServerApiError
 from .legacy_settings import SettingsWindow as LegacySettingsWindow
 from .tasks import TaskOwner
-from .local_camera import LocalCameraPublisher, list_camera_devices, rtsp_publish_url
+from .local_camera import LocalCameraPublisher, list_camera_devices, publisher_status, rtsp_publish_url
 
 
 def _breakable_text(value: str) -> str:
@@ -34,6 +34,8 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         self.local_publisher.state_changed.connect(self._local_camera_state)
         super().__init__(parent, **kwargs)
         self.body = self.pages
+        if self.api:
+            self.message.setText("로그인 상태가 유지되고 있습니다.")
         self.bounding_boxes_enabled = bool(getattr(parent, "_overlay_enabled", True))
 
     def create_basic_page(self):
@@ -112,10 +114,16 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         if self.parent().ca_file:
             trust_widget.setToolTip(str(self.parent().ca_file))
         layout.addWidget(trust_widget)
-        login = QPushButton("로그인")
-        style_button(login, "#1d4ed8", "#3b82f6", "#2563eb")
-        login.clicked.connect(self.login)
-        layout.addWidget(login)
+        self.login_button = QPushButton("로그인")
+        style_button(self.login_button, "#1d4ed8", "#3b82f6", "#2563eb")
+        self.login_button.setEnabled(not bool(self.api))
+        self.login_button.clicked.connect(self.login)
+        layout.addWidget(self.login_button)
+        self.logout_button = QPushButton("로그아웃")
+        style_button(self.logout_button, "#334155", "#64748b", "#475569")
+        self.logout_button.setEnabled(bool(self.api))
+        self.logout_button.clicked.connect(self.logout)
+        layout.addWidget(self.logout_button)
         self.refresh_cameras_button = QPushButton("카메라 목록 새로고침")
         style_button(self.refresh_cameras_button, "#334155", "#64748b", "#475569")
         self.refresh_cameras_button.setEnabled(bool(self.api))
@@ -171,6 +179,7 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             self.message.setText(self.local_publisher.failure_message or messages[state])
         elif state in messages and hasattr(self, "message"):
             self.message.setText(messages[state])
+
     def _local_camera_task_failed(self, _message):
         self.message.setText(_message)
 
@@ -192,11 +201,11 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         except ValueError:
             self.message.setText("RTSP 포트는 1~65535 범위여야 합니다.")
             return
-        already_running = (
-            self.local_publisher.camera_id == camera_id
-            and self.local_publisher.process.state() != QProcess.NotRunning
-        )
-        if already_running:
+        current = publisher_status(self.local_publisher.data_root)
+        if current["status"] == "running":
+            if current.get("camera_id") != camera_id or current.get("device_name") != name:
+                self.message.setText("다른 로컬 카메라가 송출 중입니다. 먼저 송출을 중지하세요.")
+                return
             if on_ready is not None:
                 on_ready()
             return
@@ -226,7 +235,15 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
                 url = rtsp_publish_url(host, port, camera_id, credentials["username"], credentials["password"])
                 self.local_publisher.start(name, url, camera_id=camera_id)
                 current = [item for item in self.parent().cameras if item.get("camera_id") != camera_id]
-                current.append({"camera_id": camera_id, "name": result.get("name", name)})
+                current.append(
+                    {
+                        "camera_id": camera_id,
+                        "name": result.get("name", name),
+                        "enabled": True,
+                        "recording_enabled": bool(result.get("recording_enabled", False)),
+                        "recording_state": result.get("recording_state", "stopped"),
+                    }
+                )
                 self.parent().cameras = current
                 self._populate_camera_combo()
                 self.camera.setCurrentIndex(
@@ -263,7 +280,7 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
                 try:
                     playlist = self.api.media(camera_id, playlist_path).decode("utf-8")
                     if any(line.strip() and not line.startswith("#") for line in playlist.splitlines()):
-                        return True, "노트북 카메라 송출이 확인됐습니다. 메인 화면에서 모니터링을 시작하세요."
+                        return True, "노트북 카메라 송출이 확인됐습니다. 관제 화면에서 실시간 영상과 녹화를 제어하세요."
                 except HTTPError as exc:
                     if exc.code in {401, 403}:
                         return False, "영상 인증에 실패했습니다. 카메라를 다시 등록한 뒤 송출을 시작하세요."
@@ -293,21 +310,23 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         owner = self.parent()
         url, username, password = owner.server_url, self.username.text().strip(), self.password.text()
         ca_file, previous = owner.ca_file, owner.api
+        allow_insecure_http = url.lower().startswith("http://") and getattr(owner, "allow_insecure_http", False)
+        session_store = getattr(owner, "session_store", None)
         self.password.clear()
 
         def operation():
-            api = DesktopApi(url, ca_file=ca_file, allow_insecure_http=url.lower().startswith("http://") and getattr(self.parent(), "allow_insecure_http", False))
+            api = DesktopApi(url, ca_file=ca_file, allow_insecure_http=allow_insecure_http, session_store=session_store)
             try:
                 api.login(username, password)
             except Exception:
                 try:
-                    api.logout()
+                    api.logout(clear_saved=False)
                 except Exception:
                     pass
                 raise
             if previous:
                 try:
-                    previous.logout()
+                    previous.logout(clear_saved=False)
                 except Exception:
                     pass
             return api
@@ -318,9 +337,41 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             owner.username = username
             self._populate_camera_combo()
             self.refresh_cameras_button.setEnabled(True)
+            self.login_button.setEnabled(False)
+            self.logout_button.setEnabled(True)
+            if api.session_persistence_error:
+                self.message.setText("로그인했지만 로그인 상태를 저장하지 못했습니다.")
+                return
             self.message.setText("로그인했습니다. 카메라 목록 새로고침을 눌러 목록을 불러오세요.")
 
         self.execute(operation, completed)
+
+    def logout(self):
+        if not self.api:
+            return
+        api = self.api
+
+        def completed(_result):
+            owner = self.parent()
+            stop_display = getattr(owner, "stop_display_workers", None)
+            if stop_display is not None:
+                stop_display()
+            self.api = owner.api = None
+            self.selected_source = owner.video_source = 0
+            owner.cameras = []
+            if hasattr(owner, "_camera_recordings"):
+                owner._camera_recordings.clear()
+            owner._selected_camera_id = None
+            owner._refresh_camera_picker()
+            owner._show_views()
+            owner.cam_status.setText("설정에서 로그인하세요.")
+            self._populate_camera_combo()
+            self.refresh_cameras_button.setEnabled(False)
+            self.login_button.setEnabled(True)
+            self.logout_button.setEnabled(False)
+            self.message.setText("로그아웃했습니다.")
+
+        self.execute(api.logout, completed)
 
     def refresh_cameras(self):
         if not self.api:
@@ -373,5 +424,5 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             f"서버 저장소: {_breakable_text(raw_path)}\n\n"
             "녹화·감지·분석은 서버가 수행합니다.\n"
             "저장 위치와 녹화 정책은 설치 도우미의 운영 설정을 사용합니다.\n"
-            "모니터링 시작·중지는 이 창의 화면 연결만 제어합니다.",
+            "실시간 영상은 관제 창이 열려 있을 때 자동 연결되며, 녹화 시작·중지 설정은 서버에 유지됩니다.",
         )

@@ -5,7 +5,7 @@ import logging
 import sys
 import time
 
-from PyQt5.QtCore import QProcess, QTimer, Qt, QUrl
+from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -21,8 +21,9 @@ from PyQt5.QtWidgets import (
 )
 
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
-from .api import safe_error
+from .api import DesktopApi, safe_error
 from .camera_view import CameraView
+from .session_store import WindowsSessionStore
 from .video_worker import VideoWorker
 from server.desktop.common.tasks import BackgroundTask
 
@@ -36,6 +37,13 @@ _RECORDING_STATUS_LABELS = {
     "deleting": "삭제 중",
     "deleted": "삭제됨 / 보관기간 만료",
 }
+_CAMERA_RECORDING_LABELS = {
+    "recording": "녹화 중",
+    "waiting": "녹화 대기",
+    "stopped": "녹화 중지",
+    "error": "오류",
+}
+RECORDING_POLL_INTERVAL_MS = 2000
 
 
 def _breakable_path(value: str) -> str:
@@ -47,16 +55,32 @@ def _breakable_path(value: str) -> str:
 
 
 class CCTVMainWindow(ReferenceWindow):
-    def __init__(self, server_url="https://localhost", username="admin", storage_path="", ca_file=None, allow_insecure_http=False, rtsp_host="127.0.0.1", rtsp_port=8554):
+    def __init__(
+        self,
+        server_url="https://localhost",
+        username="admin",
+        storage_path="",
+        ca_file=None,
+        allow_insecure_http=False,
+        rtsp_host="127.0.0.1",
+        rtsp_port=8554,
+    ):
         self.server_url, self.username, self.ca_file = server_url, username, ca_file
         self.allow_insecure_http = allow_insecure_http
         self.rtsp_host, self.rtsp_port = rtsp_host, rtsp_port
+        self.session_store = (
+            WindowsSessionStore(server_url) if sys.platform == "win32" else None
+        )
         self.api = None
         self.cameras = []
         self._closing = False
-        self._logout_task = None
+        self._restore_task = None
         self._event_detail_tasks = set()
-        self._logout_done = False
+        self._recording_tasks = set()
+        self._recording_poll_task = None
+        self._busy_recording_cameras = set()
+        self._bulk_recording_busy = False
+        self._camera_recordings = {}
         self._stopping = False
         self._render_count = 0
         self._render_total_ms = 0.0
@@ -68,7 +92,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._view_mode = "single"
         self._selected_camera_id = None
         self._updating_camera_picker = False
-        self._monitoring = False
+        self._monitoring = True
         super().__init__()
         self.ai_cctv_path = self.storage_root_path = str(storage_path)
         self.setMinimumSize(960, 600)
@@ -81,20 +105,87 @@ class CCTVMainWindow(ReferenceWindow):
         for label in self.findChildren(QLabel):
             label.setTextFormat(Qt.PlainText)
             if label.text() == "카메라\nRTSP / LAN / USB 입력 상태":
-                label.setText("카메라\n서버 연결 상태")
+                label.setText("카메라\n서버 연결 · 녹화 상태")
             if label.text() == "누적 추적":
                 label.setText("관측 추적 (이번 시작)")
             if label.text() == "CAM-01 정문 · 실시간 분석 화면":
                 self.camera_title = label
                 label.setText("서버 카메라 · 실시간 영상")
+        self._recording_poll_timer = QTimer(self)
+        self._recording_poll_timer.setInterval(RECORDING_POLL_INTERVAL_MS)
+        self._recording_poll_timer.timeout.connect(self.refresh_recording_states)
+        self._update_recording_controls()
+        QTimer.singleShot(0, self._restore_session)
+
+    def _restore_session(self):
+        if self.session_store is None:
+            return
+        self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(False)
+        self.btn_setting.setEnabled(False)
+        url, ca_file = self.server_url, self.ca_file
+        allow_insecure_http, store = self.allow_insecure_http, self.session_store
+
+        def operation(_progress):
+            api = DesktopApi(
+                url,
+                ca_file=ca_file,
+                allow_insecure_http=allow_insecure_http,
+                session_store=store,
+            )
+            if not api.restore_session():
+                return None
+            cameras = api.cameras()
+            try:
+                recording_items = api.cameras_recording().get("items", [])
+            except Exception:
+                recording_items = []
+            return api, api.session_username, cameras, recording_items
+
+        task = BackgroundTask(operation, self)
+        self._restore_task = task
+
+        def restored(result):
+            if result is None:
+                return
+            self.api, self.username, self.cameras, recording_items = result
+            self._ingest_cameras_recording_metadata(self.cameras)
+            if recording_items:
+                self._apply_recording_items(recording_items)
+            available = self._available_camera_ids()
+            if available:
+                self._selected_camera_id = available[0]
+                self.video_source = (self.api, available[0])
+            self._monitoring = True
+            self._refresh_camera_picker()
+            self._show_views()
+            self._update_recording_controls()
+            self._recording_poll_timer.start()
+            self.cam_status.setText("로그인 상태가 복원됐습니다.")
+
+        def finished():
+            self._restore_task = None
+            self.btn_setting.setEnabled(True)
+            self._update_recording_controls()
+            task.deleteLater()
+            if self._closing:
+                self.close()
+
+        task.result.connect(restored)
+        task.failed.connect(
+            lambda _message: self.cam_status.setText(
+                "로그인 상태를 복원하지 못했습니다. 설정에서 로그인하세요."
+            )
+        )
+        task.finished.connect(finished)
+        task.start()
 
     def _update_storage_label(self, storage_path: str) -> None:
         raw_path = str(storage_path or "서버에서 관리")
         self.storage_label.setText(
             f"서버 저장소\n{_breakable_path(raw_path)}\n\n"
-            "모니터링 중지는 화면 연결만 종료합니다.\n"
-            "서버 녹화는 계속됩니다."
+            "실시간 영상은 창이 열려 있는 동안 자동 연결됩니다.\n"
+            "녹화 시작·중지 설정은 창을 닫아도 서버에 유지됩니다."
         )
         self.storage_label.setToolTip(raw_path)
 
@@ -105,7 +196,142 @@ class CCTVMainWindow(ReferenceWindow):
         return camera_id
 
     def _available_camera_ids(self):
-        return [str(camera["camera_id"]) for camera in self.cameras if camera.get("enabled", True)]
+        return [
+            str(camera["camera_id"])
+            for camera in self.cameras
+            if camera.get("enabled", True)
+        ]
+
+    def _ingest_cameras_recording_metadata(self, cameras):
+        for camera in cameras or []:
+            if not isinstance(camera, dict) or not camera.get("camera_id"):
+                continue
+            cid = str(camera["camera_id"])
+            if "recording_state" in camera or "recording_enabled" in camera:
+                rec_enabled = bool(camera.get("recording_enabled", False))
+                rec_state = camera.get("recording_state") or (
+                    "error"
+                    if camera.get("recording_last_error_code")
+                    else ("waiting" if rec_enabled else "stopped")
+                )
+                self._camera_recordings[cid] = {
+                    "camera_id": cid,
+                    "enabled": bool(camera.get("enabled", True)),
+                    "recording_enabled": rec_enabled,
+                    "recording_state": rec_state,
+                    "last_error_code": camera.get("recording_last_error_code"),
+                }
+
+    def _camera_recording_info(self, camera_id):
+        if camera_id in self._camera_recordings:
+            return self._camera_recordings[camera_id]
+        for camera in self.cameras:
+            if camera.get("camera_id") == camera_id:
+                rec_enabled = bool(camera.get("recording_enabled", False))
+                rec_state = camera.get("recording_state") or (
+                    "error"
+                    if camera.get("recording_last_error_code")
+                    else ("waiting" if rec_enabled else "stopped")
+                )
+                return {
+                    "camera_id": camera_id,
+                    "enabled": bool(camera.get("enabled", True)),
+                    "recording_enabled": rec_enabled,
+                    "recording_state": rec_state,
+                    "last_error_code": camera.get("recording_last_error_code"),
+                }
+        return {
+            "camera_id": camera_id,
+            "enabled": True,
+            "recording_enabled": False,
+            "recording_state": "stopped",
+            "last_error_code": None,
+        }
+
+    def _sync_view_recording_state(self, camera_id):
+        view = self._views.get(camera_id)
+        if view is None:
+            return
+        info = self._camera_recording_info(camera_id)
+        busy = (
+            self._bulk_recording_busy
+            or camera_id in self._busy_recording_cameras
+        )
+        view.set_recording_state(
+            info.get("recording_state", "stopped"),
+            recording_enabled=info.get("recording_enabled", False),
+            busy=busy,
+            error_code=info.get("last_error_code") or info.get("error_code"),
+        )
+
+    def _apply_recording_item(self, item):
+        if not isinstance(item, dict) or not item.get("camera_id"):
+            return
+        camera_id = str(item["camera_id"])
+        normalized = {
+            "camera_id": camera_id,
+            "enabled": bool(item.get("enabled", True)),
+            "recording_enabled": bool(item.get("recording_enabled", False)),
+            "recording_state": str(item.get("recording_state") or "stopped"),
+            "stream_ready": bool(item.get("stream_ready", False)),
+            "recording_file_active": bool(item.get("recording_file_active", False)),
+            "last_error_code": item.get("last_error_code") or item.get("error_code"),
+            "message": item.get("message"),
+        }
+        self._camera_recordings[camera_id] = normalized
+        for camera in self.cameras:
+            if camera.get("camera_id") == camera_id:
+                camera["recording_enabled"] = normalized["recording_enabled"]
+                camera["recording_state"] = normalized["recording_state"]
+                camera["recording_last_error_code"] = normalized["last_error_code"]
+        self._sync_view_recording_state(camera_id)
+        self._update_recording_controls()
+        if camera_id == self._selected_camera_id:
+            self._update_selected_camera_status_banner()
+
+    def _apply_recording_items(self, items):
+        for item in items or []:
+            if isinstance(item, dict) and item.get("camera_id"):
+                self._apply_recording_item(item)
+        self._update_recording_controls()
+
+    def _update_selected_camera_status_banner(self):
+        camera_id = self._selected_camera_id
+        if not camera_id:
+            return
+        info = self._camera_recording_info(camera_id)
+        rec_state = info.get("recording_state", "stopped")
+        rec_label = _CAMERA_RECORDING_LABELS.get(rec_state, "오류")
+        view = self._views.get(camera_id)
+        live_part = (
+            "LIVE"
+            if view is not None and view.status.text() == "LIVE"
+            else "대기"
+        )
+        self.cam_status.setText(
+            f"● {_breakable_path(camera_id)} · {live_part} · {rec_label}"
+        )
+
+    def _update_recording_controls(self):
+        if self._restore_task is not None or self._bulk_recording_busy:
+            self.btn_start.setEnabled(False)
+            self.btn_stop.setEnabled(False)
+            return
+        available = self._available_camera_ids()
+        if not self.api or not available:
+            self.btn_start.setEnabled(not bool(self.api))
+            self.btn_stop.setEnabled(False)
+            return
+        states = [
+            self._camera_recording_info(cid).get("recording_state", "stopped")
+            for cid in available
+        ]
+        can_start = any(state in {"stopped", "error"} for state in states)
+        can_stop = any(
+            state in {"recording", "waiting", "error"} for state in states
+        )
+        self.btn_start.setEnabled(can_start)
+        self.btn_stop.setEnabled(can_stop)
 
     def _refresh_camera_picker(self):
         selected = self._selected_camera_id
@@ -123,6 +349,7 @@ class CCTVMainWindow(ReferenceWindow):
         enabled = bool(self._available_camera_ids())
         self.camera_picker.setEnabled(enabled)
         self.btn_grid.setEnabled(enabled)
+        self._update_recording_controls()
 
     def _display_ids(self):
         available = self._available_camera_ids()
@@ -149,16 +376,20 @@ class CCTVMainWindow(ReferenceWindow):
                 view = CameraView(camera_id, self._camera_name(camera_id), self)
                 view.selected.connect(self.select_camera)
                 view.activated.connect(self.open_single_camera)
+                view.recording_start_requested.connect(self.start_camera_recording)
+                view.recording_stop_requested.connect(self.stop_camera_recording)
                 self._views[camera_id] = view
             view.set_overlay_enabled(self._overlay_enabled)
             view.set_selected(camera_id == self._selected_camera_id)
+            self._sync_view_recording_state(camera_id)
             if self._view_mode == "grid":
                 self.video_grid.addWidget(view, index // 2, index % 2)
             else:
                 self.video_grid.addWidget(view, 0, 0)
             view.show()
         self.camera_title.setText(
-            "서버 카메라 · 2×2 실시간 영상" if self._view_mode == "grid"
+            "서버 카메라 · 2×2 실시간 영상"
+            if self._view_mode == "grid"
             else f"{self._selected_camera_id or '카메라'} · 실시간 영상"
         )
         self._sync_workers(camera_ids)
@@ -168,7 +399,7 @@ class CCTVMainWindow(ReferenceWindow):
         for camera_id, worker in list(self._workers.items()):
             if camera_id not in wanted:
                 worker.stop()
-        if not self._monitoring:
+        if not self._monitoring or not self.api or self._closing or self._stopping:
             return
         for camera_id in camera_ids:
             if camera_id not in self._workers:
@@ -177,12 +408,36 @@ class CCTVMainWindow(ReferenceWindow):
     def _start_camera_worker(self, camera_id):
         worker = VideoWorker(source=(self.api, camera_id))
         self._workers[camera_id] = worker
-        worker.frame_ready.connect(lambda frame, cid=camera_id, current=worker: self._on_frame(cid, current, frame))
-        worker.objects_ready.connect(lambda payload, cid=camera_id, current=worker: self._on_objects(cid, current, payload))
-        worker.metrics_ready.connect(lambda metrics, cid=camera_id, current=worker: self._on_metrics(cid, current, metrics))
-        worker.event_ready.connect(lambda event, cid=camera_id, current=worker: self._on_event(cid, current, event))
-        worker.loading_ready.connect(lambda message, cid=camera_id, current=worker: self._on_loading(cid, current, message))
-        worker.finished.connect(lambda cid=camera_id, current=worker: self._on_worker_finished(cid, current))
+        worker.frame_ready.connect(
+            lambda frame, cid=camera_id, current=worker: self._on_frame(
+                cid, current, frame
+            )
+        )
+        worker.objects_ready.connect(
+            lambda payload, cid=camera_id, current=worker: self._on_objects(
+                cid, current, payload
+            )
+        )
+        worker.metrics_ready.connect(
+            lambda metrics, cid=camera_id, current=worker: self._on_metrics(
+                cid, current, metrics
+            )
+        )
+        worker.event_ready.connect(
+            lambda event, cid=camera_id, current=worker: self._on_event(
+                cid, current, event
+            )
+        )
+        worker.loading_ready.connect(
+            lambda message, cid=camera_id, current=worker: self._on_loading(
+                cid, current, message
+            )
+        )
+        worker.finished.connect(
+            lambda cid=camera_id, current=worker: self._on_worker_finished(
+                cid, current
+            )
+        )
         view = self._views.get(camera_id)
         if view:
             view.show_loading("서버 영상 연결 중…")
@@ -198,7 +453,7 @@ class CCTVMainWindow(ReferenceWindow):
                 if view:
                     view.set_frame(frame)
                 if camera_id == self._selected_camera_id:
-                    self.cam_status.setText(f"● {_breakable_path(camera_id)} · LIVE")
+                    self._update_selected_camera_status_banner()
         finally:
             worker.acknowledge_frame()
 
@@ -243,10 +498,15 @@ class CCTVMainWindow(ReferenceWindow):
         worker.deleteLater()
         view = self._views.get(camera_id)
         if view and not self._stopping:
-            view.set_status("연결 종료 — 재시도하려면 시작", "#ef4444")
+            view.set_status("영상 연결 재시도 대기", "#facc15")
         if self._stopping and not self._workers:
             self._finish_stopping()
-        elif self._monitoring and camera_id in self._display_ids():
+        elif (
+            self._monitoring
+            and self.api
+            and not self._closing
+            and camera_id in self._display_ids()
+        ):
             # Do not leave a tile blank when a deselected worker finishes after
             # that camera has already been selected again.
             self._start_camera_worker(camera_id)
@@ -278,6 +538,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._refresh_camera_picker()
         self._show_views()
         self._render_selected_summary()
+        self._update_selected_camera_status_banner()
 
     def open_single_camera(self, camera_id):
         self._selected_camera_id = camera_id
@@ -286,6 +547,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._refresh_camera_picker()
         self._show_views()
         self._render_selected_summary()
+        self._update_selected_camera_status_banner()
 
     def toggle_grid_view(self, checked):
         self._view_mode = "grid" if checked else "single"
@@ -294,36 +556,200 @@ class CCTVMainWindow(ReferenceWindow):
     def cameras_updated(self, cameras):
         """Accept a settings-dialog refresh without disturbing unchanged views."""
         self.cameras = cameras
+        self._ingest_cameras_recording_metadata(cameras)
         available = set(self._available_camera_ids())
         for camera_id, worker in list(self._workers.items()):
             if camera_id not in available:
                 worker.stop()
         self._refresh_camera_picker()
         self._show_views()
+        if self.api and available:
+            self.refresh_recording_states()
 
-    def start_video(self):
-        if not self.api or not isinstance(self.video_source, tuple) or self.video_source[0] is not self.api:
-            self.open_settings()
-        if not self.api or not isinstance(self.video_source, tuple) or self.video_source[0] is not self.api:
+    def refresh_recording_states(self):
+        if (
+            not self.api
+            or self._closing
+            or self._recording_poll_task is not None
+            or self._recording_tasks
+        ):
             return
+        api = self.api
+
+        def operation(_progress):
+            return api.cameras_recording()
+
+        task = BackgroundTask(operation, self)
+        self._recording_poll_task = task
+
+        def handle_result(payload):
+            items = payload.get("items", []) if isinstance(payload, dict) else []
+            self._apply_recording_items(items)
+
+        def handle_finished():
+            self._recording_poll_task = None
+            task.deleteLater()
+            if self._closing and not self._recording_tasks and not self._workers:
+                QTimer.singleShot(0, self.close)
+
+        task.result.connect(handle_result)
+        task.finished.connect(handle_finished)
+        task.start()
+
+    def _ensure_logged_in_for_recording(self):
+        if not self.api:
+            self.open_settings()
+        if not self.api:
+            return False
         if not self.cameras:
             self.cameras = self.api.cameras()
-        if not self._selected_camera_id:
-            self._selected_camera_id = self.video_source[1]
+            self._ingest_cameras_recording_metadata(self.cameras)
+        available = self._available_camera_ids()
+        if not self._selected_camera_id and available:
+            self._selected_camera_id = available[0]
         self._monitoring = True
-        self._stopping = False
         self._refresh_camera_picker()
         self._show_views()
-        self.btn_start.setEnabled(False)
-        self.btn_stop.setEnabled(True)
-        self.btn_setting.setEnabled(False)
+        return bool(available)
+
+    def start_all_recording(self):
+        if not self._ensure_logged_in_for_recording():
+            return
+        self._run_bulk_recording_action(True)
+
+    def stop_all_recording(self):
+        if not self._ensure_logged_in_for_recording():
+            return
+        self._run_bulk_recording_action(False)
+
+    def start_video(self):
+        self.start_all_recording()
 
     def stop_video(self):
+        self.stop_all_recording()
+
+    def _run_bulk_recording_action(self, start: bool):
+        if not self.api or self._bulk_recording_busy:
+            return
+        api = self.api
+        self._bulk_recording_busy = True
+        self._update_recording_controls()
+        for cid in self._available_camera_ids():
+            self._sync_view_recording_state(cid)
+
+        def operation(_progress):
+            return api.start_all_recording() if start else api.stop_all_recording()
+
+        task = BackgroundTask(operation, self)
+        self._recording_tasks.add(task)
+
+        def handle_result(payload):
+            self._bulk_recording_busy = False
+            items = payload.get("items", []) if isinstance(payload, dict) else []
+            self._apply_recording_items(items)
+            failed_count = int(payload.get("failed", 0)) if isinstance(payload, dict) else 0
+            total_count = int(payload.get("total", len(items))) if isinstance(payload, dict) else len(items)
+            action_text = "녹화 시작" if start else "녹화 중지"
+            if failed_count > 0:
+                self.cam_status.setText(
+                    f"전체 {action_text} 일부 실패 ({failed_count}/{total_count})"
+                )
+            else:
+                self.cam_status.setText(f"전체 카메라 {action_text} 적용됨")
+
+        def handle_failed(message):
+            self._bulk_recording_busy = False
+            for cid in self._available_camera_ids():
+                self._apply_recording_item(
+                    {
+                        "camera_id": cid,
+                        "enabled": True,
+                        "recording_enabled": start,
+                        "recording_state": "error",
+                        "error_code": "RECORDING_CONTROL_FAILED",
+                        "message": message,
+                    }
+                )
+            self.cam_status.setText(f"전체 녹화 제어 오류: {message}")
+
+        def handle_finished():
+            self._bulk_recording_busy = False
+            self._recording_tasks.discard(task)
+            for cid in self._available_camera_ids():
+                self._sync_view_recording_state(cid)
+            self._update_recording_controls()
+            task.deleteLater()
+            if self._closing and not self._recording_tasks and not self._workers:
+                QTimer.singleShot(0, self.close)
+
+        task.result.connect(handle_result)
+        task.failed.connect(handle_failed)
+        task.finished.connect(handle_finished)
+        task.start()
+
+    def start_camera_recording(self, camera_id):
+        self._run_single_camera_recording_action(camera_id, True)
+
+    def stop_camera_recording(self, camera_id):
+        self._run_single_camera_recording_action(camera_id, False)
+
+    def _run_single_camera_recording_action(self, camera_id: str, start: bool):
+        if not self.api or not camera_id or camera_id in self._busy_recording_cameras:
+            return
+        api = self.api
+        self._busy_recording_cameras.add(camera_id)
+        self._sync_view_recording_state(camera_id)
+
+        def operation(_progress):
+            return (
+                api.start_camera_recording(camera_id)
+                if start
+                else api.stop_camera_recording(camera_id)
+            )
+
+        task = BackgroundTask(operation, self)
+        self._recording_tasks.add(task)
+
+        def handle_result(payload):
+            self._busy_recording_cameras.discard(camera_id)
+            if isinstance(payload, dict):
+                self._apply_recording_item(payload)
+
+        def handle_failed(message):
+            self._busy_recording_cameras.discard(camera_id)
+            self._apply_recording_item(
+                {
+                    "camera_id": camera_id,
+                    "enabled": True,
+                    "recording_enabled": start,
+                    "recording_state": "error",
+                    "error_code": "RECORDING_CONTROL_FAILED",
+                    "message": message,
+                }
+            )
+            self.cam_status.setText(f"{camera_id} 녹화 제어 오류: {message}")
+
+        def handle_finished():
+            self._busy_recording_cameras.discard(camera_id)
+            self._recording_tasks.discard(task)
+            self._sync_view_recording_state(camera_id)
+            self._update_recording_controls()
+            task.deleteLater()
+            if self._closing and not self._recording_tasks and not self._workers:
+                QTimer.singleShot(0, self.close)
+
+        task.result.connect(handle_result)
+        task.failed.connect(handle_failed)
+        task.finished.connect(handle_finished)
+        task.start()
+
+    def stop_display_workers(self):
+        """창 종료나 로그아웃 시 실시간 영상 화면 연결만 정리한다."""
+        self._recording_poll_timer.stop()
         if not self._workers:
             self._finish_stopping()
             return
         self._stopping = True
-        self.btn_stop.setEnabled(False)
         self.cam_status.setText("영상 연결을 정리하고 있습니다…")
         for worker in list(self._workers.values()):
             worker.stop()
@@ -331,13 +757,8 @@ class CCTVMainWindow(ReferenceWindow):
     def _finish_stopping(self):
         self._monitoring = False
         self._stopping = False
-        self.btn_start.setEnabled(True)
-        self.btn_stop.setEnabled(False)
-        self.btn_setting.setEnabled(True)
-        self.cam_status.setText("모니터링 중지됨")
-        for view in self._views.values():
-            view.set_status("중지됨", "#ef4444")
-        if self._closing:
+        self._update_recording_controls()
+        if self._closing and not self._recording_tasks and self._recording_poll_task is None:
             QTimer.singleShot(0, self.close)
 
     def set_bounding_boxes_enabled(self, enabled):
@@ -346,20 +767,31 @@ class CCTVMainWindow(ReferenceWindow):
             view.set_overlay_enabled(enabled)
 
     def open_settings(self):
-        if self._workers:
-            return
         if self.resource_monitor_window is not None:
             self.resource_monitor_window.close()
             if self.resource_monitor_window is not None:
-                QMessageBox.information(self, "상태 조회 중", "리소스 조회가 끝난 뒤 설정을 열어 주세요.")
+                QMessageBox.information(
+                    self, "상태 조회 중", "리소스 조회가 끝난 뒤 설정을 열어 주세요."
+                )
                 return
         super().open_settings()
-        if isinstance(self.video_source, tuple):
-            camera_id = self.video_source[1]
-            self._selected_camera_id = camera_id
+        if self.api:
+            self._monitoring = True
+            self._ingest_cameras_recording_metadata(self.cameras)
+            if isinstance(self.video_source, tuple):
+                camera_id = self.video_source[1]
+                self._selected_camera_id = camera_id
+            elif not self._selected_camera_id:
+                available = self._available_camera_ids()
+                if available:
+                    self._selected_camera_id = available[0]
             self._refresh_camera_picker()
             self._show_views()
-            self.cam_status.setText(f"● {_breakable_path(camera_id)} · 준비됨")
+            self._update_recording_controls()
+            self._recording_poll_timer.start()
+            self.refresh_recording_states()
+            if self._selected_camera_id:
+                self._update_selected_camera_status_banner()
         self._update_storage_label(self.ai_cctv_path)
 
     def open_resource_monitor(self):
@@ -413,7 +845,9 @@ class CCTVMainWindow(ReferenceWindow):
         def operation(_progress):
             detail = self.api.event(event_id)
             media_results = []
-            media = detail.get("media") if isinstance(detail.get("media"), dict) else {}
+            media = (
+                detail.get("media") if isinstance(detail.get("media"), dict) else {}
+            )
             for kind, key, label in (
                 ("snapshot", "snapshot", "스냅샷"),
                 ("crop", "crop", "Person Crop"),
@@ -432,11 +866,14 @@ class CCTVMainWindow(ReferenceWindow):
                     recording = self.api.recording(recording_id)
                     playback = (
                         self.api.recording_playback(recording_id)
-                        if recording.get("status") == "ready" else None
+                        if recording.get("status") == "ready"
+                        else None
                     )
                     recording_results.append((recording_id, recording, playback, None))
                 except Exception as exc:
-                    recording_results.append((recording_id, None, None, safe_error(exc)))
+                    recording_results.append(
+                        (recording_id, None, None, safe_error(exc))
+                    )
             return detail, media_results, recording_results
 
         def render(result):
@@ -481,7 +918,9 @@ class CCTVMainWindow(ReferenceWindow):
                 if playback_url:
                     button = QPushButton("녹화 재생")
                     button.clicked.connect(
-                        lambda _checked=False, url=playback_url: self._open_playback_url(url)
+                        lambda _checked=False, url=playback_url: self._open_playback_url(
+                            url
+                        )
                     )
                     layout.insertWidget(layout.count() - 1, button)
 
@@ -508,7 +947,9 @@ class CCTVMainWindow(ReferenceWindow):
             if not QDesktopServices.openUrl(QUrl(self.api.playback_url(playback_url))):
                 raise ValueError("재생 프로그램을 열 수 없습니다.")
         except Exception as exc:
-            QMessageBox.warning(self, "녹화 재생", f"재생 주소를 열 수 없습니다: {safe_error(exc)}")
+            QMessageBox.warning(
+                self, "녹화 재생", f"재생 주소를 열 수 없습니다: {safe_error(exc)}"
+            )
 
     def closeEvent(self, event):
         if self.resource_monitor_window is not None:
@@ -517,32 +958,16 @@ class CCTVMainWindow(ReferenceWindow):
                 event.ignore()
                 return
         self._closing = True
+        self._recording_poll_timer.stop()
         if self._workers:
-            self.stop_video()
+            self.stop_display_workers()
             event.ignore()
             return
-        if self._logout_task is not None:
-            event.ignore()
-            return
-        if self.api and not self._logout_done:
-            api = self.api
-
-            def operation(_progress):
-                try:
-                    api.logout()
-                except Exception:
-                    pass
-
-            self._logout_task = BackgroundTask(operation, self)
-
-            def finished():
-                self._logout_task.deleteLater()
-                self._logout_task = None
-                self._logout_done = True
-                self.close()
-
-            self._logout_task.finished.connect(finished)
-            self._logout_task.start()
+        if (
+            self._restore_task is not None
+            or self._recording_tasks
+            or self._recording_poll_task is not None
+        ):
             event.ignore()
             return
         event.accept()

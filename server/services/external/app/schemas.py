@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from .config import CAMERA_ID_PATTERN
 
 Role = Literal["admin", "viewer"]
+RecordingState = Literal["recording", "waiting", "stopped", "error"]
 
 
 # 공개 요청은 알 수 없는 필드를 거절하고 문자열 양끝 공백을 정리한다.
@@ -98,6 +99,9 @@ class CameraResponse(PublicResponse):
     name: str | None = None
     stream_path: str | None = None
     enabled: bool | None = None
+    recording_enabled: bool | None = None
+    recording_state: RecordingState | None = None
+    recording_last_error_code: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     publish_credentials: PublishCredentialsResponse | None = None
@@ -107,6 +111,40 @@ class CameraPageResponse(PublicResponse):
     items: list[CameraResponse]
     limit: int = Field(ge=1)
     offset: int = Field(ge=0)
+
+
+class CameraRecordingResponse(PublicResponse):
+    camera_id: str = Field(pattern=CAMERA_ID_PATTERN.pattern)
+    enabled: bool
+    recording_enabled: bool
+    recording_state: RecordingState
+    stream_ready: bool = False
+    recording_file_active: bool = False
+    last_error_code: str | None = None
+    updated_at: datetime | None = None
+
+
+class CameraRecordingListResponse(PublicResponse):
+    items: list[CameraRecordingResponse]
+
+
+class CameraRecordingBulkItemResponse(PublicResponse):
+    camera_id: str = Field(pattern=CAMERA_ID_PATTERN.pattern)
+    ok: bool
+    enabled: bool
+    recording_enabled: bool
+    recording_state: RecordingState
+    stream_ready: bool = False
+    recording_file_active: bool = False
+    error_code: str | None = None
+    message: str | None = None
+
+
+class CameraRecordingBulkResponse(PublicResponse):
+    items: list[CameraRecordingBulkItemResponse]
+    total: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    failed: int = Field(ge=0)
 
 
 class LiveAuthResponse(PublicResponse):

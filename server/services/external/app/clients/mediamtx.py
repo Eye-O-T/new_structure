@@ -1,4 +1,4 @@
-# MediaMTX의 기존 송출 연결을 끊어 카메라 비활성화나 자격 증명 교체를 반영한다.
+# MediaMTX의 기존 송출 연결을 끊고 카메라별 녹화 설정·상태를 제어한다.
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +23,7 @@ class MediaControlError(RuntimeError):
 
 
 class MediaMtxClient:
-    """진행 중인 송출을 끊기 위한 MediaMTX v1.9 클라이언트."""
+    """진행 중인 송출 제어와 카메라별 녹화 경로 설정을 위한 MediaMTX v1.9 클라이언트."""
 
     def __init__(
         self,
@@ -55,14 +55,19 @@ class MediaMtxClient:
         await self._client.aclose()
 
     # 네트워크 실패를 송출 제어 불가로 변환하고 HTTP 상태 해석은 개별 작업에 맡긴다.
-    async def _request(self, method: str, path: str) -> httpx.Response:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+    ) -> httpx.Response:
         try:
-            return await self._client.request(method, path)
+            return await self._client.request(method, path, json=json)
         except httpx.RequestError as exc:
             raise MediaControlError("MediaMTX control API is unavailable.") from exc
 
-    # 활성 소스가 없으면 None을 반환하고 해제 가능한 RTSP 세션인지 확인한다.
-    async def _publisher_session(self, camera_id: str) -> str | None:
+    async def get_path_status(self, camera_id: str) -> dict[str, Any] | None:
         response = await self._request(
             "GET", f"v3/paths/get/{quote(camera_id, safe='')}"
         )
@@ -71,14 +76,112 @@ class MediaMtxClient:
         if response.status_code != 200:
             raise MediaControlError("MediaMTX rejected the path status request.")
         try:
-            path: dict[str, Any] = response.json()
-            source = path.get("source")
+            payload = response.json()
         except (TypeError, ValueError) as exc:
             raise MediaControlError(
                 "MediaMTX returned an invalid path status response.",
                 code="INVALID_MEDIA_RESPONSE",
                 status_code=502,
             ) from exc
+        if not isinstance(payload, dict):
+            raise MediaControlError(
+                "MediaMTX returned an invalid path status response.",
+                code="INVALID_MEDIA_RESPONSE",
+                status_code=502,
+            )
+        return payload
+
+    async def list_paths(self) -> dict[str, dict[str, Any]]:
+        response = await self._request("GET", "v3/paths/list")
+        if response.status_code != 200:
+            raise MediaControlError("MediaMTX rejected the path list request.")
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as exc:
+            raise MediaControlError(
+                "MediaMTX returned an invalid path list response.",
+                code="INVALID_MEDIA_RESPONSE",
+                status_code=502,
+            ) from exc
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise MediaControlError(
+                "MediaMTX returned an invalid path list response.",
+                code="INVALID_MEDIA_RESPONSE",
+                status_code=502,
+            )
+        return {
+            str(item["name"]): item
+            for item in items
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        }
+
+    async def get_path_config(self, camera_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET", f"v3/config/paths/get/{quote(camera_id, safe='')}"
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200:
+            raise MediaControlError("MediaMTX rejected the path config request.")
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as exc:
+            raise MediaControlError(
+                "MediaMTX returned an invalid path config response.",
+                code="INVALID_MEDIA_RESPONSE",
+                status_code=502,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise MediaControlError(
+                "MediaMTX returned an invalid path config response.",
+                code="INVALID_MEDIA_RESPONSE",
+                status_code=502,
+            )
+        return payload
+
+    async def set_path_recording(self, camera_id: str, record: bool) -> None:
+        quoted = quote(camera_id, safe="")
+        body = {"record": bool(record)}
+        response = await self._request(
+            "PATCH",
+            f"v3/config/paths/patch/{quoted}",
+            json=body,
+        )
+        if response.status_code == 404:
+            response = await self._request(
+                "POST",
+                f"v3/config/paths/add/{quoted}",
+                json=body,
+            )
+            if response.status_code in {400, 409}:
+                response = await self._request(
+                    "PATCH",
+                    f"v3/config/paths/patch/{quoted}",
+                    json=body,
+                )
+        if response.status_code not in {200, 201, 204}:
+            raise MediaControlError(
+                "MediaMTX rejected the path recording configuration."
+            )
+
+    async def delete_path_config(self, camera_id: str) -> None:
+        response = await self._request(
+            "DELETE",
+            f"v3/config/paths/delete/{quote(camera_id, safe='')}",
+        )
+        if response.status_code in {200, 204, 404}:
+            return
+        raise MediaControlError(
+            "MediaMTX could not delete the path configuration."
+        )
+
+    # 활성 소스가 없으면 None을 반환하고 해제 가능한 RTSP 세션인지 확인한다.
+    async def _publisher_session(self, camera_id: str) -> str | None:
+        path = await self.get_path_status(camera_id)
+        if path is None:
+            return None
+        source = path.get("source")
         if source is None:
             return None
         if not isinstance(source, dict):
@@ -89,6 +192,8 @@ class MediaMtxClient:
             )
         source_type = source.get("type")
         session_id = source.get("id")
+        if source_type in {"publisher", None} and not session_id and not path.get("ready"):
+            return None
         if source_type != "rtspSession" or not isinstance(session_id, str):
             raise MediaControlError(
                 "The active MediaMTX source is not a revocable RTSP publisher.",

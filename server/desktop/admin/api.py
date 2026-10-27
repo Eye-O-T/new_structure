@@ -2,6 +2,7 @@
 
 import ssl
 import threading
+import logging
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 from urllib.request import HTTPSHandler, ProxyHandler, Request, build_opener
@@ -15,6 +16,7 @@ from server.edge_onboarding.server_api import (
 
 DESKTOP_REQUEST_TIMEOUT_SECONDS = 90
 MEDIA_REQUEST_TIMEOUT_SECONDS = 8
+LOGGER = logging.getLogger(__name__)
 
 
 def camera_path(camera_id):
@@ -24,7 +26,7 @@ def camera_path(camera_id):
 
 
 class DesktopApi(ServerApiClient):
-    def __init__(self, base_url, *, ca_file=None, timeout=DESKTOP_REQUEST_TIMEOUT_SECONDS, opener=None, allow_insecure_http=False):
+    def __init__(self, base_url, *, ca_file=None, timeout=DESKTOP_REQUEST_TIMEOUT_SECONDS, opener=None, allow_insecure_http=False, session_store=None):
         context = ssl.create_default_context()
         if ca_file:
             context.load_verify_locations(cafile=str(ca_file))
@@ -33,6 +35,36 @@ class DesktopApi(ServerApiClient):
         ).open
         super().__init__(base_url, timeout=timeout, opener=transport, allow_insecure_http=allow_insecure_http)
         self._lock = threading.RLock()
+        self.session_store = session_store
+        self.session_username = None
+        self.session_persistence_error = None
+
+    def _save_session(self):
+        if self.session_store and self.session_username and self._refresh_token:
+            try:
+                self.session_store.write(self.session_username, self._refresh_token)
+                self.session_persistence_error = None
+            except OSError as exc:
+                self.session_persistence_error = str(exc)
+                LOGGER.warning("Could not save desktop login session: %s", exc)
+
+    def restore_session(self):
+        if not self.session_store:
+            return False
+        saved = self.session_store.read()
+        if not saved:
+            return False
+        self.session_username, self._refresh_token = saved
+        try:
+            self._refresh()
+            self.system_status()
+        except ServerApiError as exc:
+            if exc.status_code in {401, 403}:
+                self.session_store.delete()
+                self._access_token = self._refresh_token = None
+                return False
+            raise
+        return True
 
     def _refresh(self):
         if not self._refresh_token:
@@ -44,6 +76,7 @@ class DesktopApi(ServerApiClient):
             if not access or not refresh:
                 raise ServerApiError(401, "AUTH_REQUIRED", "다시 로그인하세요.")
             self._access_token, self._refresh_token = access, refresh
+            self._save_session()
         except Exception:
             self._access_token = self._refresh_token = None
             raise
@@ -69,14 +102,16 @@ class DesktopApi(ServerApiClient):
     def login(self, username, password):
         with self._lock:
             result = super().login(username, password)
+            self.session_username = username
             try:
                 self.system_status()  # require_admin is the authority, not a client role flag.
             except Exception:
-                self.logout()
+                self.logout(clear_saved=False)
                 raise
+            self._save_session()
             return result
 
-    def logout(self):
+    def logout(self, *, clear_saved=True):
         with self._lock:
             try:
                 if self._refresh_token:
@@ -93,6 +128,8 @@ class DesktopApi(ServerApiClient):
                 pass
             finally:
                 self._access_token = self._refresh_token = None
+                if clear_saved and self.session_store:
+                    self.session_store.delete()
 
     def system_status(self):
         return self._request("GET", "/api/v1/admin/system/status")
@@ -118,6 +155,24 @@ class DesktopApi(ServerApiClient):
 
     def camera(self, camera_id, suffix="", method="GET", payload=None):
         return self._request(method, camera_path(camera_id) + suffix, payload)
+
+    def cameras_recording(self):
+        return self._request("GET", "/api/v1/cameras/recording")
+
+    def start_all_recording(self):
+        return self._request("POST", "/api/v1/cameras/recording/start")
+
+    def stop_all_recording(self):
+        return self._request("POST", "/api/v1/cameras/recording/stop")
+
+    def camera_recording(self, camera_id):
+        return self.camera(camera_id, "/recording", "GET")
+
+    def start_camera_recording(self, camera_id):
+        return self.camera(camera_id, "/recording/start", "POST")
+
+    def stop_camera_recording(self, camera_id):
+        return self.camera(camera_id, "/recording/stop", "POST")
 
     def events(self, camera_id, start, cursor=None):
         query = {"camera_id": camera_id, "from": start, "order": "asc", "limit": 100}

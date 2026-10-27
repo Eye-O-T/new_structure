@@ -67,6 +67,7 @@ def initialize_runtime(repository: DataRepository, settings: Settings) -> None:
                     "edge_auth_token": auth_token,
                     "source_url": camera.source_url,
                     "enabled": camera.enabled,
+                    "recording_enabled": bool(camera.enabled),
                     "status": "offline" if camera.enabled else "disabled",
                 }
             )

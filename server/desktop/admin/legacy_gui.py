@@ -70,18 +70,20 @@ class CCTVMainWindow(QMainWindow):
         title_label.setStyleSheet("font-size: 22px; font-weight: bold;")
         title_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
 
-        self.btn_start = QPushButton("모니터링 시작")
+        self.btn_start = QPushButton("전체 녹화 시작")
         self.btn_start.setStyleSheet(
-            "background-color: #166534; color: white; padding: 8px 14px; "
-            "border-radius: 5px; font-size: 15px; font-weight: bold;"
+            "QPushButton { background-color: #166534; color: white; padding: 8px 14px; "
+            "border-radius: 5px; font-size: 15px; font-weight: bold; }"
+            "QPushButton:disabled { background-color: #1e293b; color: #64748b; }"
         )
         self.btn_start.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_start.clicked.connect(self.start_video)
 
-        self.btn_stop = QPushButton("모니터링 중지")
+        self.btn_stop = QPushButton("전체 녹화 중지")
         self.btn_stop.setStyleSheet(
-            "background-color: #7f1d1d; color: white; padding: 8px 14px; "
-            "border-radius: 5px; font-size: 15px; font-weight: bold;"
+            "QPushButton { background-color: #7f1d1d; color: white; padding: 8px 14px; "
+            "border-radius: 5px; font-size: 15px; font-weight: bold; }"
+            "QPushButton:disabled { background-color: #1e293b; color: #64748b; }"
         )
         self.btn_stop.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_stop.clicked.connect(self.stop_video)

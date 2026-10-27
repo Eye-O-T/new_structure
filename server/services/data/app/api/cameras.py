@@ -15,7 +15,7 @@ from ai_cctv_core.identifiers import validate_camera_id
 from ai_cctv_core.time import format_utc
 
 from ..database.repositories import CameraHasHistory, CameraLimitReached, EdgeIdentityConflict
-from ..dependencies import Repo, _page
+from ..dependencies import Repo, RuntimeSettings, _page
 from ..errors import ApiError, _not_found
 from ..schemas import (
     CameraCreate,
@@ -26,15 +26,29 @@ from ..schemas import (
     EdgeDevicePut,
     VideoProfileStatePatch,
 )
+from ..storage.recordings import has_active_recording_file
 
 router = APIRouter()
 
 
+def _with_recording_file_state(
+    camera: dict[str, Any], settings: RuntimeSettings
+) -> dict[str, Any]:
+    result = dict(camera)
+    result["recording_file_active"] = has_active_recording_file(
+        str(result["camera_id"]), settings
+    )
+    return result
+
+
 # 저장소의 활성 수 제한 예외를 호출자가 처리할 수 있는 카메라 충돌 응답으로 바꾼다.
 @router.post("/cameras", status_code=status.HTTP_201_CREATED)
-def create_camera(payload: CameraCreate, repository: Repo) -> dict[str, Any]:
+def create_camera(
+    payload: CameraCreate, repository: Repo, settings: RuntimeSettings
+) -> dict[str, Any]:
     try:
-        return repository.create_camera(payload.model_dump(mode="json"))
+        camera = repository.create_camera(payload.model_dump(mode="json"))
+        return _with_recording_file_state(camera, settings)
     except CameraLimitReached as exc:
         raise ApiError(
             409,
@@ -79,11 +93,15 @@ def list_camera_control_targets(repository: Repo) -> dict[str, Any]:
 @router.get("/cameras/enabled")
 def enabled_cameras(
     repository: Repo,
+    settings: RuntimeSettings,
     user_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> dict[str, Any]:
     if user_id is not None and repository.get_user(user_id) is None:
         raise _not_found("user")
-    items = repository.list_cameras(200, 0, enabled_only=True, user_id=user_id)
+    items = [
+        _with_recording_file_state(item, settings)
+        for item in repository.list_cameras(200, 0, enabled_only=True, user_id=user_id)
+    ]
     return {"items": items}
 
 
@@ -99,6 +117,7 @@ def get_camera_deletion_status(camera_id: str, repository: Repo) -> dict[str, An
 @router.get("/cameras")
 def list_cameras(
     repository: Repo,
+    settings: RuntimeSettings,
     user_id: Annotated[int | None, Query(ge=1)] = None,
     enabled_only: bool = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -106,27 +125,29 @@ def list_cameras(
 ) -> dict[str, Any]:
     if user_id is not None and repository.get_user(user_id) is None:
         raise _not_found("user")
-    return _page(
-        repository.list_cameras(
+    items = [
+        _with_recording_file_state(item, settings)
+        for item in repository.list_cameras(
             limit, offset, enabled_only=enabled_only, user_id=user_id
-        ),
-        limit,
-        offset,
-    )
+        )
+    ]
+    return _page(items, limit, offset)
 
 
 @router.get("/cameras/{camera_id}")
-def get_camera(camera_id: str, repository: Repo) -> dict[str, Any]:
+def get_camera(
+    camera_id: str, repository: Repo, settings: RuntimeSettings
+) -> dict[str, Any]:
     camera = repository.get_camera(camera_id)
     if camera is None:
         raise _not_found("camera")
-    return camera
+    return _with_recording_file_state(camera, settings)
 
 
 # 명시적으로 보낸 필드만 수정하고 활성 카메라 수 제한 위반은 409로 보고한다.
 @router.patch("/cameras/{camera_id}")
 def update_camera(
-    camera_id: str, payload: CameraUpdate, repository: Repo
+    camera_id: str, payload: CameraUpdate, repository: Repo, settings: RuntimeSettings
 ) -> dict[str, Any]:
     values = payload.model_dump(mode="json", exclude_unset=True)
     try:
@@ -141,17 +162,20 @@ def update_camera(
         raise ApiError(409, "EDGE_IDENTITY_CONFLICT", str(exc)) from exc
     if camera is None:
         raise _not_found("camera")
-    return camera
+    return _with_recording_file_state(camera, settings)
 
 
 @router.patch("/cameras/{camera_id}/status")
 def update_camera_status(
-    camera_id: str, payload: CameraStatusUpdate, repository: Repo
+    camera_id: str,
+    payload: CameraStatusUpdate,
+    repository: Repo,
+    settings: RuntimeSettings,
 ) -> dict[str, Any]:
     camera = repository.update_camera(camera_id, {"status": payload.status.value})
     if camera is None:
         raise _not_found("camera")
-    return camera
+    return _with_recording_file_state(camera, settings)
 
 
 # 카메라 미존재와 Edge 제어 정보 미설정을 각각 404와 기능 미확인 충돌로 구분한다.

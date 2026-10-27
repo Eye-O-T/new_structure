@@ -1,9 +1,9 @@
-# 카메라 설정과 영상 조회를 처리하며 Data·Edge·MediaMTX 작업 순서를 조정한다.
+# 카메라 설정과 영상·녹화 제어를 처리하며 Data·Edge·MediaMTX 작업 순서를 조정한다.
 from __future__ import annotations
 
 import secrets
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, urlsplit
 
 from fastapi import (
@@ -21,7 +21,7 @@ from ..clients.data import (
     DataServiceError,
 )
 from ..clients.edge import EdgeControlError, EdgeHttpClient
-from ..clients.mediamtx import MediaMtxClient
+from ..clients.mediamtx import MediaControlError, MediaMtxClient
 from ..config import CAMERA_ID_PATTERN, Settings
 from ..dependencies import (
     camera_admission_lock,
@@ -35,8 +35,13 @@ from ..schemas import (
     CameraLiveResponse,
     CameraPageResponse,
     CameraPatch,
+    CameraRecordingBulkItemResponse,
+    CameraRecordingBulkResponse,
+    CameraRecordingListResponse,
+    CameraRecordingResponse,
     CameraResponse,
     CameraStatusResponse,
+    RecordingState,
     VideoProfilePatch,
     VideoProfileResponse,
 )
@@ -52,21 +57,262 @@ from .validation import _public_media_url
 router = APIRouter()
 
 
-# 송출 해제 성공 여부와 관계없이 일회성 MediaMTX 제어 연결을 정리한다.
-async def _disconnect_camera_publisher(settings: Settings, camera_id: str) -> bool:
-    client = MediaMtxClient(
+def _new_media_client(
+    settings: Settings,
+    request: Request | None = None,
+    *,
+    media_client_factory: Callable[[], MediaMtxClient] | None = None,
+) -> MediaMtxClient:
+    if media_client_factory is not None:
+        return media_client_factory()
+    if request is not None:
+        state_factory = getattr(request.app.state, "media_client_factory", None)
+        if callable(state_factory):
+            return state_factory()
+    return MediaMtxClient(
         settings.media_control_url,
         timeout_seconds=settings.media_control_timeout_seconds,
     )
+
+
+# 송출 해제 성공 여부와 관계없이 일회성 MediaMTX 제어 연결을 정리한다.
+async def _disconnect_camera_publisher(
+    settings: Settings, camera_id: str, request: Request | None = None
+) -> bool:
+    client = _new_media_client(settings, request)
     try:
         return await client.disconnect_publisher(camera_id)
     finally:
         await client.close()
 
 
+async def _sync_camera_path_recording_best_effort(
+    settings: Settings,
+    camera_id: str,
+    record: bool,
+    request: Request | None = None,
+) -> None:
+    client = _new_media_client(settings, request)
+    try:
+        await client.set_path_recording(camera_id, record)
+    except MediaControlError:
+        pass
+    finally:
+        await client.close()
+
+
+async def _delete_camera_path_config_best_effort(
+    settings: Settings,
+    camera_id: str,
+    request: Request | None = None,
+) -> None:
+    client = _new_media_client(settings, request)
+    try:
+        await client.delete_path_config(camera_id)
+    except MediaControlError:
+        pass
+    finally:
+        await client.close()
+
+
+def _compute_recording_status(
+    camera: dict[str, Any],
+    path_status: dict[str, Any] | None = None,
+    *,
+    media_error_code: str | None = None,
+) -> dict[str, Any]:
+    enabled = bool(camera.get("enabled", True))
+    recording_enabled = bool(camera.get("recording_enabled", False))
+    error_code = media_error_code or camera.get("recording_last_error_code")
+    stream_ready = bool(path_status and path_status.get("ready"))
+    file_active = bool(camera.get("recording_file_active"))
+
+    state: RecordingState
+    if error_code:
+        state = "error"
+    elif not enabled or not recording_enabled:
+        state = "stopped"
+    elif stream_ready or (path_status is None and file_active):
+        state = "recording"
+    else:
+        state = "waiting"
+
+    return {
+        "camera_id": str(camera["camera_id"]),
+        "enabled": enabled,
+        "recording_enabled": recording_enabled,
+        "recording_state": state,
+        "stream_ready": stream_ready,
+        "recording_file_active": file_active,
+        "last_error_code": error_code,
+        "updated_at": camera.get("updated_at"),
+    }
+
+
+async def sync_camera_recording_paths(
+    settings: Settings,
+    data: DataClient,
+    *,
+    media_client_factory: Callable[[], MediaMtxClient] | None = None,
+) -> dict[str, int]:
+    """DB에 저장된 카메라별 녹화 희망 상태를 MediaMTX 경로 설정과 동기화한다."""
+
+    page = await data.list_cameras(limit=200, offset=0)
+    items = page.get("items", []) if isinstance(page, dict) else []
+    cameras_list = [item for item in items if isinstance(item, dict)]
+    if not cameras_list:
+        return {"total": 0, "synced": 0, "failed": 0}
+
+    client = _new_media_client(settings, media_client_factory=media_client_factory)
+    synced = 0
+    failed = 0
+    try:
+        for camera in cameras_list:
+            camera_id = str(camera["camera_id"])
+            should_record = bool(camera.get("enabled", True)) and bool(
+                camera.get("recording_enabled", False)
+            )
+            try:
+                await client.set_path_recording(camera_id, should_record)
+                if camera.get("recording_last_error_code") is not None:
+                    await data.update_camera(
+                        camera_id, {"recording_last_error_code": None}
+                    )
+                synced += 1
+            except MediaControlError as exc:
+                failed += 1
+                if camera.get("recording_last_error_code") != exc.code:
+                    try:
+                        await data.update_camera(
+                            camera_id, {"recording_last_error_code": exc.code}
+                        )
+                    except DataServiceError:
+                        pass
+    finally:
+        await client.close()
+    return {"total": len(cameras_list), "synced": synced, "failed": failed}
+
+
+async def _apply_camera_recording(
+    request: Request,
+    settings: Settings,
+    data: DataClient,
+    camera_id: str,
+    desired_recording: bool,
+) -> dict[str, Any]:
+    if not CAMERA_ID_PATTERN.fullmatch(camera_id):
+        raise HTTPException(status_code=400, detail="Invalid camera ID")
+    async with camera_lifecycle_lock(request, camera_id):
+        camera = await data.get_camera(camera_id)
+        if desired_recording and not bool(camera.get("enabled", True)):
+            raise DataConflict(
+                "Disabled cameras cannot start recording.",
+                code="CAMERA_DISABLED",
+            )
+        camera = await data.update_camera(
+            camera_id,
+            {
+                "recording_enabled": bool(desired_recording),
+                "recording_last_error_code": None,
+            },
+        )
+        should_record = bool(camera.get("enabled", True)) and bool(desired_recording)
+        client = _new_media_client(settings, request)
+        try:
+            await client.set_path_recording(camera_id, should_record)
+            path_status = await client.get_path_status(camera_id)
+        except MediaControlError as exc:
+            try:
+                await data.update_camera(
+                    camera_id, {"recording_last_error_code": exc.code}
+                )
+            except DataServiceError:
+                pass
+            raise
+        finally:
+            await client.close()
+        refreshed = await data.get_camera(camera_id)
+        return _compute_recording_status(refreshed, path_status)
+
+
+async def _apply_bulk_camera_recording(
+    request: Request,
+    settings: Settings,
+    data: DataClient,
+    _principal: Principal,
+    desired_recording: bool,
+) -> dict[str, Any]:
+    page = await data.list_cameras(limit=200, offset=0)
+    raw_items = page.get("items", []) if isinstance(page, dict) else []
+    active_cameras = [
+        item
+        for item in raw_items
+        if isinstance(item, dict) and bool(item.get("enabled", True))
+    ]
+    results: list[dict[str, Any]] = []
+    succeeded = 0
+    failed = 0
+    for camera in active_cameras:
+        camera_id = str(camera["camera_id"])
+        try:
+            status_payload = await _apply_camera_recording(
+                request, settings, data, camera_id, desired_recording
+            )
+            succeeded += 1
+            results.append(
+                {
+                    "camera_id": camera_id,
+                    "ok": True,
+                    "enabled": status_payload["enabled"],
+                    "recording_enabled": status_payload["recording_enabled"],
+                    "recording_state": status_payload["recording_state"],
+                    "stream_ready": status_payload["stream_ready"],
+                    "recording_file_active": status_payload["recording_file_active"],
+                    "error_code": None,
+                    "message": None,
+                }
+            )
+        except (MediaControlError, DataServiceError, HTTPException) as exc:
+            failed += 1
+            if isinstance(exc, MediaControlError):
+                error_code = exc.code
+                message = exc.message
+            elif isinstance(exc, DataServiceError):
+                error_code = exc.code
+                message = exc.message
+            else:
+                error_code = "RECORDING_CONTROL_FAILED"
+                message = str(exc.detail)
+            results.append(
+                {
+                    "camera_id": camera_id,
+                    "ok": False,
+                    "enabled": bool(camera.get("enabled", True)),
+                    "recording_enabled": bool(desired_recording),
+                    "recording_state": "error",
+                    "stream_ready": False,
+                    "recording_file_active": bool(camera.get("recording_file_active")),
+                    "error_code": error_code,
+                    "message": message,
+                }
+            )
+    return {
+        "items": results,
+        "total": len(results),
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+
+
 # 내부 RTSP·Edge 주소 및 인증값을 제거하고 실행 상태는 별도 상태 API에 맡긴다.
-def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
+def _public_camera(
+    camera: dict[str, Any],
+    path_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     result = dict(camera)
+    if "recording_enabled" in result and "recording_state" not in result:
+        computed = _compute_recording_status(result, path_status)
+        result["recording_state"] = computed["recording_state"]
     for internal_field in (
         "source_url",
         "edge_device_id",
@@ -76,6 +322,7 @@ def _public_camera(camera: dict[str, Any]) -> dict[str, Any]:
         "management_url",
         "recovery_url",
         "auth_token",
+        "recording_file_active",
         # cameras.status는 구형 스키마 호환 필드다. 실행 상태는 /cameras/{id}/status에서만 제공한다.
         "status",
     ):
@@ -237,6 +484,7 @@ async def create_camera(
     create_body = {
         **body,
         "enabled": False,
+        "recording_enabled": False,
         "status": "disabled",
     }
     async with (
@@ -261,9 +509,16 @@ async def create_camera(
         except Exception:
             # 기존 송출을 끊기 전에 행을 지우면 옛 정적 인증값이 다시 허용될 수 있다.
             # MediaMTX 연결 실패 시에도 비활성 행을 남겨 관리자가 재시도하게 한다.
-            await _disconnect_camera_publisher(settings, payload.camera_id)
+            await _disconnect_camera_publisher(settings, payload.camera_id, request)
             await data.delete_camera(payload.camera_id)
             raise
+        await _sync_camera_path_recording_best_effort(
+            settings,
+            payload.camera_id,
+            bool(camera.get("enabled", True))
+            and bool(camera.get("recording_enabled", False)),
+            request,
+        )
         result = _public_camera(camera)
         result["publish_credentials"] = {
             "username": payload.camera_id,
@@ -271,6 +526,72 @@ async def create_camera(
         }
         response.headers["Cache-Control"] = "no-store"
         return result
+
+
+@router.get(
+    "/api/v1/cameras/recording",
+    response_model=CameraRecordingListResponse,
+)
+async def list_cameras_recording(
+    request: Request,
+    principal: Principal = Depends(get_current_principal),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Any:
+    page = await data.list_cameras(user_id=principal.user_id, limit=200, offset=0)
+    raw_items = page.get("items", []) if isinstance(page, dict) else []
+    cameras_list = [item for item in raw_items if isinstance(item, dict)]
+
+    paths: dict[str, dict[str, Any]] = {}
+    media_error_code: str | None = None
+    if cameras_list:
+        client = _new_media_client(settings, request)
+        try:
+            paths = await client.list_paths()
+        except MediaControlError as exc:
+            media_error_code = exc.code
+        finally:
+            await client.close()
+
+    items = [
+        _compute_recording_status(
+            camera,
+            paths.get(str(camera["camera_id"])),
+            media_error_code=media_error_code,
+        )
+        for camera in cameras_list
+    ]
+    return {"items": items}
+
+
+@router.post(
+    "/api/v1/cameras/recording/start",
+    response_model=CameraRecordingBulkResponse,
+)
+async def start_all_cameras_recording(
+    request: Request,
+    principal: Principal = Depends(require_admin),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Any:
+    return await _apply_bulk_camera_recording(
+        request, settings, data, principal, True
+    )
+
+
+@router.post(
+    "/api/v1/cameras/recording/stop",
+    response_model=CameraRecordingBulkResponse,
+)
+async def stop_all_cameras_recording(
+    request: Request,
+    principal: Principal = Depends(require_admin),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Any:
+    return await _apply_bulk_camera_recording(
+        request, settings, data, principal, False
+    )
 
 
 # 부분 설정을 검증하고 활성 상태 변경 시 오래된 실행 상태와 송출 연결도 정리한다.
@@ -313,10 +634,17 @@ async def update_camera(
                     "last_error_code": (None if body["enabled"] else "CAMERA_DISABLED"),
                 },
             )
+            await _sync_camera_path_recording_best_effort(
+                settings,
+                camera_id,
+                bool(updated.get("enabled", True))
+                and bool(updated.get("recording_enabled", False)),
+                request,
+            )
             if not body["enabled"]:
                 # 먼저 비활성 상태를 저장해 재접속을 차단한다.
                 # MediaMTX 연결 끊기에 실패해도 비활성 상태를 유지하므로 안전하게 재시도할 수 있다.
-                await _disconnect_camera_publisher(settings, camera_id)
+                await _disconnect_camera_publisher(settings, camera_id, request)
         return _public_camera(updated)
 
 
@@ -354,7 +682,7 @@ async def delete_camera(
                 "last_error_code": "CAMERA_DISABLED",
             },
         )
-        await _disconnect_camera_publisher(settings, camera_id)
+        await _disconnect_camera_publisher(settings, camera_id, request)
         try:
             await data.delete_camera(camera_id)
         except DataConflict:
@@ -379,6 +707,7 @@ async def delete_camera(
                 },
             )
             raise
+        await _delete_camera_path_config_best_effort(settings, camera_id, request)
         return Response(status_code=204)
 
 
@@ -417,7 +746,7 @@ async def rotate_camera_publish_credentials(
                 "last_error_code": "PUBLISH_CREDENTIAL_ROTATING",
             },
         )
-        await _disconnect_camera_publisher(settings, camera_id)
+        await _disconnect_camera_publisher(settings, camera_id, request)
 
         publish_password = secrets.token_urlsafe(32)
         await data.put_camera_publish_credential(
@@ -460,6 +789,64 @@ async def get_camera(
     data: DataClient = Depends(get_data_client),
 ) -> Any:
     return _public_camera(await _ensure_camera_access(data, principal, camera_id))
+
+
+@router.get(
+    "/api/v1/cameras/{camera_id}/recording",
+    response_model=CameraRecordingResponse,
+)
+async def get_camera_recording(
+    request: Request,
+    camera_id: str,
+    principal: Principal = Depends(get_current_principal),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Any:
+    camera = await _ensure_camera_access(data, principal, camera_id)
+    path_status: dict[str, Any] | None = None
+    media_error_code: str | None = None
+    client = _new_media_client(settings, request)
+    try:
+        path_status = await client.get_path_status(camera_id)
+    except MediaControlError as exc:
+        media_error_code = exc.code
+    finally:
+        await client.close()
+    return _compute_recording_status(
+        camera, path_status, media_error_code=media_error_code
+    )
+
+
+@router.post(
+    "/api/v1/cameras/{camera_id}/recording/start",
+    response_model=CameraRecordingResponse,
+)
+async def start_camera_recording(
+    request: Request,
+    camera_id: str,
+    _: Principal = Depends(require_admin),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Any:
+    return await _apply_camera_recording(
+        request, settings, data, camera_id, True
+    )
+
+
+@router.post(
+    "/api/v1/cameras/{camera_id}/recording/stop",
+    response_model=CameraRecordingResponse,
+)
+async def stop_camera_recording(
+    request: Request,
+    camera_id: str,
+    _: Principal = Depends(require_admin),
+    settings: Settings = Depends(get_settings_dependency),
+    data: DataClient = Depends(get_data_client),
+) -> Any:
+    return await _apply_camera_recording(
+        request, settings, data, camera_id, False
+    )
 
 
 # 권한이 있고 활성인 카메라에 대해 쿠키 인증이 필요한 HLS 재생 계약을 만든다.
