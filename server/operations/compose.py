@@ -15,6 +15,7 @@ from pathlib import Path
 from server.deployment.validation import read_deployment_env
 
 START_ARGUMENTS = ("up", "-d", "--build", "--wait")
+STOP_ARGUMENTS = ("--profile", "ai", "stop")
 DETECTION_MODEL_MIGRATION = {"", "default.pt"}
 
 
@@ -315,7 +316,7 @@ class ComposeAdapter:
         return self.run(*START_ARGUMENTS).returncode
 
     def stop(self) -> int:
-        return self.run("down").returncode
+        return self.run(*STOP_ARGUMENTS).returncode
 
     def restart(self) -> int:
         result = self.run("restart")

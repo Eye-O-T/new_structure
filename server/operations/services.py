@@ -16,7 +16,12 @@ from typing import Any
 from server.deployment.context import DeploymentContext
 from server.deployment.validation import deployment_path, read_deployment_env
 
-from .compose import START_ARGUMENTS, ComposeAdapter, migrate_detection_model
+from .compose import (
+    START_ARGUMENTS,
+    STOP_ARGUMENTS,
+    ComposeAdapter,
+    migrate_detection_model,
+)
 
 
 _WINDOWS = os.name == "nt"
@@ -206,6 +211,28 @@ def _mounts_match(mounts: Any, expected: dict[str, Path], *, resolved: bool) -> 
     return True
 
 
+# Data 컨테이너가 없을 때 남은 컨테이너(예: AI 프로파일 서비스)의 마운트로 동일 배포 여부를 판별한다.
+def _partial_mounts_match(mounts: Any, expected_any: dict[str, Path]) -> str:
+    if not isinstance(mounts, list):
+        return "unknown"
+    matched_targets = 0
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        target = mount.get("Destination")
+        if target not in expected_any:
+            continue
+        matched_targets += 1
+        actual = mount.get("Source")
+        if (
+            mount.get("Type") != "bind"
+            or not isinstance(actual, str)
+            or _host_path(actual) != _host_path(str(expected_any[target]))
+        ):
+            return "different"
+    return "matching" if matched_targets > 0 else "unknown"
+
+
 # Compose 프로젝트명만 믿지 않고 Data의 설정·DB 마운트로 선택한 설치와의 일치를 확인한다.
 def _deployment_state(
     adapter: ComposeAdapter, installed: DeploymentContext, deadline: float
@@ -222,6 +249,18 @@ def _deployment_state(
         "/app/config/config.yaml": config_file,
         "/data/database": database,
     }
+    expected_any: dict[str, Path] = dict(expected)
+    for env_key, target in (
+        ("SNAPSHOTS_DIR", "/snapshots"),
+        ("RECORDINGS_DIR", "/recordings"),
+        ("MODELS_DIR", "/models"),
+    ):
+        raw_value = values.get(env_key)
+        if raw_value:
+            try:
+                expected_any[target] = deployment_path(adapter.server_dir, raw_value)
+            except (OSError, ValueError):
+                pass
     configuration = _json(
         _run(
             _command(adapter, "config", "--format", "json"),
@@ -254,7 +293,6 @@ def _deployment_state(
     containers = _ids(_run(query, directory=adapter.server_dir, deadline=deadline))
     if not containers:
         return "empty"
-    # Data가 없으면 저장소 소유 관계를 증명할 수 없으므로 남은 컨테이너를 임의로 변경하지 않는다.
     data_containers = _ids(
         _run(
             [*query, "--filter", "label=com.docker.compose.service=data"],
@@ -262,7 +300,22 @@ def _deployment_state(
             deadline=deadline,
         )
     )
-    if not data_containers or not set(data_containers).issubset(containers):
+    if not data_containers:
+        mounts_output = _run(
+            ["docker", "inspect", "--format", "{{json .Mounts}}", *containers],
+            directory=adapter.server_dir,
+            deadline=deadline,
+        )
+        lines = [line for line in mounts_output.splitlines() if line.strip()]
+        if len(lines) != len(containers):
+            return "unknown"
+        statuses = [_partial_mounts_match(_json(line), expected_any) for line in lines]
+        if "different" in statuses:
+            return "different"
+        if all(status == "matching" for status in statuses):
+            return "matching"
+        return "unknown"
+    if not set(data_containers).issubset(containers):
         return "unknown"
     mounts_output = _run(
         ["docker", "inspect", "--format", "{{json .Mounts}}", *data_containers],
@@ -390,7 +443,7 @@ def run_service_action(
         arguments = START_ARGUMENTS if migrated_model else ("restart",)
     else:
         progress("선택한 저장 위치의 서버를 중지하고 있습니다…")
-        arguments = ("down",)
+        arguments = STOP_ARGUMENTS
     _run(
         _command(adapter, *arguments),
         directory=adapter.server_dir,

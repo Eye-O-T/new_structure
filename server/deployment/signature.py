@@ -386,9 +386,11 @@ def reset_incompatible_deployment(
         env_file = resolved_root / "config" / "compose.env"
         if env_file.is_file() and (resolved_server / "compose.yml").is_file():
             try:
-                from server.operations.compose import ComposeAdapter
+                from server.operations.compose import STOP_ARGUMENTS, ComposeAdapter
 
-                ComposeAdapter(resolved_server, env_file).run("down", capture=True)
+                ComposeAdapter(resolved_server, env_file).run(
+                    *STOP_ARGUMENTS, capture=True
+                )
             except Exception:
                 pass
 
