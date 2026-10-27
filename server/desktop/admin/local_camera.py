@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
 from pathlib import Path
 from urllib.parse import quote
 
@@ -13,6 +11,7 @@ from server.operations.compose import default_data_root
 from server.operations.local_camera import (
     list_camera_devices,
     publisher_status,
+    resolve_ffmpeg_executable,
     start_publisher,
     stop_publisher,
 )
@@ -43,9 +42,11 @@ class LocalCameraPublisher(QObject):
 
     @staticmethod
     def ffmpeg_path():
-        value = os.getenv("AI_CCTV_FFMPEG") or shutil.which("ffmpeg")
+        value = resolve_ffmpeg_executable()
         if not value:
-            raise RuntimeError("FFmpeg가 설치되어 있지 않습니다. AI_CCTV_FFMPEG를 설정하거나 PATH에 ffmpeg를 추가하세요.")
+            raise RuntimeError(
+                "FFmpeg가 설치되어 있지 않습니다. AI_CCTV_FFMPEG를 설정하거나 PATH에 ffmpeg를 추가하세요."
+            )
         return value
 
     def start(self, camera_name, stream_url, *, camera_id="", width=1280, height=720, fps=30):
@@ -79,5 +80,9 @@ class LocalCameraPublisher(QObject):
 
 def rtsp_publish_url(host, port, camera_id, username, password):
     return "rtsp://%s:%s@%s:%s/%s" % (
-        quote(username, safe=""), quote(password, safe=""), host, int(port), quote(camera_id, safe="")
+        quote(username, safe=""),
+        quote(password, safe=""),
+        host,
+        int(port),
+        quote(camera_id, safe=""),
     )
