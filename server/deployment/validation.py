@@ -9,6 +9,35 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+ALLOWED_SECRET_KEYS: dict[str, set[str]] = {
+    "data": {
+        "DATA_EXTERNAL_TOKEN",
+        "DATA_INFERENCE_TOKEN",
+        "DATA_MEDIA_TOKEN",
+        "DATA_RECOVERY_TOKEN",
+        "DATA_IDENTITY_TOKEN",
+        "DATA_ANALYSIS_TOKEN",
+        "EDGE_AUTH_TOKENS_JSON",
+        "INITIAL_ADMIN_USERNAME",
+        "INITIAL_ADMIN_PASSWORD_HASH",
+    },
+    "external": {
+        "DATA_EXTERNAL_TOKEN",
+        "JWT_SECRET",
+        "MEDIA_READ_USERNAME",
+        "MEDIA_READ_PASSWORD",
+        "MEDIA_PUBLISH_CREDENTIALS_JSON",
+    },
+    "preprocessing": {
+        "DATA_INFERENCE_TOKEN",
+        "DATA_IDENTITY_TOKEN",
+        "MEDIA_READ_USERNAME",
+        "MEDIA_READ_PASSWORD",
+    },
+    "media": {"DATA_MEDIA_TOKEN"},
+    "analysis": {"DATA_ANALYSIS_TOKEN"},
+}
+
 
 # 진단 항목을 상태·분류·메시지로 전달해 CLI가 여러 실패를 한꺼번에 표시하게 한다.
 @dataclass(frozen=True)
@@ -176,36 +205,8 @@ def validate_deployment(
 
     # 파일 누락은 앞에서 보고했다. 필요한 파일이 모두 있을 때만 역할별 값의 계약을 대조한다.
     if all(path.is_file() for path in secrets_paths):
-        allowed_keys = {
-            "data": {
-                "DATA_EXTERNAL_TOKEN",
-                "DATA_INFERENCE_TOKEN",
-                "DATA_MEDIA_TOKEN",
-                "DATA_RECOVERY_TOKEN",
-                "DATA_IDENTITY_TOKEN",
-                "DATA_ANALYSIS_TOKEN",
-                "EDGE_AUTH_TOKENS_JSON",
-                "INITIAL_ADMIN_USERNAME",
-                "INITIAL_ADMIN_PASSWORD_HASH",
-            },
-            "external": {
-                "DATA_EXTERNAL_TOKEN",
-                "JWT_SECRET",
-                "MEDIA_READ_USERNAME",
-                "MEDIA_READ_PASSWORD",
-                "MEDIA_PUBLISH_CREDENTIALS_JSON",
-            },
-            "preprocessing": {
-                "DATA_INFERENCE_TOKEN",
-                "DATA_IDENTITY_TOKEN",
-                "MEDIA_READ_USERNAME",
-                "MEDIA_READ_PASSWORD",
-            },
-            "media": {"DATA_MEDIA_TOKEN"},
-            "analysis": {"DATA_ANALYSIS_TOKEN"},
-        }
         for service, values in secret_values.items():
-            forbidden = sorted(set(values) - allowed_keys[service])
+            forbidden = sorted(set(values) - ALLOWED_SECRET_KEYS[service])
             checks.append(
                 _check(
                     not forbidden,

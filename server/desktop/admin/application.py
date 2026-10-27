@@ -7,7 +7,18 @@ import time
 
 from PyQt5.QtCore import QProcess, QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices, QPixmap
-from PyQt5.QtWidgets import QApplication, QDialog, QDialogButtonBox, QLabel, QMessageBox, QPushButton, QVBoxLayout
+from PyQt5.QtWidgets import (
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
 from .api import safe_error
@@ -25,6 +36,14 @@ _RECORDING_STATUS_LABELS = {
     "deleting": "삭제 중",
     "deleted": "삭제됨 / 보관기간 만료",
 }
+
+
+def _breakable_path(value: str) -> str:
+    """긴 경로가 우측 패널 밖으로 잘리지 않도록 구분자 뒤에 줄바꿈 허용 문자(ZWSP)를 넣는다."""
+    text = str(value or "")
+    for sep in ("/", "\\", "_", "-"):
+        text = text.replace(sep, sep + "\u200b")
+    return text
 
 
 class CCTVMainWindow(ReferenceWindow):
@@ -52,11 +71,11 @@ class CCTVMainWindow(ReferenceWindow):
         self._monitoring = False
         super().__init__()
         self.ai_cctv_path = self.storage_root_path = str(storage_path)
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(960, 600)
         self.video_label.setMinimumSize(320, 180)
         self.video_grid.removeWidget(self.video_label)
         self.video_label.hide()
-        self.storage_label.setText(f"서버 저장소\n{storage_path or '서버에서 관리'}\n\n모니터링 중지는 화면 연결만 종료합니다.\n서버 녹화는 계속됩니다.")
+        self._update_storage_label(storage_path)
         self.cam_status.setText("설정에서 로그인하세요.")
         self.cam_status.setWordWrap(True)
         for label in self.findChildren(QLabel):
@@ -69,6 +88,15 @@ class CCTVMainWindow(ReferenceWindow):
                 self.camera_title = label
                 label.setText("서버 카메라 · 실시간 영상")
         self.btn_stop.setEnabled(False)
+
+    def _update_storage_label(self, storage_path: str) -> None:
+        raw_path = str(storage_path or "서버에서 관리")
+        self.storage_label.setText(
+            f"서버 저장소\n{_breakable_path(raw_path)}\n\n"
+            "모니터링 중지는 화면 연결만 종료합니다.\n"
+            "서버 녹화는 계속됩니다."
+        )
+        self.storage_label.setToolTip(raw_path)
 
     def _camera_name(self, camera_id):
         for camera in self.cameras:
@@ -83,11 +111,14 @@ class CCTVMainWindow(ReferenceWindow):
         selected = self._selected_camera_id
         self._updating_camera_picker = True
         self.camera_picker.clear()
-        for camera_id in self._available_camera_ids():
-            self.camera_picker.addItem(f"{self._camera_name(camera_id)} · {camera_id}", camera_id)
+        for index, camera_id in enumerate(self._available_camera_ids()):
+            display = f"{self._camera_name(camera_id)} · {camera_id}"
+            self.camera_picker.addItem(display, camera_id)
+            self.camera_picker.setItemData(index, display, Qt.ToolTipRole)
         index = self.camera_picker.findData(selected)
         if index >= 0:
             self.camera_picker.setCurrentIndex(index)
+        self.camera_picker.setToolTip(self.camera_picker.currentText())
         self._updating_camera_picker = False
         enabled = bool(self._available_camera_ids())
         self.camera_picker.setEnabled(enabled)
@@ -167,7 +198,7 @@ class CCTVMainWindow(ReferenceWindow):
                 if view:
                     view.set_frame(frame)
                 if camera_id == self._selected_camera_id:
-                    self.cam_status.setText(f"● {camera_id} · LIVE")
+                    self.cam_status.setText(f"● {_breakable_path(camera_id)} · LIVE")
         finally:
             worker.acknowledge_frame()
 
@@ -328,8 +359,8 @@ class CCTVMainWindow(ReferenceWindow):
             self._selected_camera_id = camera_id
             self._refresh_camera_picker()
             self._show_views()
-            self.cam_status.setText(f"● {camera_id} · 준비됨")
-        self.storage_label.setText(f"서버 저장소\n{self.ai_cctv_path or '서버에서 관리'}\n\n모니터링 중지는 화면 연결만 종료합니다.\n서버 녹화는 계속됩니다.")
+            self.cam_status.setText(f"● {_breakable_path(camera_id)} · 준비됨")
+        self._update_storage_label(self.ai_cctv_path)
 
     def open_resource_monitor(self):
         if not self.api:
@@ -346,16 +377,38 @@ class CCTVMainWindow(ReferenceWindow):
             return
         dialog = QDialog(self)
         dialog.setWindowTitle(f"이벤트 상세: {event_id}")
-        dialog.setMinimumWidth(520)
-        layout = QVBoxLayout(dialog)
+        dialog.resize(560, 640)
+        dialog.setMinimumSize(480, 360)
+        outer_layout = QVBoxLayout(dialog)
+
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("border: none;")
+        content_widget = QWidget()
+        content_widget.setMinimumWidth(0)
+        content_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        layout = QVBoxLayout(content_widget)
         loading = QLabel("이벤트 정보를 불러오는 중입니다.")
+        loading.setWordWrap(True)
         layout.addWidget(loading)
+        layout.addStretch()
+        scroll.setWidget(content_widget)
+        outer_layout.addWidget(scroll, 1)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
+        outer_layout.addWidget(buttons)
 
         state = {"open": True}
         dialog.destroyed.connect(lambda: state.__setitem__("open", False))
+
+        def _add_wrapped_label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            lbl.setTextFormat(Qt.PlainText)
+            layout.insertWidget(layout.count() - 1, lbl)
+            return lbl
 
         def operation(_progress):
             detail = self.api.event(event_id)
@@ -400,37 +453,37 @@ class CCTVMainWindow(ReferenceWindow):
                 ("Global Person ID", detail.get("global_person_id") or "-"),
                 ("Confidence", detail.get("confidence", "-")),
             ):
-                layout.insertWidget(layout.indexOf(buttons), QLabel(f"{name}: {value}"))
+                _add_wrapped_label(f"{name}: {value}")
             for label, content, _content_type, error in media_results:
                 if error:
-                    layout.insertWidget(layout.indexOf(buttons), QLabel(f"{label}: {error}"))
+                    _add_wrapped_label(f"{label}: {error}")
                     continue
                 image = QPixmap()
                 if not image.loadFromData(content):
-                    layout.insertWidget(layout.indexOf(buttons), QLabel(f"{label}: 이미지 형식이 올바르지 않습니다."))
+                    _add_wrapped_label(f"{label}: 이미지 형식이 올바르지 않습니다.")
                     continue
                 image_label = QLabel()
                 image_label.setPixmap(image.scaledToWidth(440, Qt.SmoothTransformation))
                 image_label.setToolTip(label)
-                layout.insertWidget(layout.indexOf(buttons), image_label)
+                layout.insertWidget(layout.count() - 1, image_label)
             for recording_id, recording, playback, error in recording_results:
                 if error:
-                    layout.insertWidget(layout.indexOf(buttons), QLabel(f"관련 녹화 {recording_id}: {error}"))
+                    _add_wrapped_label(f"관련 녹화 {recording_id}: {error}")
                     continue
                 status = recording.get("status", "unknown")
-                layout.insertWidget(layout.indexOf(buttons), QLabel(
+                _add_wrapped_label(
                     f"관련 녹화 ID: {recording_id} | "
                     f"시작: {recording.get('start_time', '-')} | "
                     f"종료: {recording.get('end_time', '-')} | "
                     f"상태: {_RECORDING_STATUS_LABELS.get(status, status)}"
-                ))
+                )
                 playback_url = (playback or {}).get("playback_url")
                 if playback_url:
                     button = QPushButton("녹화 재생")
                     button.clicked.connect(
                         lambda _checked=False, url=playback_url: self._open_playback_url(url)
                     )
-                    layout.insertWidget(layout.indexOf(buttons), button)
+                    layout.insertWidget(layout.count() - 1, button)
 
         def failed(message):
             if state["open"] and dialog.isVisible():

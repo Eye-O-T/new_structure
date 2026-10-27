@@ -171,7 +171,7 @@ class StreamDiagnosticsTests(unittest.TestCase):
             OSError("connect failed rtsp://user:password@example.test:8554/cam-001"),
             hls_open,
         ]
-        bridge = Mock()
+        bridge = MagicMock()
         bridge.__enter__.return_value.url = "http://127.0.0.1/hls"
         bridge.__exit__.return_value = False
         with patch.object(video, "MediaBridge", return_value=bridge), self.assertLogs(
@@ -182,7 +182,7 @@ class StreamDiagnosticsTests(unittest.TestCase):
         message = "\n".join(logs.output)
         self.assertIn("camera=cam-001", message)
         self.assertIn("OSError", message)
-        self.assertIn("falling back", message)
+        self.assertIn("using HLS fallback", message)
         self.assertNotIn("password", message)
 
     def test_stream_error_redacts_credentials_for_supported_url_schemes(self):

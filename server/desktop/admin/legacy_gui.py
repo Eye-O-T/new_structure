@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QComboBox,
     QGridLayout,
+    QSizePolicy,
 )
 from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
@@ -60,47 +61,71 @@ class CCTVMainWindow(QMainWindow):
 
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(20)
+        main_layout.setSpacing(16)
 
         header_layout = QHBoxLayout()
+        header_layout.setSpacing(8)
 
         title_label = QLabel("AI CCTV 관제 화면")
-        title_label.setStyleSheet("font-size: 28px; font-weight: bold;")
+        title_label.setStyleSheet("font-size: 22px; font-weight: bold;")
+        title_label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
 
         self.btn_start = QPushButton("모니터링 시작")
         self.btn_start.setStyleSheet(
-            "background-color: #166534; color: white; padding: 8px 20px; "
-            "border-radius: 5px; font-size: 22px; font-weight: bold;"
+            "background-color: #166534; color: white; padding: 8px 14px; "
+            "border-radius: 5px; font-size: 15px; font-weight: bold;"
         )
+        self.btn_start.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_start.clicked.connect(self.start_video)
 
         self.btn_stop = QPushButton("모니터링 중지")
         self.btn_stop.setStyleSheet(
-            "background-color: #7f1d1d; color: white; padding: 8px 20px; "
-            "border-radius: 5px; font-size: 22px; font-weight: bold;"
+            "background-color: #7f1d1d; color: white; padding: 8px 14px; "
+            "border-radius: 5px; font-size: 15px; font-weight: bold;"
         )
+        self.btn_stop.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_stop.clicked.connect(self.stop_video)
+
         self.btn_setting = QPushButton("설정")
         self.btn_setting.setStyleSheet(
-            "background-color: #334155; color: white; padding: 8px 20px; "
-            "border-radius: 5px; font-size: 22px; font-weight: bold;"
+            "background-color: #334155; color: white; padding: 8px 14px; "
+            "border-radius: 5px; font-size: 15px; font-weight: bold;"
         )
+        self.btn_setting.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_setting.clicked.connect(self.open_settings)
 
         self.camera_picker = QComboBox()
-        self.camera_picker.setMinimumWidth(180)
+        self.camera_picker.setMinimumWidth(130)
+        self.camera_picker.setMaximumWidth(280)
+        self.camera_picker.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.camera_picker.setMinimumContentsLength(10)
+        self.camera_picker.setStyleSheet(
+            "QComboBox { background-color: #1e293b; color: #f8fafc; "
+            "border: 1px solid #475569; border-radius: 5px; "
+            "padding: 6px 10px; font-size: 14px; }"
+            "QComboBox:disabled { color: #64748b; background-color: #0f172a; }"
+        )
         self.camera_picker.setEnabled(False)
         self.camera_picker.currentIndexChanged.connect(self.select_camera_from_picker)
+
         self.btn_grid = QPushButton("2×2 보기")
         self.btn_grid.setCheckable(True)
         self.btn_grid.setEnabled(False)
+        self.btn_grid.setStyleSheet(
+            "QPushButton { background-color: #334155; color: white; padding: 8px 14px; "
+            "border-radius: 5px; font-size: 15px; font-weight: bold; }"
+            "QPushButton:checked { background-color: #2563eb; }"
+            "QPushButton:disabled { background-color: #1e293b; color: #64748b; }"
+        )
+        self.btn_grid.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_grid.clicked.connect(self.toggle_grid_view)
 
         self.btn_resource_monitor = QPushButton("리소스 모니터링")
         self.btn_resource_monitor.setStyleSheet(
-            "background-color: #0e7490; color: white; padding: 8px 20px; "
-            "border-radius: 5px; font-size: 22px; font-weight: bold;"
+            "background-color: #0e7490; color: white; padding: 8px 14px; "
+            "border-radius: 5px; font-size: 15px; font-weight: bold;"
         )
+        self.btn_resource_monitor.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         self.btn_resource_monitor.clicked.connect(self.open_resource_monitor)
 
         header_layout.addWidget(title_label)
@@ -115,24 +140,26 @@ class CCTVMainWindow(QMainWindow):
         main_layout.addLayout(header_layout)
 
         body_layout = QHBoxLayout()
-        body_layout.setSpacing(20)
-        main_layout.addLayout(body_layout)
+        body_layout.setSpacing(16)
+        main_layout.addLayout(body_layout, stretch=1)
 
         left_panel = QFrame()
-        left_panel.setMinimumWidth(180)
-        left_panel.setMaximumWidth(300)
+        left_panel.setMinimumWidth(190)
+        left_panel.setMaximumWidth(280)
         left_panel.setStyleSheet("background-color: #1e293b; border-radius: 10px;")
 
         left_layout = QVBoxLayout(left_panel)
 
         cam_label = QLabel("카메라\nRTSP / LAN / USB 입력 상태")
-        cam_label.setStyleSheet("color: #94a3b8; font-size: 17px;")
+        cam_label.setWordWrap(True)
+        cam_label.setStyleSheet("color: #94a3b8; font-size: 15px;")
         left_layout.addWidget(cam_label)
 
         self.cam_status = QLabel("● CAM-01 · 대기 중")
+        self.cam_status.setWordWrap(True)
         self.cam_status.setStyleSheet(
             "background-color: #0f172a; border: 1px solid #3b82f6; "
-            "border-radius: 5px; padding: 15px; color: #facc15; font-size: 22px;"
+            "border-radius: 5px; padding: 12px; color: #facc15; font-size: 16px; font-weight: bold;"
         )
         left_layout.addWidget(self.cam_status)
         left_layout.addStretch()
@@ -144,14 +171,16 @@ class CCTVMainWindow(QMainWindow):
         center_layout = QVBoxLayout(center_panel)
 
         center_title = QLabel("CAM-01 정문 · 실시간 분석 화면")
-        center_title.setStyleSheet("font-size: 22px; font-weight: bold;")
+        center_title.setWordWrap(True)
+        center_title.setStyleSheet("font-size: 20px; font-weight: bold;")
         center_layout.addWidget(center_title)
 
         self.video_label = QLabel("LIVE VIDEO SURFACE")
         self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setWordWrap(True)
         self.video_label.setStyleSheet(
             "background-color: #0f172a; border-radius: 5px; "
-            "font-size: 28px; color: #334155; font-weight: bold;"
+            "font-size: 24px; color: #334155; font-weight: bold;"
         )
         self.video_label.setMinimumSize(320, 180)
         self.video_grid = QGridLayout()
@@ -166,38 +195,42 @@ class CCTVMainWindow(QMainWindow):
         self.metric_appear = self.create_metric_box("0", "출현")
         self.metric_disappear = self.create_metric_box("0", "사라짐")
 
-        metrics_layout.addWidget(self.metric_current["box"])
-        metrics_layout.addWidget(self.metric_total["box"])
-        metrics_layout.addWidget(self.metric_appear["box"])
-        metrics_layout.addWidget(self.metric_disappear["box"])
+        metrics_layout.addWidget(self.metric_current["box"], 1)
+        metrics_layout.addWidget(self.metric_total["box"], 1)
+        metrics_layout.addWidget(self.metric_appear["box"], 1)
+        metrics_layout.addWidget(self.metric_disappear["box"], 1)
 
         center_layout.addLayout(metrics_layout)
 
         body_layout.addWidget(center_panel, stretch=1)
 
         right_panel = QFrame()
-        right_panel.setMinimumWidth(220)
-        right_panel.setMaximumWidth(350)
+        right_panel.setMinimumWidth(230)
+        right_panel.setMaximumWidth(340)
         right_panel.setStyleSheet("background-color: #1e293b; border-radius: 10px;")
 
         right_layout = QVBoxLayout(right_panel)
 
         event_label = QLabel("이벤트 타임라인\n출현 · 이동 · 사라짐 중심")
-        event_label.setStyleSheet("color: #94a3b8; font-size: 17px;")
+        event_label.setWordWrap(True)
+        event_label.setStyleSheet("color: #94a3b8; font-size: 15px;")
         right_layout.addWidget(event_label)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet("border: none;")
 
         scroll_widget = QWidget()
+        scroll_widget.setMinimumWidth(0)
+        scroll_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.event_list = QVBoxLayout(scroll_widget)
+        self.event_list.setContentsMargins(0, 0, 4, 0)
         self.event_list.setAlignment(Qt.AlignTop)
 
         scroll.setWidget(scroll_widget)
 
-        right_layout.addWidget(scroll)
-        right_layout.addStretch()
+        right_layout.addWidget(scroll, stretch=1)
 
         self.storage_label = QLabel(
             "저장 경로\n"
@@ -205,22 +238,26 @@ class CCTVMainWindow(QMainWindow):
             "설정 - 저장 설정에서 위치를 선택하세요."
         )
         self.storage_label.setWordWrap(True)
-        self.storage_label.setStyleSheet("font-size: 17px; font-weight: bold;")
+        self.storage_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #cbd5e1;")
         right_layout.addWidget(self.storage_label)
 
         body_layout.addWidget(right_panel)
 
     def create_metric_box(self, value, label):
         box = QFrame()
+        box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         box.setStyleSheet("background-color: #0f172a; border-radius: 5px;")
 
         layout = QVBoxLayout(box)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(4)
 
         value_label = QLabel(value)
-        value_label.setStyleSheet("font-size: 34px; font-weight: bold;")
+        value_label.setStyleSheet("font-size: 28px; font-weight: bold;")
 
         text_label = QLabel(label)
-        text_label.setStyleSheet("color: #cbd5e1; font-size: 22px;")
+        text_label.setWordWrap(True)
+        text_label.setStyleSheet("color: #cbd5e1; font-size: 14px; font-weight: bold;")
 
         layout.addWidget(value_label)
         layout.addWidget(text_label)
@@ -260,7 +297,7 @@ class CCTVMainWindow(QMainWindow):
         self.cam_status.setText("● CAM-01 · 로딩 중")
         self.cam_status.setStyleSheet(
             "background-color: #0f172a; border: 1px solid #facc15; "
-            "border-radius: 5px; padding: 15px; color: #facc15; font-size: 22px;"
+            "border-radius: 5px; padding: 12px; color: #facc15; font-size: 16px; font-weight: bold;"
         )
 
     def stop_video(self):
@@ -271,7 +308,7 @@ class CCTVMainWindow(QMainWindow):
         self.cam_status.setText("● CAM-01 · 중지됨")
         self.cam_status.setStyleSheet(
             "background-color: #0f172a; border: 1px solid #ef4444; "
-            "border-radius: 5px; padding: 15px; color: #ef4444; font-size: 22px;"
+            "border-radius: 5px; padding: 12px; color: #ef4444; font-size: 16px; font-weight: bold;"
         )
         self.show_idle_screen()
 
@@ -350,12 +387,12 @@ class CCTVMainWindow(QMainWindow):
             self.cam_status.setText("● CAM-01 · LIVE")
             self.cam_status.setStyleSheet(
                 "background-color: #0f172a; border: 1px solid #22c55e; "
-                "border-radius: 5px; padding: 15px; color: #22c55e; font-size: 22px;"
+                "border-radius: 5px; padding: 12px; color: #22c55e; font-size: 16px; font-weight: bold;"
             )
 
         self.video_label.setStyleSheet(
             "background-color: #0f172a; border-radius: 5px; "
-            "font-size: 28px; color: #334155; font-weight: bold;"
+            "font-size: 24px; color: #334155; font-weight: bold;"
         )
 
         qt_img = QImage(frame)
@@ -415,7 +452,7 @@ class CCTVMainWindow(QMainWindow):
         self.cam_status.setText(text)
         self.cam_status.setStyleSheet(
             f"background-color: #0f172a; border: 1px solid {border_color}; "
-            f"border-radius: 5px; padding: 15px; color: {text_color}; font-size: 22px;"
+            f"border-radius: 5px; padding: 12px; color: {text_color}; font-size: 16px; font-weight: bold;"
         )
 
     def show_loading_screen(self, message):
@@ -424,7 +461,7 @@ class CCTVMainWindow(QMainWindow):
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setStyleSheet(
             "background-color: #0f172a; border: 1px solid #334155; "
-            "border-radius: 5px; font-size: 28px; color: #facc15; "
+            "border-radius: 5px; font-size: 24px; color: #facc15; "
             "font-weight: bold;"
         )
 
@@ -434,7 +471,7 @@ class CCTVMainWindow(QMainWindow):
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setStyleSheet(
             "background-color: #0f172a; border-radius: 5px; "
-            "font-size: 28px; color: #334155; font-weight: bold;"
+            "font-size: 24px; color: #334155; font-weight: bold;"
         )
 
     def show_network_failure_screen(self, message="네트워크 연결 장애\n네트워크 연결 상태를 확인하세요."):
@@ -443,7 +480,7 @@ class CCTVMainWindow(QMainWindow):
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setStyleSheet(
             "background-color: #000000; border: 1px solid #ef4444; "
-            "border-radius: 5px; font-size: 28px; color: #ef4444; "
+            "border-radius: 5px; font-size: 24px; color: #ef4444; "
             "font-weight: bold;"
         )
 
@@ -458,7 +495,7 @@ class CCTVMainWindow(QMainWindow):
         self.cam_status.setText("● CAM-01 · 오류")
         self.cam_status.setStyleSheet(
             "background-color: #0f172a; border: 1px solid #ef4444; "
-            "border-radius: 5px; padding: 15px; color: #ef4444; font-size: 22px;"
+            "border-radius: 5px; padding: 12px; color: #ef4444; font-size: 16px; font-weight: bold;"
         )
 
     def update_metrics(self, data):
@@ -483,6 +520,14 @@ class CCTVMainWindow(QMainWindow):
         elif event_type == "error":
             desc = event.get("message", "오류 발생")
             color = "#ef4444"
+        elif event_type == "network_recovered":
+            desc = event.get("message", "장애 복구 영상 저장 완료")
+            color = "#38bdf8"
+            self.set_camera_status(
+                "● CAM-01 · LIVE",
+                "#22c55e",
+                "#22c55e"
+            )
         elif event_type == "network_failure":
             desc = event.get("message", "네트워크 장애 감지")
             color = "#facc15"
@@ -492,14 +537,6 @@ class CCTVMainWindow(QMainWindow):
                 "#facc15"
             )
             self.show_network_failure_screen(desc)
-        elif event_type == "network_recovered":
-            desc = event.get("message", "장애 복구 영상 저장 완료")
-            color = "#38bdf8"
-            self.set_camera_status(
-                "● CAM-01 · LIVE",
-                "#22c55e",
-                "#22c55e"
-            )
         else:
             desc = f"ID {person_id} {event_type}"
             color = "#38bdf8"
@@ -513,15 +550,16 @@ class CCTVMainWindow(QMainWindow):
             )(item)
 
         layout = QVBoxLayout(event_box)
-        layout.setContentsMargins(18, 14, 18, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(6)
 
         time_label = QLabel(time_text)
-        time_label.setStyleSheet(f"color: {color}; font-size: 24px; font-weight: bold;")
+        time_label.setWordWrap(True)
+        time_label.setStyleSheet(f"color: {color}; font-size: 18px; font-weight: bold;")
 
         desc_label = QLabel(desc)
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        desc_label.setStyleSheet("font-size: 15px; font-weight: bold;")
 
         layout.addWidget(time_label)
         layout.addWidget(desc_label)

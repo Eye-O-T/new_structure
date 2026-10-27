@@ -51,6 +51,10 @@ from server.desktop.launcher import (
     server_manager_arguments,
 )
 from server.operations.services import run_service_action
+from server.deployment.signature import (
+    ContractSignatureMismatchError,
+    reset_incompatible_deployment,
+)
 from server.installer.workflow import (
     Installation,
     inspect_installation,
@@ -93,7 +97,7 @@ def local_networks() -> list[tuple[str, str]]:
 class InstallerWindow(QWidget):
     # 명시한 저장소·환경 변수·최근 선택 순서로 위치를 복원하고 첫 진단은 이벤트 루프 시작 뒤 실행한다.
     def __init__(
-        self, *, server_dir=None, data_root=None, preferences=None, auto_check=True
+        self, *, server_dir=None, data_root=None, preferences=None, auto_check=True, reset_notice=None
     ):
         super().__init__()
         self.server_dir = Path(server_dir or default_server_dir()).resolve()
@@ -117,6 +121,8 @@ class InstallerWindow(QWidget):
         self._location_error = False
         self._last_suggested_url = ""
         self._after_task = None
+        self._reset_notice = reset_notice
+        self._preserve_reset_notice = False
         self.setWindowTitle("AI CCTV 서버 설치 도우미")
         self.resize(800, 780)
         self.setMinimumSize(640, 600)
@@ -439,6 +445,20 @@ class InstallerWindow(QWidget):
             if not self.tls_private_key.text() and (directory / "tls.key").is_file():
                 self.tls_private_key.setText(str(directory / "tls.key"))
 
+    def _apply_reset_ui(self, notice: str) -> None:
+        self._reset_notice = notice
+        self._preserve_reset_notice = True
+        self.title.setText("AI CCTV 서버 재설정 (계약 변경 감지)")
+        self.pages.setCurrentIndex(0)
+        self._discover_files()
+        self.check_results.setPlainText(
+            f"{notice}\n\n필수 프로그램과 파일을 검사해 주세요."
+        )
+        self.activity.setText(
+            "내부 계약 변경으로 기존 데이터가 초기화되었습니다. 새 설정값을 입력해 주세요."
+        )
+        self._show_notice("계약 변경 감지 및 초기화 완료", notice)
+
     # 완료된 설치·빈 저장소·복구가 필요한 저장소를 구분해 올바른 화면과 버튼 상태로 전환한다.
     def _load_location(self):
         self._location_error = False
@@ -448,6 +468,11 @@ class InstallerWindow(QWidget):
             self.installation = inspect_installation(
                 Path(self.storage.text()), self.server_dir
             )
+        except ContractSignatureMismatchError as exc:
+            reset_incompatible_deployment(Path(self.storage.text()), self.server_dir)
+            self._location_error = False
+            self.installation = None
+            self._apply_reset_ui(exc.user_message)
         except (OSError, ValueError) as exc:
             self._location_error = True
             self.pages.setCurrentIndex(3)
@@ -459,6 +484,8 @@ class InstallerWindow(QWidget):
         else:
             if self.installation is not None:
                 self._show_management(self.installation)
+            elif self._reset_notice:
+                self._apply_reset_ui(self._reset_notice)
             else:
                 self.title.setText("AI CCTV 서버 설치")
                 self.pages.setCurrentIndex(0)
@@ -472,6 +499,8 @@ class InstallerWindow(QWidget):
             self, "영상과 설정을 저장할 폴더", self.storage.text()
         )
         if path:
+            self._reset_notice = None
+            self._preserve_reset_notice = False
             self.storage.setText(str(Path(path).resolve()))
             self._load_location()
             self.check_current_location()
@@ -507,15 +536,19 @@ class InstallerWindow(QWidget):
         )
 
         def completed(checks):
-            self.check_results.setPlainText(
-                "\n\n".join(
-                    f"{'[확인]' if item.ok else '[준비 필요]'} {item.name}\n{item.message}"
-                    for item in checks
-                )
+            body = "\n\n".join(
+                f"{'[확인]' if item.ok else '[준비 필요]'} {item.name}\n{item.message}"
+                for item in checks
             )
+            if self._reset_notice:
+                self.check_results.setPlainText(f"{self._reset_notice}\n\n{body}")
+            else:
+                self.check_results.setPlainText(body)
             failed = [item for item in checks if not item.ok]
             self._preflight_ok = not failed
-            if failed:
+            preserve_notice = self._preserve_reset_notice
+            self._preserve_reset_notice = False
+            if failed and not preserve_notice:
                 self._show_notice(
                     "설치 준비가 필요합니다",
                     "\n".join(f"• {item.name}: {item.message}" for item in failed),
@@ -685,6 +718,8 @@ class InstallerWindow(QWidget):
     def _show_management(self, installed):
         self.installation = installed
         self._location_error = False
+        self._reset_notice = None
+        self._preserve_reset_notice = False
         self._request = None
         self.password.clear()
         self.confirm_password.clear()

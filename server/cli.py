@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import getpass
 import json
 import sys
@@ -17,6 +18,10 @@ from server.operations.compose import (
     default_data_root,
     default_server_dir,
     installation_prerequisites,
+)
+from server.deployment.signature import (
+    ContractSignatureMismatchError,
+    reset_incompatible_deployment,
 )
 from server.installer.configuration import InstallRequest, initialize
 from server.installer.models import validate_custom_model
@@ -65,9 +70,83 @@ def _launch_manager(args: argparse.Namespace) -> int:
     return 0
 
 
+def _prompt_reconfiguration(data_root: Path, server_dir: Path, notice: str) -> None:
+    """계약 불일치로 초기화된 뒤 GUI 설치 마법사 또는 대화형 CLI로 새 설정값을 입력받는다."""
+
+    if os.getenv("AI_CCTV_NO_GUI_ON_RESET") != "1":
+        try:
+            from PyQt5.QtWidgets import QApplication
+            from server.installer.gui import InstallerWindow
+
+            app = QApplication.instance() or QApplication(sys.argv[:1])
+            window = InstallerWindow(
+                server_dir=server_dir,
+                data_root=data_root,
+                reset_notice=notice,
+            )
+            window.show()
+            app.exec_()
+            return
+        except Exception:
+            pass
+
+    if not sys.stdin.isatty():
+        return
+
+    cert_dir = data_root.expanduser().resolve() / "certs"
+    cert_path = cert_dir / "tls.crt" if (cert_dir / "tls.crt").is_file() else None
+    key_path = cert_dir / "tls.key" if (cert_dir / "tls.key").is_file() else None
+
+    while True:
+        try:
+            print("\n--- 새로운 서버 기본 설정 입력 ---")
+            username = input("관리자 계정 [admin]: ").strip() or "admin"
+            password = getpass.getpass("관리자 비밀번호 (4~12자): ").strip()
+            scheme = (
+                input("통신 방식 (https/http) [http]: ").strip() or "http"
+            ).lower()
+            default_url = f"{scheme}://127.0.0.1"
+            base_url = input(f"접속 주소 [{default_url}]: ").strip() or default_url
+        except (EOFError, KeyboardInterrupt):
+            return
+        request = InstallRequest(
+            data_root=data_root,
+            server_dir=server_dir,
+            admin_username=username,
+            admin_password=password,
+            model_path=None,
+            cameras=[],
+            public_scheme=scheme,
+            allow_insecure_http=(scheme == "http"),
+            public_base_url=base_url,
+            tls_certificate_path=cert_path if scheme == "https" else None,
+            tls_private_key_path=key_path if scheme == "https" else None,
+        )
+        try:
+            install_new(request, check_environment=False, require_tls=(scheme == "https"))
+        except ValueError as exc:
+            print(f"[ERROR] {exc}")
+            continue
+        print("[OK] 새로운 설정값이 저장되었습니다.")
+        return
+
+
+def _inspect_or_reset_installation(data_root: Path, server_dir: Path):
+    """설치 정보를 확인하고 계약 해시 불일치 시 초기화 후 새 값 입력을 유도한다."""
+
+    try:
+        return inspect_installation(data_root, server_dir)
+    except ContractSignatureMismatchError as exc:
+        print(f"[WARN] CONTRACT_SIGNATURE_MISMATCH:\n{exc.user_message}")
+        reset_incompatible_deployment(data_root, server_dir)
+        print("[OK] 기존 저장 데이터가 초기화되었습니다 (models/, certs/ 보존).")
+        _prompt_reconfiguration(data_root, server_dir, exc.user_message)
+        return inspect_installation(data_root, server_dir)
+
+
 def _launch_admin(args: argparse.Namespace) -> int:
     try:
-        deployment = inspect_installation(args.data_root, args.server_dir)
+        deployment = _inspect_or_reset_installation(args.data_root, args.server_dir)
         if deployment is None:
             raise ValueError("no installed deployment was found; run the installer first")
         process = launch_desktop("admin", admin_arguments(deployment))
@@ -79,7 +158,7 @@ def _launch_admin(args: argparse.Namespace) -> int:
 
 
 def _installed_deployment(args: argparse.Namespace):
-    deployment = inspect_installation(args.data_root, args.server_dir)
+    deployment = _inspect_or_reset_installation(args.data_root, args.server_dir)
     if deployment is None:
         raise ValueError("no installed deployment was found; run the installer first")
     return deployment
@@ -662,7 +741,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.command == "stop":
                 stop_publisher(args.data_root)
-            deployment = inspect_installation(args.data_root, args.server_dir)
+            deployment = _inspect_or_reset_installation(args.data_root, args.server_dir)
         except (OSError, ValueError) as exc:
             print(f"[ERROR] SERVICE_ACTION_FAILED: {exc}")
             return 1

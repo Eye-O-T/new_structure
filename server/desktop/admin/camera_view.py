@@ -4,7 +4,7 @@ import time
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
-from PyQt5.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PyQt5.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout
 
 from .overlay import overlay_items
 
@@ -26,20 +26,26 @@ class CameraView(QFrame):
         self._selected = False
 
         self.setFrameShape(QFrame.StyledPanel)
-        self.setMinimumSize(240, 135)
+        self.setMinimumSize(220, 135)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setStyleSheet("QFrame { background-color: #0f172a; border: 1px solid #334155; border-radius: 5px; }")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
         self.title = QLabel(f"{self.name} · {camera_id}")
         self.title.setTextFormat(Qt.PlainText)
-        self.title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.title.setWordWrap(True)
+        self.title.setStyleSheet("font-size: 13px; font-weight: bold;")
         self.status = QLabel("준비됨")
         self.status.setTextFormat(Qt.PlainText)
+        self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #facc15; font-size: 12px;")
         self.surface = QLabel("LIVE VIDEO SURFACE")
         self.surface.setAlignment(Qt.AlignCenter)
-        self.surface.setStyleSheet("color: #475569; font-size: 16px; font-weight: bold;")
+        self.surface.setWordWrap(True)
+        self.surface.setMinimumSize(1, 1)
+        self.surface.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.surface.setStyleSheet("color: #475569; font-size: 15px; font-weight: bold;")
         layout.addWidget(self.title)
         layout.addWidget(self.surface, stretch=1)
         layout.addWidget(self.status)
@@ -79,11 +85,11 @@ class CameraView(QFrame):
         self.set_status("연결 오류", "#ef4444")
         self.surface.setPixmap(QPixmap())
         self.surface.setText(message)
-        self.surface.setStyleSheet("color: #ef4444; font-size: 14px; font-weight: bold;")
+        self.surface.setStyleSheet("color: #ef4444; font-size: 13px; font-weight: bold;")
 
     def set_frame(self, frame):
         self._frame = QImage(frame)
-        self.surface.setStyleSheet("color: #475569; font-size: 16px; font-weight: bold;")
+        self.surface.setStyleSheet("color: #475569; font-size: 15px; font-weight: bold;")
         self.set_status("LIVE", "#22c55e")
         self._render()
 

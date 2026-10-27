@@ -112,6 +112,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(title)
 
         desc = QLabel("카메라 입력 방식과 AI 분석 가동 여부를 설정합니다.")
+        desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 15px; color: #94a3b8;")
         layout.addWidget(desc)
 
@@ -229,6 +230,7 @@ class SettingsWindow(QDialog):
         layout.addLayout(button_layout)
 
         self.result_label = QLabel("")
+        self.result_label.setWordWrap(True)
         self.result_label.setStyleSheet("font-size: 14px; color: #22c55e;")
         layout.addWidget(self.result_label)
 
@@ -290,9 +292,11 @@ class SettingsWindow(QDialog):
         layout.setContentsMargins(30, 30, 30, 30)
 
         title = QLabel(title_text)
+        title.setWordWrap(True)
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
 
         desc = QLabel(desc_text)
+        desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 16px; color: #94a3b8;")
         desc.setAlignment(Qt.AlignTop)
 
@@ -314,6 +318,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(title)
 
         desc = QLabel("원본 영상과 이벤트 클립 저장 방식을 설정합니다.")
+        desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 15px; color: #94a3b8;")
         layout.addWidget(desc)
 
@@ -332,6 +337,7 @@ class SettingsWindow(QDialog):
             "위치를 선택하면 해당 위치에 AI_CCTV 폴더가 생성되고,\n"
             "하위 폴더로 원본 녹화본 / 이벤트 CLIP 폴더가 생성됩니다."
         )
+        path_desc.setWordWrap(True)
         path_desc.setStyleSheet("font-size: 14px; color: #94a3b8;")
         storage_layout.addWidget(path_desc)
 
@@ -434,6 +440,7 @@ class SettingsWindow(QDialog):
         storage_layout.addLayout(clip_row)
 
         self.storage_result_label = QLabel("")
+        self.storage_result_label.setWordWrap(True)
         self.storage_result_label.setStyleSheet("font-size: 14px; color: #22c55e;")
         storage_layout.addWidget(self.storage_result_label)
 
@@ -453,6 +460,7 @@ class SettingsWindow(QDialog):
         layout.addLayout(button_layout)
 
         self.storage_save_result = QLabel("")
+        self.storage_save_result.setWordWrap(True)
         self.storage_save_result.setStyleSheet("font-size: 14px; color: #22c55e;")
         layout.addWidget(self.storage_save_result)
 

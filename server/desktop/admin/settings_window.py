@@ -3,10 +3,10 @@
 from time import sleep
 from urllib.error import HTTPError
 
-from PyQt5.QtCore import QProcess, QTimer
+from PyQt5.QtCore import QProcess, QTimer, Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QMessageBox, QScrollArea, QCheckBox,
+    QPushButton, QComboBox, QMessageBox, QScrollArea, QCheckBox, QSizePolicy,
 )
 
 from .api import DesktopApi
@@ -14,6 +14,13 @@ from server.edge_onboarding.server_api import ServerApiError
 from .legacy_settings import SettingsWindow as LegacySettingsWindow
 from .tasks import TaskOwner
 from .local_camera import LocalCameraPublisher, list_camera_devices, rtsp_publish_url
+
+
+def _breakable_text(value: str) -> str:
+    text = str(value or "")
+    for sep in ("/", "\\", "_", "-"):
+        text = text.replace(sep, sep + "\u200b")
+    return text
 
 
 class SettingsWindow(TaskOwner, LegacySettingsWindow):
@@ -31,12 +38,15 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
 
     def create_basic_page(self):
         page = QWidget()
+        page.setMinimumWidth(0)
+        page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(30, 24, 30, 24)
         layout.setSpacing(12)
 
         def section(title):
             label = QLabel(title)
+            label.setWordWrap(True)
             label.setStyleSheet("color: #f8fafc; font-size: 18px; font-weight: bold;")
             layout.addWidget(label)
 
@@ -79,7 +89,10 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
                 self.camera.findData(("server", self.selected_source[1]))
             )
         server_url = self.parent().server_url
-        form.addRow("서버 주소", QLabel(server_url))
+        server_url_label = QLabel(_breakable_text(server_url))
+        server_url_label.setWordWrap(True)
+        server_url_label.setToolTip(str(server_url))
+        form.addRow("서버 주소", server_url_label)
         form.addRow("관리자 계정", self.username)
         form.addRow("비밀번호", self.password)
         form.addRow("카메라", self.camera)
@@ -90,11 +103,15 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         )
         layout.addWidget(self.bounding_box_checkbox)
         trust_label = (
-            f"추가 CA: {self.parent().ca_file}"
+            f"추가 CA: {_breakable_text(self.parent().ca_file)}"
             if self.parent().ca_file
             else "추가 CA 없음 · 운영체제의 신뢰 인증서 사용"
         )
-        layout.addWidget(QLabel(trust_label))
+        trust_widget = QLabel(trust_label)
+        trust_widget.setWordWrap(True)
+        if self.parent().ca_file:
+            trust_widget.setToolTip(str(self.parent().ca_file))
+        layout.addWidget(trust_widget)
         login = QPushButton("로그인")
         style_button(login, "#1d4ed8", "#3b82f6", "#2563eb")
         login.clicked.connect(self.login)
@@ -121,6 +138,7 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         layout.addStretch()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setWidget(page)
         return scroll
@@ -349,9 +367,10 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
 
     def create_storage_page(self):
         # The reference local-folder and clip writers must not duplicate server recording.
+        raw_path = self.ai_cctv_path or self.storage_root_path or "서버에서 관리"
         return self.create_empty_page(
             "저장 설정",
-            f"서버 저장소: {self.ai_cctv_path or self.storage_root_path or '서버에서 관리'}\n\n"
+            f"서버 저장소: {_breakable_text(raw_path)}\n\n"
             "녹화·감지·분석은 서버가 수행합니다.\n"
             "저장 위치와 녹화 정책은 설치 도우미의 운영 설정을 사용합니다.\n"
             "모니터링 시작·중지는 이 창의 화면 연결만 제어합니다.",

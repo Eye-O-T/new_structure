@@ -15,6 +15,11 @@ import yaml
 
 from ai_cctv_core.config import AppConfig
 from server.deployment.context import DeploymentContext
+from server.deployment.signature import (
+    ContractSignatureMismatchError,
+    check_existing_signature,
+    ensure_signature_file,
+)
 from server.deployment.validation import deployment_path, read_deployment_env
 from server.installer.configuration import (
     InstallRequest,
@@ -86,8 +91,10 @@ def inspect_installation(data_root: Path, server_dir: Path) -> Installation | No
             raise ValueError(_RECOVERY_MESSAGE)
         if not env_file.is_file():
             if _has_installation_traces(root):
+                check_existing_signature(root, server)
                 raise ValueError(_RECOVERY_MESSAGE)
             return None
+        current_signature = check_existing_signature(root, server)
         values = read_deployment_env(env_file)
         required = ("CONFIG_FILE", "DATABASE_DIR", *_SECRET_KEYS)
         if not all(values.get(key) for key in required):
@@ -129,6 +136,7 @@ def inspect_installation(data_root: Path, server_dir: Path) -> Installation | No
         rtsp_host = config.server.rtsp_bind_address
         if rtsp_host in {"0.0.0.0", "::"}:
             rtsp_host = urlsplit(public_url).hostname or "localhost"
+        ensure_signature_file(root, server, current_signature)
         return Installation(
             data_root=root,
             env_file=env_file,
@@ -139,6 +147,8 @@ def inspect_installation(data_root: Path, server_dir: Path) -> Installation | No
             admin_username=admin_username,
             allow_insecure_http=allow_insecure_http,
         )
+    except ContractSignatureMismatchError:
+        raise
     except (OSError, UnicodeError, ValueError, yaml.YAMLError):
         # YAML/Pydantic 오류에는 입력값이 들어갈 수 있으므로 화면에는 원문을 전달하지 않는다.
         raise ValueError(_RECOVERY_MESSAGE) from None

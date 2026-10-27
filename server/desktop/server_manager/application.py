@@ -23,6 +23,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from server.deployment.signature import (
+    ContractSignatureMismatchError,
+    reset_incompatible_deployment,
+)
 from server.deployment.validation import deployment_path, read_deployment_env
 from server.desktop.common.tasks import BackgroundTask
 from server.desktop.launcher import admin_arguments, launch_desktop
@@ -322,6 +326,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         window = ServerManagerWindow(
             server_dir=args.server_dir, data_root=args.data_root
+        )
+    except ContractSignatureMismatchError as exc:
+        reset_incompatible_deployment(args.data_root, args.server_dir)
+        from server.installer.gui import InstallerWindow
+
+        window = InstallerWindow(
+            server_dir=args.server_dir,
+            data_root=args.data_root,
+            reset_notice=exc.user_message,
         )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))

@@ -30,6 +30,7 @@ from .models import (
     validate_custom_model,
 )
 from server.deployment.private_files import restrict_private_file
+from server.deployment.signature import write_contract_signature
 from server.deployment.validation import read_deployment_env
 
 SAFE_ENV = re.compile(r"^[A-Za-z0-9_./:@+-]+$")
@@ -628,6 +629,7 @@ def initialize(request: InstallRequest) -> InstallResult:
     )
     # 참조 대상 파일을 준비한 뒤 마지막으로 Compose 연결 정보를 저장한다.
     _write_atomic(compose_env_path, compose_payload, 0o600)
+    write_contract_signature(root, request.server_dir)
     return InstallResult(
         config_path=config_path,
         secrets_path=secrets_path,
