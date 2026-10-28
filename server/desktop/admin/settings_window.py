@@ -1,19 +1,25 @@
 """Retain the reference settings sidebar/stack/save flow; configure server cameras."""
 
-from time import sleep
-from urllib.error import HTTPError
-
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLabel, QLineEdit,
-    QPushButton, QComboBox, QMessageBox, QScrollArea, QCheckBox, QSizePolicy,
+    QPushButton, QComboBox, QScrollArea, QCheckBox, QSizePolicy,
 )
 
 from .api import DesktopApi
-from server.edge_onboarding.server_api import ServerApiError
 from .legacy_settings import SettingsWindow as LegacySettingsWindow
 from .tasks import TaskOwner
-from .local_camera import LocalCameraPublisher, list_camera_devices, publisher_status, rtsp_publish_url
+from .local_camera import (
+    LocalCameraPublisher,
+    list_camera_devices,
+    publisher_status,
+)
+from server.operations.local_camera import (
+    load_device_setting,
+    load_local_camera_enabled,
+    save_device_setting,
+    save_local_camera_enabled,
+)
 
 
 def _breakable_text(value: str) -> str:
@@ -31,7 +37,6 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             data_root = getattr(parent, "storage_root_path", "") or None
             self.local_publisher = LocalCameraPublisher(parent, data_root=data_root)
             parent.local_publisher = self.local_publisher
-        self.local_publisher.state_changed.connect(self._local_camera_state)
         super().__init__(parent, **kwargs)
         self.body = self.pages
         if self.api:
@@ -82,13 +87,32 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
         self.camera = QComboBox()
+        self.local_camera_device = QComboBox()
+        self.local_camera_enabled = QCheckBox("전체 녹화 시 노트북 카메라 송출")
         for widget in (self.username, self.password, self.camera):
             style_input(widget)
+        style_input(self.local_camera_device)
         self._local_devices = list_camera_devices()
+        self.local_camera_device.addItems(self._local_devices)
+        saved_device = load_device_setting(self.local_publisher.data_root)
+        if saved_device:
+            saved_index = self.local_camera_device.findText(saved_device)
+            if saved_index >= 0:
+                self.local_camera_device.setCurrentIndex(saved_index)
+        self.local_camera_enabled.setChecked(
+            load_local_camera_enabled(self.local_publisher.data_root)
+        )
+        self.local_camera_device.setEnabled(bool(self._local_devices))
         self._populate_camera_combo()
         if isinstance(self.selected_source, tuple):
+            camera_id = self.selected_source[1]
+            source_data = (
+                ("local", saved_device)
+                if camera_id == "local-camera" and saved_device
+                else ("server", camera_id)
+            )
             self.camera.setCurrentIndex(
-                self.camera.findData(("server", self.selected_source[1]))
+                self.camera.findData(source_data)
             )
         server_url = self.parent().server_url
         server_url_label = QLabel(_breakable_text(server_url))
@@ -98,6 +122,8 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         form.addRow("관리자 계정", self.username)
         form.addRow("비밀번호", self.password)
         form.addRow("카메라", self.camera)
+        form.addRow("로컬 카메라 사용", self.local_camera_enabled)
+        form.addRow("노트북 카메라 장치", self.local_camera_device)
         layout.addLayout(form)
         self.bounding_box_checkbox = QCheckBox("Bounding Box 표시")
         self.bounding_box_checkbox.setChecked(
@@ -168,143 +194,6 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             index = self.camera.findData(current)
             if index >= 0:
                 self.camera.setCurrentIndex(index)
-
-    def _local_camera_state(self, state):
-        messages = {
-            "starting": "노트북 카메라 송출을 시작하는 중입니다.",
-            "failed": "노트북 카메라 송출이 실패했습니다. FFmpeg·카메라·RTSP 주소를 확인하세요.",
-            "stopped": "노트북 카메라 송출이 중지되었습니다.",
-        }
-        if state == "failed":
-            self.message.setText(self.local_publisher.failure_message or messages[state])
-        elif state in messages and hasattr(self, "message"):
-            self.message.setText(messages[state])
-
-    def _local_camera_task_failed(self, _message):
-        self.message.setText(_message)
-
-    def start_local_camera(self, device_name, on_ready=None):
-        if not self.api:
-            self.message.setText("먼저 서버에 로그인하세요.")
-            return
-        camera_id = "local-camera"
-        name = device_name.strip()
-        if not camera_id or not name:
-            self.message.setText("카메라 ID와 장치명을 입력하세요.")
-            return
-        owner = self.parent()
-        host = getattr(owner, "rtsp_host", "127.0.0.1")
-        port = getattr(owner, "rtsp_port", 8554)
-        try:
-            if not 1 <= int(port) <= 65535:
-                raise ValueError
-        except ValueError:
-            self.message.setText("RTSP 포트는 1~65535 범위여야 합니다.")
-            return
-        current = publisher_status(self.local_publisher.data_root)
-        if current["status"] == "running":
-            if current.get("camera_id") != camera_id or current.get("device_name") != name:
-                self.message.setText("다른 로컬 카메라가 송출 중입니다. 먼저 송출을 중지하세요.")
-                return
-            if on_ready is not None:
-                on_ready()
-            return
-        if any(item.get("camera_id") == camera_id for item in self.parent().cameras):
-            answer = QMessageBox.question(
-                self,
-                "기존 카메라 송출 설정 변경",
-                "같은 카메라 ID가 이미 등록되어 있습니다.\n"
-                "게시 계정이 재발급되어 기존 송출이 중단될 수 있습니다.\n\n"
-                "계속하시겠습니까?",
-            )
-            if answer != QMessageBox.Yes:
-                return
-
-        def register():
-            try:
-                return self.api.register_local_camera(camera_id, name)
-            except ServerApiError as exc:
-                if exc.status_code != 409:
-                    raise
-                self.api.camera(camera_id, method="PATCH", payload={"name": name, "enabled": True})
-                return self.api.camera(camera_id, "/publish-credentials/rotate", "POST")
-
-        def started(result):
-            credentials = result.get("publish_credentials") or {}
-            try:
-                url = rtsp_publish_url(host, port, camera_id, credentials["username"], credentials["password"])
-                self.local_publisher.start(name, url, camera_id=camera_id)
-                current = [item for item in self.parent().cameras if item.get("camera_id") != camera_id]
-                current.append(
-                    {
-                        "camera_id": camera_id,
-                        "name": result.get("name", name),
-                        "enabled": True,
-                        "recording_enabled": bool(result.get("recording_enabled", False)),
-                        "recording_state": result.get("recording_state", "stopped"),
-                    }
-                )
-                self.parent().cameras = current
-                self._populate_camera_combo()
-                self.camera.setCurrentIndex(
-                    self.camera.findData(("local", name))
-                )
-                self.message.setText("RTSP 서버에서 웹캠 영상을 확인하는 중입니다…")
-                QTimer.singleShot(
-                    0,
-                    lambda: self._verify_local_camera(camera_id, on_ready),
-                )
-            except Exception as exc:
-                self.message.setText(str(exc))
-
-        self.execute(register, started)
-
-    def _verify_local_camera(self, camera_id, on_ready=None):
-        if self.task is not None:
-            QTimer.singleShot(
-                100,
-                lambda: self._verify_local_camera(camera_id, on_ready),
-            )
-            return
-
-        def operation():
-            try:
-                live = self.api.camera(camera_id, "/live")
-                playlist_path = self.api.media_path(camera_id, live["hls_url"])
-            except Exception:
-                return False, "카메라 영상 주소를 확인할 수 없습니다. 로그인과 카메라 등록 상태를 확인하세요."
-
-            for _ in range(15):
-                if self.local_publisher.failure_message:
-                    return False, self.local_publisher.failure_message
-                try:
-                    playlist = self.api.media(camera_id, playlist_path).decode("utf-8")
-                    if any(line.strip() and not line.startswith("#") for line in playlist.splitlines()):
-                        return True, "노트북 카메라 송출이 확인됐습니다. 관제 화면에서 실시간 영상과 녹화를 제어하세요."
-                except HTTPError as exc:
-                    if exc.code in {401, 403}:
-                        return False, "영상 인증에 실패했습니다. 카메라를 다시 등록한 뒤 송출을 시작하세요."
-                    if exc.code not in {404, 502, 503}:
-                        return False, "서버가 웹캠 영상을 거부했습니다. RTSP 송출 계정과 서버 설정을 확인하세요."
-                except Exception:
-                    pass
-                sleep(1)
-
-            return False, "15초 안에 서버에서 웹캠 영상을 받지 못했습니다. 송출 오류와 RTSP 주소·포트 8554를 확인하세요."
-
-        def completed(result):
-            ready, message = result
-            if not ready:
-                self.local_publisher.stop()
-            self.message.setText(message)
-            if ready and on_ready is not None:
-                on_ready()
-
-        self.execute(operation, completed)
-
-    def stop_local_camera(self):
-        self.local_publisher.stop()
-        self.message.setText("노트북 카메라 송출을 중지했습니다.")
 
     def login(self):
         owner = self.parent()
@@ -400,6 +289,29 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
     def save_basic_settings(self):
         if self.task is not None:
             return
+        local_enabled = self.local_camera_enabled.isChecked()
+        local_device = self.local_camera_device.currentText().strip()
+        if local_enabled and not local_device:
+            self.message.setText("사용할 노트북 카메라 장치를 선택하세요.")
+            return
+        current_publisher = publisher_status(self.local_publisher.data_root)
+        save_local_camera_enabled(self.local_publisher.data_root, local_enabled)
+        if local_device:
+            save_device_setting(self.local_publisher.data_root, local_device)
+        if (
+            current_publisher.get("status") == "running"
+            and (
+                not local_enabled
+                or current_publisher.get("device_name") != local_device
+            )
+        ):
+            try:
+                self.local_publisher.stop()
+            except OSError as exc:
+                self.message.setText(
+                    f"노트북 카메라를 중지하지 못했습니다. 설정은 저장됐습니다: {exc}"
+                )
+                return
         selection = self.camera.currentData()
         if not self.api or not selection:
             self.message.setText("로그인 후 카메라를 선택하세요.")
@@ -407,13 +319,13 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
         kind, value = selection
         self.bounding_boxes_enabled = self.bounding_box_checkbox.isChecked()
         if kind == "local":
-            self.start_local_camera(value, on_ready=self._accept_local_camera)
+            if value != local_device:
+                self.local_camera_device.setCurrentText(value)
+                save_device_setting(self.local_publisher.data_root, value)
+            self.selected_source = (self.api, "local-camera")
+            self.accept()
             return
         self.selected_source = (self.api, value)
-        self.accept()
-
-    def _accept_local_camera(self):
-        self.selected_source = (self.api, "local-camera")
         self.accept()
 
     def create_storage_page(self):

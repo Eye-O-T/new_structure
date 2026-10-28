@@ -230,6 +230,7 @@ _ensure_service_stubs()
 import httpx  # noqa: E402
 from server.desktop.admin.api import DesktopApi  # noqa: E402
 from server.desktop.admin.application import CCTVMainWindow  # noqa: E402
+from server.desktop.admin.settings_window import SettingsWindow  # noqa: E402
 from server.services.data.app.config import Settings as DataSettings  # noqa: E402
 from server.services.data.app.database.connection import Database  # noqa: E402
 from server.services.data.app.database.repositories import DataRepository  # noqa: E402
@@ -370,7 +371,7 @@ class _DirectDataAdapter:
         )
         return result
 
-    async def get_camera(self, camera_id: str, user_id: int | None = None) -> dict:
+    async def get_camera(self, camera_id: str, *, user_id: str) -> dict:
         cam = self._enrich(self.repository.get_camera(camera_id))
         if cam is None:
             raise KeyError(camera_id)
@@ -379,9 +380,9 @@ class _DirectDataAdapter:
     async def list_cameras(
         self,
         *,
-        user_id: int | None = None,
-        limit: int = 50,
-        offset: int = 0,
+        user_id: str | None,
+        limit: int,
+        offset: int,
     ) -> dict:
         items = [
             self._enrich(item)
@@ -539,7 +540,12 @@ class RecordingControlBackendTests(unittest.TestCase):
         # 1. Start recording on offline camera -> 'waiting' (녹화 대기)
         res_waiting = _run_async(
             _apply_camera_recording(
-                self.request, self.external_settings, data_adapter, "cam-1", True
+                self.request,
+                self.external_settings,
+                data_adapter,
+                "cam-1",
+                self.principal.user_id,
+                True,
             )
         )
         self.assertEqual(res_waiting["recording_state"], "waiting")
@@ -576,7 +582,12 @@ class RecordingControlBackendTests(unittest.TestCase):
         # 4. Stop recording on local-camera ONLY -> cam-1 is unaffected and continues recording
         stop_local = _run_async(
             _apply_camera_recording(
-                self.request, self.external_settings, data_adapter, "local-camera", False
+                self.request,
+                self.external_settings,
+                data_adapter,
+                "local-camera",
+                self.principal.user_id,
+                False,
             )
         )
         self.assertEqual(stop_local["recording_state"], "stopped")
@@ -605,12 +616,22 @@ class RecordingControlBackendTests(unittest.TestCase):
         # 6. Server restart & MediaMTX reset -> sync_camera_recording_paths restores DB state
         _run_async(
             _apply_camera_recording(
-                self.request, self.external_settings, data_adapter, "local-camera", False
+                self.request,
+                self.external_settings,
+                data_adapter,
+                "local-camera",
+                self.principal.user_id,
+                False,
             )
         )
         _run_async(
             _apply_camera_recording(
-                self.request, self.external_settings, data_adapter, "cam-1", True
+                self.request,
+                self.external_settings,
+                data_adapter,
+                "cam-1",
+                self.principal.user_id,
+                True,
             )
         )
         self.mediamtx.path_configs.clear()
@@ -784,6 +805,17 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
 
                 gui1.api = self._make_api_mock()
                 gui2.api = self._make_api_mock()
+                with patch(
+                    "server.desktop.admin.settings_window.list_camera_devices",
+                    return_value=["Integrated Camera"],
+                ):
+                    settings = SettingsWindow(gui1)
+                try:
+                    self.assertTrue(hasattr(settings, "local_camera_enabled"))
+                    self.assertTrue(hasattr(settings, "local_camera_device"))
+                    self.assertFalse(hasattr(settings, "btn_stop_local_camera"))
+                finally:
+                    settings.close()
                 gui1._view_mode = "grid"
                 gui2._view_mode = "grid"
                 gui1.cameras_updated(gui1.api.cameras())
@@ -850,13 +882,45 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                 self.assertFalse(local_worker.stopped)
                 self.assertEqual(gui1._views["local-camera"].status.text(), "LIVE")
 
-                gui1.btn_stop.click()
-                self._wait_tasks(gui1)
+                with patch.object(gui1.local_publisher, "stop") as stop_local:
+                    gui1.btn_stop.click()
+                    self._wait_tasks(gui1)
+                stop_local.assert_called_once_with()
                 self.assertEqual(
                     gui1._views["local-camera"].recording_status.text(), "녹화 중지"
                 )
                 self.assertEqual(
                     gui1._views["cam-1"].recording_status.text(), "녹화 중지"
+                )
+
+                gui1._set_recording_notice("전체 녹화 제어 오류: Data 호출 실패")
+                gui1._apply_recording_item(
+                    {
+                        "camera_id": "local-camera",
+                        "enabled": True,
+                        "recording_enabled": False,
+                        "recording_state": "stopped",
+                    }
+                )
+                self.assertEqual(
+                    gui1.cam_status.text(), "전체 녹화 제어 오류: Data 호출 실패"
+                )
+                gui1.select_camera("cam-1")
+                self.assertNotIn("전체 녹화 제어 오류", gui1.cam_status.text())
+
+                gui1._apply_recording_item(
+                    {
+                        "camera_id": "cam-1",
+                        "enabled": True,
+                        "recording_enabled": True,
+                        "recording_state": "error",
+                        "error_code": "MEDIA_CONTROL_UNAVAILABLE",
+                        "message": "MediaMTX 제어 API에 연결할 수 없습니다.",
+                    }
+                )
+                self.assertEqual(
+                    gui1._views["cam-1"].recording_status.toolTip(),
+                    "MEDIA_CONTROL_UNAVAILABLE · MediaMTX 제어 API에 연결할 수 없습니다.",
                 )
                 self.assertFalse(local_worker.stopped)
                 self.assertFalse(cam1_worker.stopped)

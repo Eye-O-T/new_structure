@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 import time
+from urllib.error import HTTPError
 
 from PyQt5.QtCore import QTimer, Qt, QUrl
 from PyQt5.QtGui import QDesktopServices, QPixmap
@@ -26,6 +27,12 @@ from .camera_view import CameraView
 from .session_store import WindowsSessionStore
 from .video_worker import VideoWorker
 from server.desktop.common.tasks import BackgroundTask
+from .local_camera import LocalCameraPublisher, rtsp_publish_url
+from server.operations.local_camera import (
+    load_device_setting,
+    load_local_camera_enabled,
+    publisher_status,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -81,6 +88,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._busy_recording_cameras = set()
         self._bulk_recording_busy = False
         self._camera_recordings = {}
+        self._recording_notice = None
         self._stopping = False
         self._render_count = 0
         self._render_total_ms = 0.0
@@ -95,6 +103,9 @@ class CCTVMainWindow(ReferenceWindow):
         self._monitoring = True
         super().__init__()
         self.ai_cctv_path = self.storage_root_path = str(storage_path)
+        self.local_publisher = LocalCameraPublisher(
+            self, data_root=self.storage_root_path or None
+        )
         self.setMinimumSize(960, 600)
         self.video_label.setMinimumSize(320, 180)
         self.video_grid.removeWidget(self.video_label)
@@ -262,12 +273,24 @@ class CCTVMainWindow(ReferenceWindow):
             recording_enabled=info.get("recording_enabled", False),
             busy=busy,
             error_code=info.get("last_error_code") or info.get("error_code"),
+            error_message=info.get("message"),
         )
 
     def _apply_recording_item(self, item):
         if not isinstance(item, dict) or not item.get("camera_id"):
             return
         camera_id = str(item["camera_id"])
+        added_local_camera = camera_id == "local-camera" and not any(
+            camera.get("camera_id") == camera_id for camera in self.cameras
+        )
+        if added_local_camera:
+            self.cameras.append(
+                {
+                    "camera_id": camera_id,
+                    "name": load_device_setting(self.local_publisher.data_root) or "노트북 카메라",
+                    "enabled": bool(item.get("enabled", True)),
+                }
+            )
         normalized = {
             "camera_id": camera_id,
             "enabled": bool(item.get("enabled", True)),
@@ -286,6 +309,9 @@ class CCTVMainWindow(ReferenceWindow):
                 camera["recording_last_error_code"] = normalized["last_error_code"]
         self._sync_view_recording_state(camera_id)
         self._update_recording_controls()
+        if added_local_camera:
+            self._refresh_camera_picker()
+            self._show_views()
         if camera_id == self._selected_camera_id:
             self._update_selected_camera_status_banner()
 
@@ -296,6 +322,10 @@ class CCTVMainWindow(ReferenceWindow):
         self._update_recording_controls()
 
     def _update_selected_camera_status_banner(self):
+        if self._recording_notice:
+            self.cam_status.setText(self._recording_notice)
+            self.cam_status.setToolTip(self._recording_notice)
+            return
         camera_id = self._selected_camera_id
         if not camera_id:
             return
@@ -311,23 +341,43 @@ class CCTVMainWindow(ReferenceWindow):
         self.cam_status.setText(
             f"● {_breakable_path(camera_id)} · {live_part} · {rec_label}"
         )
+        self.cam_status.setToolTip("")
+
+    def _set_recording_notice(self, message):
+        self._recording_notice = str(message) if message else None
+        if self._recording_notice:
+            self.cam_status.setText(self._recording_notice)
+            self.cam_status.setToolTip(self._recording_notice)
+        else:
+            self._update_selected_camera_status_banner()
 
     def _update_recording_controls(self):
+        local_running = (
+            publisher_status(self.local_publisher.data_root).get("status")
+            == "running"
+        )
+        local_enabled = load_local_camera_enabled(self.local_publisher.data_root)
         if self._restore_task is not None or self._bulk_recording_busy:
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(False)
             return
         available = self._available_camera_ids()
-        if not self.api or not available:
-            self.btn_start.setEnabled(not bool(self.api))
-            self.btn_stop.setEnabled(False)
+        if not self.api:
+            self.btn_start.setEnabled(True)
+            self.btn_stop.setEnabled(local_running)
+            return
+        if not available:
+            self.btn_start.setEnabled(local_enabled)
+            self.btn_stop.setEnabled(local_running)
             return
         states = [
             self._camera_recording_info(cid).get("recording_state", "stopped")
             for cid in available
         ]
-        can_start = any(state in {"stopped", "error"} for state in states)
-        can_stop = any(
+        can_start = any(state in {"stopped", "error"} for state in states) or (
+            local_enabled and not local_running
+        )
+        can_stop = local_running or any(
             state in {"recording", "waiting", "error"} for state in states
         )
         self.btn_start.setEnabled(can_start)
@@ -534,6 +584,7 @@ class CCTVMainWindow(ReferenceWindow):
     def select_camera(self, camera_id):
         if not camera_id or camera_id == self._selected_camera_id:
             return
+        self._set_recording_notice(None)
         self._selected_camera_id = camera_id
         self._refresh_camera_picker()
         self._show_views()
@@ -541,6 +592,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._update_selected_camera_status_banner()
 
     def open_single_camera(self, camera_id):
+        self._set_recording_notice(None)
         self._selected_camera_id = camera_id
         self._view_mode = "single"
         self.btn_grid.setChecked(False)
@@ -607,10 +659,17 @@ class CCTVMainWindow(ReferenceWindow):
         available = self._available_camera_ids()
         if not self._selected_camera_id and available:
             self._selected_camera_id = available[0]
+        if not available and load_local_camera_enabled(self.local_publisher.data_root):
+            self._selected_camera_id = "local-camera"
         self._monitoring = True
         self._refresh_camera_picker()
         self._show_views()
-        return bool(available)
+        local_setting = self.local_publisher.data_root
+        return (
+            bool(available)
+            or load_local_camera_enabled(local_setting)
+            or publisher_status(local_setting).get("status") == "running"
+        )
 
     def start_all_recording(self):
         if not self._ensure_logged_in_for_recording():
@@ -618,9 +677,84 @@ class CCTVMainWindow(ReferenceWindow):
         self._run_bulk_recording_action(True)
 
     def stop_all_recording(self):
+        if self.api is None and publisher_status(self.local_publisher.data_root).get("status") == "running":
+            try:
+                self.local_publisher.stop()
+            except OSError as exc:
+                self._set_recording_notice(f"로컬 카메라 송출 중지 오류: {exc}")
+            else:
+                self._set_recording_notice("로컬 카메라 송출을 중지했습니다.")
+            self._update_recording_controls()
+            return
         if not self._ensure_logged_in_for_recording():
             return
         self._run_bulk_recording_action(False)
+
+    def _start_local_camera_for_recording(self, api):
+        data_root = self.local_publisher.data_root
+        if not load_local_camera_enabled(data_root):
+            return False
+        device_name = load_device_setting(data_root)
+        if not device_name:
+            raise RuntimeError("노트북 카메라 사용이 켜져 있지만 장치가 선택되지 않았습니다.")
+        current = publisher_status(data_root)
+        if current.get("status") == "running":
+            if (
+                current.get("camera_id") == "local-camera"
+                and current.get("device_name") == device_name
+            ):
+                return False
+            self.local_publisher.stop()
+        try:
+            result = api.register_local_camera("local-camera", device_name)
+        except Exception as exc:
+            if getattr(exc, "status_code", None) != 409:
+                raise
+            api.camera(
+                "local-camera", method="PATCH", payload={"name": device_name, "enabled": True}
+            )
+            result = api.camera(
+                "local-camera", "/publish-credentials/rotate", "POST"
+            )
+        credentials = result.get("publish_credentials") or {}
+        username, password = credentials.get("username"), credentials.get("password")
+        if not username or not password:
+            raise RuntimeError("노트북 카메라 송출 계정을 발급받지 못했습니다.")
+        stream_url = rtsp_publish_url(
+            self.rtsp_host, self.rtsp_port, "local-camera", username, password
+        )
+        self.local_publisher.start(
+            device_name, stream_url, camera_id="local-camera"
+        )
+        try:
+            self._wait_for_local_camera(api)
+        except Exception:
+            self.local_publisher.stop()
+            raise
+        return True
+
+    def _wait_for_local_camera(self, api):
+        live = api.camera("local-camera", "/live?protocol=hls")
+        playlist_path = api.media_path("local-camera", live["hls_url"])
+        for _ in range(15):
+            try:
+                playlist = api.media("local-camera", playlist_path).decode("utf-8")
+                if any(
+                    line.strip() and not line.startswith("#")
+                    for line in playlist.splitlines()
+                ):
+                    return
+            except HTTPError as exc:
+                if exc.code in {401, 403}:
+                    raise RuntimeError(
+                        "노트북 카메라 영상 인증이 거부됐습니다. 송출 계정과 서버 설정을 확인하세요."
+                    ) from None
+                if exc.code not in {404, 502, 503}:
+                    raise
+            time.sleep(1)
+        raise RuntimeError(
+            "15초 안에 노트북 카메라 영상이 서버에 도착하지 않았습니다. RTSP 송출과 인증 로그를 확인하세요."
+        )
 
     def start_video(self):
         self.start_all_recording()
@@ -633,12 +767,38 @@ class CCTVMainWindow(ReferenceWindow):
             return
         api = self.api
         self._bulk_recording_busy = True
+        self._set_recording_notice(None)
         self._update_recording_controls()
         for cid in self._available_camera_ids():
             self._sync_view_recording_state(cid)
 
         def operation(_progress):
-            return api.start_all_recording() if start else api.stop_all_recording()
+            if start:
+                started_local = self._start_local_camera_for_recording(api)
+                try:
+                    return api.start_all_recording()
+                except Exception:
+                    if started_local:
+                        self.local_publisher.stop()
+                    raise
+            try:
+                payload = api.stop_all_recording()
+            except Exception as server_error:
+                try:
+                    self.local_publisher.stop()
+                except OSError as local_error:
+                    raise RuntimeError(
+                        f"서버 녹화 중지 오류: {server_error}; 로컬 카메라 중지 오류: {local_error}"
+                    ) from None
+                raise
+            try:
+                self.local_publisher.stop()
+            except OSError as local_error:
+                if isinstance(payload, dict):
+                    payload["local_camera_stop_error"] = str(local_error)
+                else:
+                    raise
+            return payload
 
         task = BackgroundTask(operation, self)
         self._recording_tasks.add(task)
@@ -646,15 +806,33 @@ class CCTVMainWindow(ReferenceWindow):
         def handle_result(payload):
             self._bulk_recording_busy = False
             items = payload.get("items", []) if isinstance(payload, dict) else []
+            local_stop_error = (
+                payload.get("local_camera_stop_error")
+                if isinstance(payload, dict)
+                else None
+            )
             self._apply_recording_items(items)
             failed_count = int(payload.get("failed", 0)) if isinstance(payload, dict) else 0
             total_count = int(payload.get("total", len(items))) if isinstance(payload, dict) else len(items)
             action_text = "녹화 시작" if start else "녹화 중지"
             if failed_count > 0:
-                self.cam_status.setText(
-                    f"전체 {action_text} 일부 실패 ({failed_count}/{total_count})"
+                failures = [
+                    f"{item.get('camera_id')}: {item.get('error_code') or 'ERROR'}"
+                    + (f" · {item['message']}" if item.get("message") else "")
+                    for item in items
+                    if isinstance(item, dict) and not item.get("ok", True)
+                ]
+                summary = f"전체 {action_text} 일부 실패 ({failed_count}/{total_count})"
+                if failures:
+                    summary += " · " + " | ".join(failures)
+                self._set_recording_notice(summary)
+            elif local_stop_error:
+                self._set_recording_notice(
+                    f"서버 녹화는 중지됐지만 로컬 카메라 종료 확인에 실패했습니다: {local_stop_error}"
                 )
             else:
+                self._recording_notice = None
+                self.cam_status.setToolTip("")
                 self.cam_status.setText(f"전체 카메라 {action_text} 적용됨")
 
         def handle_failed(message):
@@ -670,7 +848,7 @@ class CCTVMainWindow(ReferenceWindow):
                         "message": message,
                     }
                 )
-            self.cam_status.setText(f"전체 녹화 제어 오류: {message}")
+            self._set_recording_notice(f"전체 녹화 제어 오류: {message}")
 
         def handle_finished():
             self._bulk_recording_busy = False
@@ -698,6 +876,7 @@ class CCTVMainWindow(ReferenceWindow):
             return
         api = self.api
         self._busy_recording_cameras.add(camera_id)
+        self._set_recording_notice(None)
         self._sync_view_recording_state(camera_id)
 
         def operation(_progress):
@@ -712,6 +891,8 @@ class CCTVMainWindow(ReferenceWindow):
 
         def handle_result(payload):
             self._busy_recording_cameras.discard(camera_id)
+            self._recording_notice = None
+            self.cam_status.setToolTip("")
             if isinstance(payload, dict):
                 self._apply_recording_item(payload)
 
@@ -727,7 +908,7 @@ class CCTVMainWindow(ReferenceWindow):
                     "message": message,
                 }
             )
-            self.cam_status.setText(f"{camera_id} 녹화 제어 오류: {message}")
+            self._set_recording_notice(f"{camera_id} 녹화 제어 오류: {message}")
 
         def handle_finished():
             self._busy_recording_cameras.discard(camera_id)

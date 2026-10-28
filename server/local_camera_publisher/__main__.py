@@ -58,7 +58,9 @@ def _build_command(
         ]
     cmd += ["-i", f"video={device}", "-an"]
     if not explicit_dshow_mode:
-        cmd += ["-vf", f"scale={width}:{height}", "-r", str(fps)]
+        cmd += ["-vf", f"scale={width}:{height},hflip", "-r", str(fps)]
+    else:
+        cmd += ["-vf", "hflip"]
     cmd += [
         "-c:v",
         "libx264",

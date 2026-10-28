@@ -148,15 +148,26 @@ def publisher_status(data_root: Path) -> dict[str, Any]:
 def save_device_setting(data_root: Path, device_name: str) -> None:
     path = settings_path(data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"device_name": device_name}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    value = _read_json(path)
+    value["device_name"] = device_name
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load_device_setting(data_root: Path) -> str | None:
     value = _read_json(settings_path(data_root)).get("device_name")
     return value if isinstance(value, str) and value.strip() else None
+
+
+def save_local_camera_enabled(data_root: Path, enabled: bool) -> None:
+    path = settings_path(data_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = _read_json(path)
+    value["enabled"] = bool(enabled)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def load_local_camera_enabled(data_root: Path) -> bool:
+    return _read_json(settings_path(data_root)).get("enabled") is True
 
 
 def _publisher_command() -> list[str]:

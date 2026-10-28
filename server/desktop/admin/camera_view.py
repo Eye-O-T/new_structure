@@ -147,6 +147,7 @@ class CameraView(QFrame):
         recording_enabled=None,
         busy=False,
         error_code=None,
+        error_message=None,
     ):
         normalized = state if state in _RECORDING_STATE_BADGES else "error"
         self.recording_state = normalized
@@ -160,7 +161,8 @@ class CameraView(QFrame):
 
         label_text, fg_color, bg_color = _RECORDING_STATE_BADGES[normalized]
         self.recording_status.setText(label_text)
-        self.recording_status.setToolTip(str(error_code or label_text))
+        details = [str(value) for value in (error_code, error_message) if value]
+        self.recording_status.setToolTip(" · ".join(details) or label_text)
         self.recording_status.setStyleSheet(
             f"color: {fg_color}; background-color: {bg_color}; "
             f"border: 1px solid {fg_color}; border-radius: 4px; "

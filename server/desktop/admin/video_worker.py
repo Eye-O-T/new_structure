@@ -12,7 +12,7 @@ from urllib.error import HTTPError
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QImage
 
-from .api import safe_error
+from .api import ServerApiError, safe_error
 from .media import MediaBridge
 
 
@@ -57,6 +57,10 @@ def _safe_stream_error(exc):
 
 
 def _rtsp_failure_reason(exc, elapsed_ms):
+    if isinstance(exc, ServerApiError):
+        return "live API authentication rejected" if exc.status_code == 401 else "live API request failed"
+    if type(exc).__name__ == "HTTPUnauthorizedError":
+        return "RTSP authentication rejected"
     if type(exc).__name__ == "ExitError" and elapsed_ms >= 7_500:
         return "connection timeout"
     return type(exc).__name__
@@ -66,8 +70,10 @@ def _rtsp_failure_reason(exc, elapsed_ms):
 def _open_live_stream(api, camera_id, av):
     """Prefer direct RTSP and retain HLS as a compatibility fallback."""
     rtsp_started_at = time.monotonic()
+    stage = "live API request"
     try:
         live = api.camera(camera_id, "/live?protocol=rtsp")
+        stage = "RTSP connection or decode"
         with av.open(live["url"], timeout=(8, 8), options=LIVE_RTSP_OPTIONS) as stream:
             yield stream
             return
@@ -82,10 +88,16 @@ def _open_live_stream(api, camera_id, av):
                     raise CameraOfflineError("카메라 영상이 송출되지 않고 있습니다.") from None
                 raise
         elapsed_ms = (time.monotonic() - rtsp_started_at) * 1000
+        error_status = getattr(exc, "status_code", None)
+        error_code = getattr(exc, "code", None)
         LOGGER.warning(
-            "RTSP unavailable camera=%s reason=%s; using HLS fallback",
+            "RTSP unavailable camera=%s stage=%s reason=%s status=%s code=%s detail=%s; using HLS fallback",
             camera_id,
+            stage,
             _rtsp_failure_reason(exc, elapsed_ms),
+            error_status or "-",
+            error_code or "-",
+            _safe_stream_error(exc),
         )
         live = api.camera(camera_id, "/live?protocol=hls")
         with MediaBridge(api, camera_id, live["hls_url"]) as bridge:

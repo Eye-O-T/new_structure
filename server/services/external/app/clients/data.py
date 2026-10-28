@@ -278,11 +278,14 @@ class DataClient:
             json=payload,
         )
 
-    async def list_cameras(self, *, user_id: str, limit: int, offset: int) -> Any:
+    async def list_cameras(self, *, user_id: str | None, limit: int, offset: int) -> Any:
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if user_id is not None:
+            params["user_id"] = user_id
         return await self._request(
             "GET",
             "cameras",
-            params={"user_id": user_id, "limit": limit, "offset": offset},
+            params=params,
         )
 
     async def create_camera(self, payload: dict[str, Any]) -> dict[str, Any]:

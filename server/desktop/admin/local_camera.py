@@ -69,6 +69,7 @@ class LocalCameraPublisher(QObject):
             self.failure_message = str(exc)
             self.state_changed.emit("failed")
             raise
+        self.state_changed.emit("running")
 
     def stop(self):
         stop_publisher(self.data_root)

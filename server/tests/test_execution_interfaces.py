@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,8 +14,10 @@ from server.operations.local_camera import (
     _pid_running,
     error_state_path,
     load_device_setting,
+    load_local_camera_enabled,
     publisher_status,
     save_device_setting,
+    save_local_camera_enabled,
     start_publisher,
 )
 
@@ -24,12 +27,22 @@ class ExecutionInterfaceTests(unittest.TestCase):
         self.assertIn("server.host_helper", desktop_command("host_helper"))
         self.assertIn("server.local_camera_publisher", desktop_command("local_camera"))
 
-    def test_local_camera_setting_contains_only_the_device_name(self):
+    def test_local_camera_setting_persists_device_and_use_option_without_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             save_device_setting(root, "USB Camera")
+            save_local_camera_enabled(root, True)
+            value = json.loads(
+                (root / "config" / "local-camera.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(value, {"device_name": "USB Camera", "enabled": True})
             self.assertEqual(load_device_setting(root), "USB Camera")
-            self.assertNotIn("password", (root / "config" / "local-camera.json").read_text(encoding="utf-8"))
+            self.assertTrue(load_local_camera_enabled(root))
+            self.assertNotIn("password", value)
+
+            save_local_camera_enabled(root, False)
+            self.assertFalse(load_local_camera_enabled(root))
+            self.assertEqual(load_device_setting(root), "USB Camera")
 
     def test_stale_local_camera_state_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -96,9 +109,12 @@ class ExecutionInterfaceTests(unittest.TestCase):
             explicit_dshow_mode=False,
         )
         self.assertIn("-video_size", explicit)
-        self.assertNotIn("-vf", explicit)
+        self.assertEqual(explicit[explicit.index("-vf") + 1], "hflip")
         self.assertNotIn("-video_size", fallback)
         self.assertIn("-vf", fallback)
+        self.assertEqual(
+            fallback[fallback.index("-vf") + 1], "scale=1280:720,hflip"
+        )
 
     def test_duplicate_local_camera_start_reuses_the_running_process(self):
         expected = {

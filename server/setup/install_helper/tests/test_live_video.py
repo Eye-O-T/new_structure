@@ -16,7 +16,13 @@ from server.desktop.admin import video_worker as video
 from server.desktop.admin.api import DesktopApi
 from server.desktop.admin.local_camera import LocalCameraPublisher
 from server.desktop.admin.media import MediaBridge, hls_resource_type
-from server.desktop.admin.settings_window import SettingsWindow
+from server.edge_onboarding.server_api import ServerApiError
+from server.operations.local_camera import (
+    load_device_setting,
+    load_local_camera_enabled,
+    save_device_setting,
+    save_local_camera_enabled,
+)
 
 
 class Clock:
@@ -156,28 +162,36 @@ class PlaybackTests(unittest.TestCase):
             fps=30,
         )
 
-    def test_reopened_settings_reuses_running_local_camera_without_rotating_credentials(self):
-        settings = Mock()
-        settings.api = Mock()
-        settings.local_publisher.data_root = Path("unused")
-        settings.local_publisher.camera_id = ""
-        settings.parent.return_value.cameras = [{"camera_id": "local-camera"}]
-        settings.parent.return_value.rtsp_port = 8554
-        ready = Mock()
-        running = {
-            "status": "running",
-            "camera_id": "local-camera",
-            "device_name": "720p HD Camera",
-        }
+    def test_local_camera_enabled_setting_persists_with_device_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_root = Path(directory)
 
-        with patch("server.desktop.admin.settings_window.publisher_status", return_value=running):
-            SettingsWindow.start_local_camera(settings, "720p HD Camera", on_ready=ready)
+            self.assertFalse(load_local_camera_enabled(data_root))
+            save_device_setting(data_root, "Integrated Camera")
+            save_local_camera_enabled(data_root, True)
 
-        ready.assert_called_once_with()
-        settings.execute.assert_not_called()
+            self.assertTrue(load_local_camera_enabled(data_root))
+            self.assertEqual(load_device_setting(data_root), "Integrated Camera")
+
+            save_local_camera_enabled(data_root, False)
+            self.assertFalse(load_local_camera_enabled(data_root))
+            self.assertEqual(load_device_setting(data_root), "Integrated Camera")
 
 
 class StreamDiagnosticsTests(unittest.TestCase):
+    def test_rtsp_failures_identify_auth_and_api_stages(self):
+        unauthorized = type("HTTPUnauthorizedError", (OSError,), {})()
+        self.assertEqual(
+            video._rtsp_failure_reason(unauthorized, 10),
+            "RTSP authentication rejected",
+        )
+        self.assertEqual(
+            video._rtsp_failure_reason(
+                ServerApiError(401, "AUTH_REQUIRED", "Please log in."), 10
+            ),
+            "live API authentication rejected",
+        )
+
     def test_unpublished_camera_skips_hls_bridge_and_fallback_warning(self):
         api = Mock()
         api.camera.side_effect = [

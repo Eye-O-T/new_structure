@@ -157,7 +157,7 @@ async def sync_camera_recording_paths(
 ) -> dict[str, int]:
     """DB에 저장된 카메라별 녹화 희망 상태를 MediaMTX 경로 설정과 동기화한다."""
 
-    page = await data.list_cameras(limit=200, offset=0)
+    page = await data.list_cameras(user_id=None, limit=200, offset=0)
     items = page.get("items", []) if isinstance(page, dict) else []
     cameras_list = [item for item in items if isinstance(item, dict)]
     if not cameras_list:
@@ -198,12 +198,13 @@ async def _apply_camera_recording(
     settings: Settings,
     data: DataClient,
     camera_id: str,
+    user_id: str,
     desired_recording: bool,
 ) -> dict[str, Any]:
     if not CAMERA_ID_PATTERN.fullmatch(camera_id):
         raise HTTPException(status_code=400, detail="Invalid camera ID")
     async with camera_lifecycle_lock(request, camera_id):
-        camera = await data.get_camera(camera_id)
+        camera = await data.get_camera(camera_id, user_id=user_id)
         if desired_recording and not bool(camera.get("enabled", True)):
             raise DataConflict(
                 "Disabled cameras cannot start recording.",
@@ -231,7 +232,7 @@ async def _apply_camera_recording(
             raise
         finally:
             await client.close()
-        refreshed = await data.get_camera(camera_id)
+        refreshed = await data.get_camera(camera_id, user_id=user_id)
         return _compute_recording_status(refreshed, path_status)
 
 
@@ -239,10 +240,12 @@ async def _apply_bulk_camera_recording(
     request: Request,
     settings: Settings,
     data: DataClient,
-    _principal: Principal,
+    principal: Principal,
     desired_recording: bool,
 ) -> dict[str, Any]:
-    page = await data.list_cameras(limit=200, offset=0)
+    page = await data.list_cameras(
+        user_id=principal.user_id, limit=200, offset=0
+    )
     raw_items = page.get("items", []) if isinstance(page, dict) else []
     active_cameras = [
         item
@@ -256,7 +259,12 @@ async def _apply_bulk_camera_recording(
         camera_id = str(camera["camera_id"])
         try:
             status_payload = await _apply_camera_recording(
-                request, settings, data, camera_id, desired_recording
+                request,
+                settings,
+                data,
+                camera_id,
+                principal.user_id,
+                desired_recording,
             )
             succeeded += 1
             results.append(
@@ -824,12 +832,12 @@ async def get_camera_recording(
 async def start_camera_recording(
     request: Request,
     camera_id: str,
-    _: Principal = Depends(require_admin),
+    principal: Principal = Depends(require_admin),
     settings: Settings = Depends(get_settings_dependency),
     data: DataClient = Depends(get_data_client),
 ) -> Any:
     return await _apply_camera_recording(
-        request, settings, data, camera_id, True
+        request, settings, data, camera_id, principal.user_id, True
     )
 
 
@@ -840,12 +848,12 @@ async def start_camera_recording(
 async def stop_camera_recording(
     request: Request,
     camera_id: str,
-    _: Principal = Depends(require_admin),
+    principal: Principal = Depends(require_admin),
     settings: Settings = Depends(get_settings_dependency),
     data: DataClient = Depends(get_data_client),
 ) -> Any:
     return await _apply_camera_recording(
-        request, settings, data, camera_id, False
+        request, settings, data, camera_id, principal.user_id, False
     )
 
 
