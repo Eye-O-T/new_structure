@@ -3,6 +3,7 @@
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from queue import Empty, Queue
@@ -210,6 +211,29 @@ class StreamDiagnosticsTests(unittest.TestCase):
                 pass
 
         api.media.assert_called_once_with("cam-001", "/hls/cam-001/index.m3u8")
+        bridge.assert_not_called()
+        warning.assert_not_called()
+
+    def test_requested_stop_does_not_log_rtsp_failure_or_start_hls_fallback(self):
+        api = Mock()
+        api.camera.return_value = {"url": "rtsp://example.test/cam-001"}
+        stop_event = threading.Event()
+        av_module = Mock()
+
+        def fail_open(*_args, **_kwargs):
+            stop_event.set()
+            raise OSError("socket closed")
+
+        av_module.open.side_effect = fail_open
+        with patch.object(video, "MediaBridge") as bridge, patch.object(
+            video.LOGGER, "warning"
+        ) as warning, self.assertRaisesRegex(OSError, "socket closed"):
+            with video._open_live_stream(
+                api, "cam-001", av_module, stop_event=stop_event
+            ):
+                pass
+
+        self.assertEqual(api.camera.call_count, 1)
         bridge.assert_not_called()
         warning.assert_not_called()
 

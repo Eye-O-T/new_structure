@@ -67,8 +67,10 @@ def _rtsp_failure_reason(exc, elapsed_ms):
 
 
 @contextmanager
-def _open_live_stream(api, camera_id, av):
+def _open_live_stream(api, camera_id, av, *, stop_event=None):
     """Prefer direct RTSP and retain HLS as a compatibility fallback."""
+    if stop_event is not None and stop_event.is_set():
+        raise InterruptedError("Stream stop requested")
     rtsp_started_at = time.monotonic()
     stage = "live API request"
     try:
@@ -78,6 +80,8 @@ def _open_live_stream(api, camera_id, av):
             yield stream
             return
     except Exception as exc:
+        if stop_event is not None and stop_event.is_set():
+            raise
         if type(exc).__name__ == "HTTPNotFoundError":
             live = api.camera(camera_id, "/live?protocol=hls")
             path = api.media_path(camera_id, live["hls_url"])
@@ -308,7 +312,9 @@ class VideoWorker(QThread):
                         break
                 if not offline:
                     self.loading_ready.emit("서버 영상 연결 중...")
-                with _open_live_stream(api, camera_id, av) as stream:
+                with _open_live_stream(
+                    api, camera_id, av, stop_event=self._stop
+                ) as stream:
                     offline = False
                     for frame in stream.decode(video=0):
                         if self._stop.is_set():

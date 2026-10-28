@@ -200,6 +200,17 @@ class CameraView(QFrame):
             "color: #ef4444; font-size: 13px; font-weight: bold; border: none;"
         )
 
+    def show_stopped(self, message):
+        self._frame = None
+        self._objects = None
+        self._objects_received_at = 0.0
+        self.surface.setPixmap(QPixmap())
+        self.surface.setText(message)
+        self.surface.setStyleSheet(
+            "color: #94a3b8; font-size: 13px; font-weight: bold; border: none;"
+        )
+        self.set_status("중지됨", "#94a3b8")
+
     def set_frame(self, frame):
         self._frame = QImage(frame)
         self.surface.setStyleSheet(

@@ -94,6 +94,8 @@ class CCTVMainWindow(ReferenceWindow):
         self._render_total_ms = 0.0
         self._last_render_log = time.monotonic()
         self._workers = {}
+        self._local_camera_preview_requested = False
+        self._local_camera_stopped_message = "노트북 카메라 송출이 중지되어 있습니다."
         self._views = {}
         self._camera_metrics = {}
         self._camera_events = {}
@@ -105,6 +107,12 @@ class CCTVMainWindow(ReferenceWindow):
         self.ai_cctv_path = self.storage_root_path = str(storage_path)
         self.local_publisher = LocalCameraPublisher(
             self, data_root=self.storage_root_path or None
+        )
+        publisher = publisher_status(self.local_publisher.data_root)
+        self._local_camera_preview_requested = (
+            load_local_camera_enabled(self.local_publisher.data_root)
+            and publisher.get("status") == "running"
+            and publisher.get("camera_id") == "local-camera"
         )
         self.setMinimumSize(960, 600)
         self.video_label.setMinimumSize(320, 180)
@@ -432,6 +440,16 @@ class CCTVMainWindow(ReferenceWindow):
             view.set_overlay_enabled(self._overlay_enabled)
             view.set_selected(camera_id == self._selected_camera_id)
             self._sync_view_recording_state(camera_id)
+            if (
+                camera_id == "local-camera"
+                and not self._local_camera_preview_requested
+            ):
+                message = (
+                    "노트북 카메라 사용이 꺼져 있습니다."
+                    if not load_local_camera_enabled(self.local_publisher.data_root)
+                    else self._local_camera_stopped_message
+                )
+                view.show_stopped(message)
             if self._view_mode == "grid":
                 self.video_grid.addWidget(view, index // 2, index % 2)
             else:
@@ -447,15 +465,59 @@ class CCTVMainWindow(ReferenceWindow):
     def _sync_workers(self, camera_ids):
         wanted = set(camera_ids)
         for camera_id, worker in list(self._workers.items()):
-            if camera_id not in wanted:
+            if camera_id not in wanted or not self._camera_stream_requested(camera_id):
                 worker.stop()
         if not self._monitoring or not self.api or self._closing or self._stopping:
             return
         for camera_id in camera_ids:
-            if camera_id not in self._workers:
+            if (
+                camera_id not in self._workers
+                and self._camera_stream_requested(camera_id)
+            ):
                 self._start_camera_worker(camera_id)
 
+    def _camera_stream_requested(self, camera_id):
+        return (
+            camera_id != "local-camera"
+            or self._local_camera_preview_requested
+        )
+
+    def pause_local_camera_preview(self, message="노트북 카메라 송출이 중지되어 있습니다."):
+        self._local_camera_preview_requested = False
+        worker = self._workers.get("local-camera")
+        if worker is not None:
+            worker.stop()
+        self._set_local_camera_stopped_message(message)
+
+    def _set_local_camera_stopped_message(self, message):
+        self._local_camera_stopped_message = message
+        view = self._views.get("local-camera")
+        if view is not None:
+            view.show_stopped(message)
+
+    def _resume_local_camera_preview(self):
+        data_root = self.local_publisher.data_root
+        if (
+            not load_local_camera_enabled(data_root)
+            or publisher_status(data_root).get("status") != "running"
+        ):
+            return
+        self._local_camera_preview_requested = True
+        self._local_camera_stopped_message = ""
+        if not any(item.get("camera_id") == "local-camera" for item in self.cameras):
+            self.cameras.append(
+                {
+                    "camera_id": "local-camera",
+                    "name": load_device_setting(data_root) or "노트북 카메라",
+                    "enabled": True,
+                }
+            )
+        self._refresh_camera_picker()
+        self._show_views()
+
     def _start_camera_worker(self, camera_id):
+        if not self._camera_stream_requested(camera_id):
+            return
         worker = VideoWorker(source=(self.api, camera_id))
         self._workers[camera_id] = worker
         worker.frame_ready.connect(
@@ -496,9 +558,15 @@ class CCTVMainWindow(ReferenceWindow):
     def _is_current_worker(self, camera_id, worker):
         return self._workers.get(camera_id) is worker
 
+    def _accept_worker_data(self, camera_id, worker):
+        return self._is_current_worker(camera_id, worker) and (
+            self._camera_stream_requested(camera_id)
+            and worker.running
+        )
+
     def _on_frame(self, camera_id, worker, frame):
         try:
-            if self._is_current_worker(camera_id, worker) and not self._stopping:
+            if self._accept_worker_data(camera_id, worker) and not self._stopping:
                 view = self._views.get(camera_id)
                 if view:
                     view.set_frame(frame)
@@ -508,21 +576,21 @@ class CCTVMainWindow(ReferenceWindow):
             worker.acknowledge_frame()
 
     def _on_objects(self, camera_id, worker, payload):
-        if not self._is_current_worker(camera_id, worker):
+        if not self._accept_worker_data(camera_id, worker):
             return
         view = self._views.get(camera_id)
         if view:
             view.set_objects(payload)
 
     def _on_metrics(self, camera_id, worker, metrics):
-        if not self._is_current_worker(camera_id, worker):
+        if not self._accept_worker_data(camera_id, worker):
             return
         self._camera_metrics[camera_id] = metrics
         if camera_id == self._selected_camera_id:
             self._render_selected_summary()
 
     def _on_event(self, camera_id, worker, event):
-        if not self._is_current_worker(camera_id, worker):
+        if not self._accept_worker_data(camera_id, worker):
             return
         event = {**event, "camera_id": camera_id}
         self._camera_events.setdefault(camera_id, []).insert(0, event)
@@ -535,7 +603,7 @@ class CCTVMainWindow(ReferenceWindow):
             self._render_selected_summary()
 
     def _on_loading(self, camera_id, worker, message):
-        if self._is_current_worker(camera_id, worker):
+        if self._accept_worker_data(camera_id, worker):
             view = self._views.get(camera_id)
             if view:
                 view.show_loading(message)
@@ -548,13 +616,17 @@ class CCTVMainWindow(ReferenceWindow):
         worker.deleteLater()
         view = self._views.get(camera_id)
         if view and not self._stopping:
-            view.set_status("영상 연결 재시도 대기", "#facc15")
+            if camera_id == "local-camera" and not self._local_camera_preview_requested:
+                view.show_stopped(self._local_camera_stopped_message)
+            else:
+                view.set_status("영상 연결 재시도 대기", "#facc15")
         if self._stopping and not self._workers:
             self._finish_stopping()
         elif (
             self._monitoring
             and self.api
             and not self._closing
+            and self._camera_stream_requested(camera_id)
             and camera_id in self._display_ids()
         ):
             # Do not leave a tile blank when a deselected worker finishes after
@@ -678,13 +750,42 @@ class CCTVMainWindow(ReferenceWindow):
 
     def stop_all_recording(self):
         if self.api is None and publisher_status(self.local_publisher.data_root).get("status") == "running":
-            try:
-                self.local_publisher.stop()
-            except OSError as exc:
-                self._set_recording_notice(f"로컬 카메라 송출 중지 오류: {exc}")
-            else:
-                self._set_recording_notice("로컬 카메라 송출을 중지했습니다.")
+            self.pause_local_camera_preview("노트북 카메라 송출을 중지하는 중입니다.")
+            self._bulk_recording_busy = True
             self._update_recording_controls()
+            task = BackgroundTask(
+                lambda _progress: self.local_publisher.stop(), self
+            )
+            self._recording_tasks.add(task)
+            task.result.connect(
+                lambda _result: (
+                    self._set_local_camera_stopped_message(
+                        "노트북 카메라 송출이 중지되었습니다."
+                    ),
+                    self._set_recording_notice("노트북 카메라 송출을 중지했습니다."),
+                )
+            )
+            task.failed.connect(
+                lambda message: (
+                    self._set_local_camera_stopped_message(
+                        f"로컬 카메라 중지 확인 실패: {message}"
+                    ),
+                    self._set_recording_notice(
+                        f"로컬 카메라 송출 중지 오류: {message}"
+                    ),
+                )
+            )
+
+            def local_stop_finished():
+                self._bulk_recording_busy = False
+                self._recording_tasks.discard(task)
+                self._update_recording_controls()
+                task.deleteLater()
+                if self._closing and not self._recording_tasks and not self._workers:
+                    QTimer.singleShot(0, self.close)
+
+            task.finished.connect(local_stop_finished)
+            task.start()
             return
         if not self._ensure_logged_in_for_recording():
             return
@@ -765,6 +866,10 @@ class CCTVMainWindow(ReferenceWindow):
     def _run_bulk_recording_action(self, start: bool):
         if not self.api or self._bulk_recording_busy:
             return
+        if not start:
+            self.pause_local_camera_preview(
+                "전체 녹화 중지에 따라 노트북 카메라를 중지하는 중입니다."
+            )
         api = self.api
         self._bulk_recording_busy = True
         self._set_recording_notice(None)
@@ -781,23 +886,26 @@ class CCTVMainWindow(ReferenceWindow):
                     if started_local:
                         self.local_publisher.stop()
                     raise
+            local_error = None
+            try:
+                self.local_publisher.stop()
+            except OSError as exc:
+                local_error = str(exc)
             try:
                 payload = api.stop_all_recording()
             except Exception as server_error:
-                try:
-                    self.local_publisher.stop()
-                except OSError as local_error:
+                if local_error:
                     raise RuntimeError(
                         f"서버 녹화 중지 오류: {server_error}; 로컬 카메라 중지 오류: {local_error}"
                     ) from None
                 raise
-            try:
-                self.local_publisher.stop()
-            except OSError as local_error:
+            if local_error:
                 if isinstance(payload, dict):
-                    payload["local_camera_stop_error"] = str(local_error)
+                    payload["local_camera_stop_error"] = local_error
                 else:
-                    raise
+                    raise RuntimeError(
+                        f"로컬 카메라 중지 오류: {local_error}"
+                    ) from None
             return payload
 
         task = BackgroundTask(operation, self)
@@ -805,12 +913,20 @@ class CCTVMainWindow(ReferenceWindow):
 
         def handle_result(payload):
             self._bulk_recording_busy = False
+            if start:
+                self._resume_local_camera_preview()
             items = payload.get("items", []) if isinstance(payload, dict) else []
             local_stop_error = (
                 payload.get("local_camera_stop_error")
                 if isinstance(payload, dict)
                 else None
             )
+            if not start:
+                self._set_local_camera_stopped_message(
+                    f"로컬 카메라 중지 확인 실패: {local_stop_error}"
+                    if local_stop_error
+                    else "전체 녹화 중지에 따라 노트북 카메라 송출이 중지되었습니다."
+                )
             self._apply_recording_items(items)
             failed_count = int(payload.get("failed", 0)) if isinstance(payload, dict) else 0
             total_count = int(payload.get("total", len(items))) if isinstance(payload, dict) else len(items)
@@ -837,6 +953,15 @@ class CCTVMainWindow(ReferenceWindow):
 
         def handle_failed(message):
             self._bulk_recording_busy = False
+            if start:
+                self._resume_local_camera_preview()
+            else:
+                local_stop_error = "로컬 카메라 중지 오류:" in message
+                self._set_local_camera_stopped_message(
+                    f"로컬 카메라 중지 확인 실패: {message}"
+                    if local_stop_error
+                    else "전체 녹화 중지에 따라 노트북 카메라 송출이 중지되었습니다."
+                )
             for cid in self._available_camera_ids():
                 self._apply_recording_item(
                     {

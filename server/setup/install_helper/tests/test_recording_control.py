@@ -792,7 +792,7 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
 
         with patch(
             "server.desktop.admin.application.VideoWorker", side_effect=_DummyWorker
-        ), patch(
+        ) as worker_factory, patch(
             "server.desktop.admin.application.BackgroundTask", side_effect=_SyncTask
         ), patch(
             "server.desktop.admin.application.WindowsSessionStore", return_value=None
@@ -805,6 +805,7 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
 
                 gui1.api = self._make_api_mock()
                 gui2.api = self._make_api_mock()
+                gui1._local_camera_preview_requested = True
                 with patch(
                     "server.desktop.admin.settings_window.list_camera_devices",
                     return_value=["Integrated Camera"],
@@ -886,12 +887,26 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                     gui1.btn_stop.click()
                     self._wait_tasks(gui1)
                 stop_local.assert_called_once_with()
+                self.assertFalse(gui1._local_camera_preview_requested)
+                self.assertTrue(local_worker.stopped)
                 self.assertEqual(
                     gui1._views["local-camera"].recording_status.text(), "녹화 중지"
                 )
                 self.assertEqual(
                     gui1._views["cam-1"].recording_status.text(), "녹화 중지"
                 )
+                gui1._on_event(
+                    "local-camera",
+                    local_worker,
+                    {"type": "network_failure", "message": "3초 후 재접속합니다."},
+                )
+                self.assertEqual(gui1._views["local-camera"].status.text(), "중지됨")
+                self.assertIsNone(gui1._views["local-camera"]._frame)
+                worker_count = worker_factory.call_count
+                gui1._on_worker_finished("local-camera", local_worker)
+                self.assertNotIn("local-camera", gui1._workers)
+                self.assertEqual(worker_factory.call_count, worker_count)
+                self.assertEqual(gui1._views["local-camera"].status.text(), "중지됨")
 
                 gui1._set_recording_notice("전체 녹화 제어 오류: Data 호출 실패")
                 gui1._apply_recording_item(
@@ -922,9 +937,9 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                     gui1._views["cam-1"].recording_status.toolTip(),
                     "MEDIA_CONTROL_UNAVAILABLE · MediaMTX 제어 API에 연결할 수 없습니다.",
                 )
-                self.assertFalse(local_worker.stopped)
+                self.assertTrue(local_worker.stopped)
                 self.assertFalse(cam1_worker.stopped)
-                self.assertEqual(gui1._views["local-camera"].status.text(), "LIVE")
+                self.assertEqual(gui1._views["local-camera"].status.text(), "중지됨")
 
                 gui1._views["cam-1"].set_recording_state(
                     "error", error_code="MEDIA_CONTROL_UNAVAILABLE"

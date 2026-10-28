@@ -291,37 +291,66 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             return
         local_enabled = self.local_camera_enabled.isChecked()
         local_device = self.local_camera_device.currentText().strip()
+        selection = self.camera.currentData()
+        if selection and selection[0] == "local":
+            local_device = str(selection[1]).strip()
+            self.local_camera_device.setCurrentText(local_device)
         if local_enabled and not local_device:
             self.message.setText("사용할 노트북 카메라 장치를 선택하세요.")
             return
         current_publisher = publisher_status(self.local_publisher.data_root)
+        previous_device = load_device_setting(self.local_publisher.data_root)
         save_local_camera_enabled(self.local_publisher.data_root, local_enabled)
         if local_device:
             save_device_setting(self.local_publisher.data_root, local_device)
-        if (
+        owner = self.parent()
+        publisher_device_changed = (
             current_publisher.get("status") == "running"
-            and (
-                not local_enabled
-                or current_publisher.get("device_name") != local_device
-            )
-        ):
-            try:
-                self.local_publisher.stop()
-            except OSError as exc:
-                self.message.setText(
-                    f"노트북 카메라를 중지하지 못했습니다. 설정은 저장됐습니다: {exc}"
+            and current_publisher.get("device_name") != local_device
+        )
+        selected_device_changed = (
+            previous_device is not None
+            and previous_device != local_device
+            and bool(getattr(owner, "_local_camera_preview_requested", False))
+        )
+        should_pause_preview = (
+            not local_enabled
+            or publisher_device_changed
+            or selected_device_changed
+        )
+        should_stop_publisher = current_publisher.get("status") == "running" and (
+            not local_enabled or publisher_device_changed
+        )
+        if should_pause_preview:
+            pause_preview = getattr(owner, "pause_local_camera_preview", None)
+            if pause_preview is not None:
+                pause_preview(
+                    "노트북 카메라 설정 변경에 따라 기존 송출을 중지하는 중입니다."
                 )
-                return
-        selection = self.camera.currentData()
+            if should_stop_publisher:
+                try:
+                    self.local_publisher.stop()
+                except OSError as exc:
+                    set_stopped_message = getattr(
+                        owner, "_set_local_camera_stopped_message", None
+                    )
+                    if set_stopped_message is not None:
+                        set_stopped_message(f"로컬 카메라 중지 확인 실패: {exc}")
+                    self.message.setText(
+                        f"노트북 카메라를 중지하지 못했습니다. 설정은 저장됐습니다: {exc}"
+                    )
+                    return
+            set_stopped_message = getattr(
+                owner, "_set_local_camera_stopped_message", None
+            )
+            if set_stopped_message is not None:
+                set_stopped_message("노트북 카메라 설정 변경으로 미리보기가 중지되었습니다.")
         if not self.api or not selection:
             self.message.setText("로그인 후 카메라를 선택하세요.")
             return
         kind, value = selection
         self.bounding_boxes_enabled = self.bounding_box_checkbox.isChecked()
         if kind == "local":
-            if value != local_device:
-                self.local_camera_device.setCurrentText(value)
-                save_device_setting(self.local_publisher.data_root, value)
             self.selected_source = (self.api, "local-camera")
             self.accept()
             return
