@@ -91,8 +91,8 @@ class CamerasRepositoryMixin:
                 INSERT INTO cameras(
                     camera_id, name, stream_path, edge_device_id, source_url,
                     enabled, recording_enabled, recording_last_error_code,
-                    status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    stream_requested, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     values["camera_id"],
@@ -101,8 +101,9 @@ class CamerasRepositoryMixin:
                     edge_device_id,
                     values.get("source_url"),
                     int(values.get("enabled", True)),
-                    int(values.get("recording_enabled", False)),
+                    int(bool(values.get("enabled", True)) and bool(values.get("recording_enabled", False))),
                     values.get("recording_last_error_code"),
+                    int(bool(values.get("enabled", True)) and bool(values.get("recording_enabled", False))),
                     values.get("status", "offline"),
                     now,
                     now,
@@ -208,6 +209,7 @@ class CamerasRepositoryMixin:
             "edge_mac_address",
             "source_url",
             "enabled",
+            "stream_requested",
             "recording_enabled",
             "recording_last_error_code",
             "status",
@@ -215,17 +217,27 @@ class CamerasRepositoryMixin:
         changes = {key: value for key, value in values.items() if key in allowed}
         if "enabled" in changes:
             changes["enabled"] = int(changes["enabled"])
-        if "recording_enabled" in changes:
-            changes["recording_enabled"] = int(changes["recording_enabled"])
         now = _now()
         changes["updated_at"] = now
-        assignments = ", ".join(f"{column} = ?" for column in changes)
         with self.database.transaction() as connection:
             existing = connection.execute(
                 "SELECT * FROM cameras WHERE camera_id = ?", (camera_id,)
             ).fetchone()
             if existing is None:
                 return None
+            desired_recording = None
+            if changes.get("enabled") == 0:
+                desired_recording = False
+            elif "recording_enabled" in values:
+                desired_recording = bool(values["recording_enabled"])
+            elif "stream_requested" in values:
+                desired_recording = bool(values["stream_requested"])
+            if desired_recording is not None:
+                changes["recording_enabled"] = int(desired_recording)
+                changes["stream_requested"] = int(desired_recording)
+            if "enabled" in changes:
+                changes["enabled"] = int(changes["enabled"])
+            assignments = ", ".join(f"{column} = ?" for column in changes)
             if (
                 values.get("enabled") is True
                 and not bool(existing["enabled"])

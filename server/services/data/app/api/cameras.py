@@ -101,6 +101,7 @@ def enabled_cameras(
     items = [
         _with_recording_file_state(item, settings)
         for item in repository.list_cameras(200, 0, enabled_only=True, user_id=user_id)
+        if bool(item.get("stream_requested", True))
     ]
     return {"items": items}
 

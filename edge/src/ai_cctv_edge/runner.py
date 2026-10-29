@@ -1,4 +1,4 @@
-# Edge의 실행 관리자: 카메라 캡처, 중앙 송출, 상태 기록, 오래된 백업 정리를 조정한다.
+﻿# Edge의 실행 관리자: 카메라 캡처, 중앙 송출, 상태 기록, 오래된 백업 정리를 조정한다.
 # 중앙 연결이 끊겨도 캡처와 로컬 백업은 계속하고, 송출 프로세스만 재시작한다.
 from __future__ import annotations
 
@@ -16,19 +16,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import EdgeConfig, write_atomic
+from .capture import GstCapture
 from .monitoring import CameraInputWatchdog
-from .pipeline import (
-    build_gstreamer_command,
-    daily_backup_directory,
-    redacted_command,
-    render_edge_mediamtx_config,
-)
+from .pipeline import render_edge_mediamtx_config
 from .retention import enforce_retention
 from .state import (
     EventJournal,
     ProfileRequestStore,
     ProfileSelectionStore,
     RuntimeStatusStore,
+    CaptureControlStore,
     default_runtime_root,
     default_state_root,
     utc_timestamp,
@@ -70,7 +67,7 @@ class EdgeRunner:
         self.stop_event = threading.Event()
         self.reload_event = threading.Event()
         self.children: list[subprocess.Popen] = []
-        self.capture: subprocess.Popen | None = None
+        self.capture: GstCapture | None = None
         self.publisher: subprocess.Popen | None = None
         self.publisher_restart_at = 0.0
         self.publisher_started_at = 0.0
@@ -83,13 +80,12 @@ class EdgeRunner:
         self.status_store = RuntimeStatusStore(self.state_root)
         self.selection_store = ProfileSelectionStore(self.state_root)
         self.request_store = ProfileRequestStore(self.runtime_root)
+        self.capture_control_store = CaptureControlStore(self.state_root)
+        self.capture_control = self.capture_control_store.read()
         self.events = EventJournal(self.config.camera_id, self.state_root)
         self.camera_watchdog = CameraInputWatchdog(
             self.config.monitoring.frame_timeout_seconds
         )
-        self.active_backup_dir: Path | None = None
-        self.active_segment_prefix = ""
-        self._last_activity: tuple[str, int, int] | None = None
         self.lock_handle = None
 
     # Linux에서 같은 카메라의 중복 실행을 막고 제어 서비스가 확인할 소유자를 기록한다.
@@ -219,6 +215,8 @@ class EdgeRunner:
             "camera_input": (
                 "offline" if capture_stopped else self.camera_watchdog.status
             ),
+            "stream_requested": self.capture_control["stream_enabled"],
+            "recording_requested": self.capture_control["recording_enabled"],
             "current_video_profile": self.config.video.profile,
             "profile_generation": self.profile_generation,
             "supported_video_profiles": list(self.config.video.supported_profiles),
@@ -245,15 +243,19 @@ class EdgeRunner:
             time.sleep(1)
 
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-        self.active_backup_dir = daily_backup_directory(self.config, timestamp[:8])
-        self.active_segment_prefix = timestamp
-        self._last_activity = None
         self.camera_watchdog.arm()
-        pipeline = build_gstreamer_command(self.config, timestamp)
-        LOGGER.info("starting pipeline: %s", redacted_command(pipeline))
-        self.capture = self._spawn(pipeline)
+        self.capture_control = self.capture_control_store.read()
+        self.capture = GstCapture(
+            self.config,
+            timestamp,
+            recording_enabled=self.capture_control["recording_enabled"],
+            stream_enabled=self.capture_control["stream_enabled"],
+        )
         self.children.append(self.capture)
-        if self.config.rtsp.mode == "central_publish":
+        if (
+            self.config.rtsp.mode == "central_publish"
+            and self.capture_control["stream_enabled"]
+        ):
             self._try_start_publisher()
         self._write_status("starting")
 
@@ -327,6 +329,11 @@ class EdgeRunner:
         # 재접속 간격을 최대 30초까지 늘려 장애 중 반복 접속으로 부하가 커지지 않게 한다.
         if self.config.rtsp.mode != "central_publish":
             return
+        if not self.capture_control["stream_enabled"]:
+            if self.publisher is not None:
+                self._stop_publisher()
+            self.central_connection_status = "unknown"
+            return
         now = time.monotonic()
         if self.publisher is not None and self.publisher.poll() is None:
             self.publisher_delay = 1.0
@@ -345,32 +352,41 @@ class EdgeRunner:
         if now >= self.publisher_restart_at:
             self._try_start_publisher(now)
 
-    # 현재 캡처의 가장 최근 세그먼트 이름·크기·수정 시각을 활동 표식으로 반환한다.
-    def _recording_activity(self) -> tuple[str, int, int] | None:
-        if self.active_backup_dir is None:
-            return None
-        newest: tuple[str, int, int] | None = None
+    def _stop_publisher(self) -> None:
+        publisher = self.publisher
+        self.publisher = None
+        if publisher is None or publisher.poll() is not None:
+            return
         try:
-            paths = self.active_backup_dir.glob(f"{self.active_segment_prefix}_*.ts")
-            for path in paths:
-                try:
-                    stat = path.stat()
-                except FileNotFoundError:
-                    continue
-                if stat.st_size <= 0:
-                    continue
-                candidate = (path.name, stat.st_size, stat.st_mtime_ns)
-                if newest is None or candidate[2] > newest[2]:
-                    newest = candidate
-        except OSError:
-            return None
-        return newest
+            os.killpg(publisher.pid, signal.SIGTERM)
+            publisher.wait(timeout=5)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(publisher.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            publisher.wait(timeout=2)
+
+    def _sync_capture_control(self) -> None:
+        desired = self.capture_control_store.read()
+        if desired == self.capture_control:
+            return
+        if self.capture is not None:
+            self.capture.set_recording_enabled(desired["recording_enabled"])
+            self.capture.set_stream_enabled(desired["stream_enabled"])
+        self.capture_control = desired
+        if not desired["stream_enabled"]:
+            self._stop_publisher()
+            self.central_connection_status = "unknown"
+        elif self.config.rtsp.mode == "central_publish" and self.publisher is None:
+            self.publisher_restart_at = 0.0
+            self._try_start_publisher()
+        self._write_status(
+            "running" if self.camera_watchdog.status == "online" else "starting"
+        )
 
     def _monitor_camera_input(self) -> None:
-        # 프로세스 생존만으로는 부족하므로 녹화 파일의 크기·수정 시각으로 캡처 활동을 확인한다.
-        activity = self._recording_activity()
-        if activity is not None and activity != self._last_activity:
-            self._last_activity = activity
+        if self.capture is not None and self.capture.frame_activity():
             event_type = self.camera_watchdog.observe_frame()
             if event_type:
                 self.events.record(event_type)
@@ -395,6 +411,9 @@ class EdgeRunner:
     def _stop_children(self) -> None:
         all_children = self.children + ([self.publisher] if self.publisher else [])
         for child in all_children:
+            if isinstance(child, GstCapture):
+                child.stop()
+                continue
             if child.poll() is None:
                 try:
                     os.killpg(child.pid, signal.SIGTERM)
@@ -497,6 +516,7 @@ class EdgeRunner:
                         if self.reload_event.is_set():
                             LOGGER.info("profile reload requested")
                             break
+                        self._sync_capture_control()
                         self._maintain_publisher()
                         self._monitor_camera_input()
                         failed = next(

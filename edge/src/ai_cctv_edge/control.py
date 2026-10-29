@@ -18,7 +18,7 @@ from typing import Protocol
 
 from fastapi import Depends, FastAPI, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from .auth import BearerAuthenticator, load_tokens
 from .config import EdgeConfig, VIDEO_PROFILES
@@ -31,6 +31,7 @@ from .monitoring import (
 )
 from .pipeline import build_profile_probe_command
 from .state import (
+    CaptureControlStore,
     EventJournal,
     ProfileRequestStore,
     ProfileSelectionStore,
@@ -641,6 +642,17 @@ class VideoProfileRequest(BaseModel):
     profile: str
 
 
+class CaptureControlRequest(BaseModel):
+    stream_enabled: bool
+    recording_enabled: bool
+
+    @model_validator(mode="after")
+    def require_unified_state(self) -> "CaptureControlRequest":
+        if self.stream_enabled != self.recording_enabled:
+            raise ValueError("Streaming and recording must be enabled or disabled together.")
+        return self
+
+
 # 제어 서비스의 생존과 캡처·중앙 연결 상태를 구분해 하나의 상태 응답으로 합친다.
 class EdgeStatusService:
     def __init__(
@@ -746,6 +758,8 @@ class EdgeStatusService:
             "camera_input": camera_input,
             "camera_input_status": camera_input,
             "central_connection_status": central_connection,
+            "stream_enabled": bool(runtime.get("recording_requested", False)),
+            "recording_enabled": bool(runtime.get("recording_requested", False)),
             "current_video_profile": current,
             "desired_video_profile": desired,
             "supported_video_profiles": list(capabilities.supported_profiles),
@@ -778,6 +792,7 @@ def create_control_app(
     root = state_root or default_state_root()
     selection_store = ProfileSelectionStore(root)
     status_store = RuntimeStatusStore(root)
+    capture_control_store = CaptureControlStore(root)
     journal = EventJournal(config.camera_id, root)
     probe = capability_probe or LocalCapabilityProbe()
     runtime = profile_runtime or LocalProfileRuntime(
@@ -833,6 +848,22 @@ def create_control_app(
     @app.get("/internal/v1/status", dependencies=[Depends(authenticate)])
     def status():
         return status_service.snapshot()
+
+    @app.put("/internal/v1/config/capture", dependencies=[Depends(authenticate)])
+    def apply_capture_control(request: CaptureControlRequest):
+        if not request.stream_enabled and request.recording_enabled:
+            raise HTTPException(
+                status_code=422,
+                detail="recording cannot remain enabled while the stream is stopped",
+            )
+        capture_control_store.write(
+            request.stream_enabled, request.recording_enabled
+        )
+        return {
+            "status": "accepted",
+            "stream_enabled": request.stream_enabled,
+            "recording_enabled": request.recording_enabled,
+        }
 
     # 프로필 목록과 검사 성공 여부를 함께 제공해 unknown을 지원 가능으로 오인하지 않게 한다.
     @app.get(

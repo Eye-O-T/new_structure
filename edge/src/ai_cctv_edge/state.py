@@ -108,6 +108,44 @@ class ProfileSelectionStore:
         )
 
 
+class CaptureControlStore:
+    """Persist recording and central stream intent shared by Edge services."""
+
+    def __init__(self, root: Path | None = None):
+        self.root = root or default_state_root()
+        self.path = self.root / "capture-control.json"
+
+    def read(self) -> dict[str, bool]:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            stream_enabled = payload["stream_enabled"]
+            recording_enabled = payload["recording_enabled"]
+            if type(stream_enabled) is not bool or type(recording_enabled) is not bool:
+                raise ValueError
+            return {
+                "stream_enabled": recording_enabled,
+                "recording_enabled": recording_enabled,
+            }
+        except (OSError, KeyError, ValueError, TypeError, json.JSONDecodeError):
+            return {"stream_enabled": False, "recording_enabled": False}
+
+    def write(self, stream_enabled: bool, recording_enabled: bool) -> None:
+        write_atomic(
+            self.path,
+            json.dumps(
+                {
+                    "stream_enabled": bool(stream_enabled),
+                    "recording_enabled": bool(recording_enabled),
+                    "updated_at": utc_timestamp(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            mode=0o640,
+        )
+
+
 class ProfileRequestStore:
     """현재 실행 인스턴스에만 적용할 임시 요청."""
 

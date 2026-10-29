@@ -83,6 +83,10 @@ def build_gstreamer_command(
             "max-size-time=0",
             "max-size-bytes=0",
             "!",
+            "valve",
+            "name=recording_valve",
+            "drop=false",
+            "!",
             "splitmuxsink",
             f"location={location}",
             "muxer-factory=mpegtsmux",
@@ -93,6 +97,10 @@ def build_gstreamer_command(
             "queue",
             "leaky=downstream",
             "max-size-buffers=60",
+            "!",
+            "valve",
+            "name=stream_valve",
+            "drop=false",
             "!",
         ]
     )

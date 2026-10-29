@@ -63,6 +63,7 @@ class StatusCollector:
             self.settings,
             self.data,
             media_client_factory=self._media_client_factory,
+            camera_lock_factory=self._camera_lock_factory,
         )
 
     # Data의 목록·페이지 응답을 수집 대상 객체 목록으로 통일한다.

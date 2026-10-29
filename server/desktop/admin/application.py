@@ -86,6 +86,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._recording_tasks = set()
         self._recording_poll_task = None
         self._busy_recording_cameras = set()
+        self._camera_streams = {}
         self._bulk_recording_busy = False
         self._camera_recordings = {}
         self._recording_notice = None
@@ -226,6 +227,7 @@ class CCTVMainWindow(ReferenceWindow):
             if not isinstance(camera, dict) or not camera.get("camera_id"):
                 continue
             cid = str(camera["camera_id"])
+            self._camera_streams[cid] = bool(camera.get("stream_requested", True))
             if "recording_state" in camera or "recording_enabled" in camera:
                 rec_enabled = bool(camera.get("recording_enabled", False))
                 rec_state = camera.get("recording_state") or (
@@ -239,6 +241,7 @@ class CCTVMainWindow(ReferenceWindow):
                     "recording_enabled": rec_enabled,
                     "recording_state": rec_state,
                     "last_error_code": camera.get("recording_last_error_code"),
+                    "stream_requested": bool(camera.get("stream_requested", True)),
                 }
 
     def _camera_recording_info(self, camera_id):
@@ -258,6 +261,7 @@ class CCTVMainWindow(ReferenceWindow):
                     "recording_enabled": rec_enabled,
                     "recording_state": rec_state,
                     "last_error_code": camera.get("recording_last_error_code"),
+                    "stream_requested": bool(camera.get("stream_requested", True)),
                 }
         return {
             "camera_id": camera_id,
@@ -265,6 +269,7 @@ class CCTVMainWindow(ReferenceWindow):
             "recording_enabled": False,
             "recording_state": "stopped",
             "last_error_code": None,
+            "stream_requested": self._camera_streams.get(camera_id, True),
         }
 
     def _sync_view_recording_state(self, camera_id):
@@ -303,19 +308,33 @@ class CCTVMainWindow(ReferenceWindow):
             "camera_id": camera_id,
             "enabled": bool(item.get("enabled", True)),
             "recording_enabled": bool(item.get("recording_enabled", False)),
-            "recording_state": str(item.get("recording_state") or "stopped"),
+            "recording_state": str(item.get("recording_state") or (
+                "waiting" if bool(item.get("recording_enabled", False)) else "stopped"
+            )),
             "stream_ready": bool(item.get("stream_ready", False)),
             "recording_file_active": bool(item.get("recording_file_active", False)),
             "last_error_code": item.get("last_error_code") or item.get("error_code"),
             "message": item.get("message"),
+            "stream_requested": bool(item.get("stream_requested", self._camera_streams.get(camera_id, True))),
         }
         self._camera_recordings[camera_id] = normalized
+        self._camera_streams[camera_id] = normalized["stream_requested"]
         for camera in self.cameras:
             if camera.get("camera_id") == camera_id:
                 camera["recording_enabled"] = normalized["recording_enabled"]
                 camera["recording_state"] = normalized["recording_state"]
                 camera["recording_last_error_code"] = normalized["last_error_code"]
+                camera["stream_requested"] = normalized["stream_requested"]
         self._sync_view_recording_state(camera_id)
+        if not normalized["stream_requested"]:
+            worker = self._workers.get(camera_id)
+            if worker is not None:
+                worker.stop()
+            view = self._views.get(camera_id)
+            if view is not None:
+                view.show_stopped("송출이 중지되어 있습니다.")
+        elif camera_id != "local-camera":
+            self._sync_workers(self._display_ids())
         self._update_recording_controls()
         if added_local_camera:
             self._refresh_camera_picker()
@@ -440,14 +459,14 @@ class CCTVMainWindow(ReferenceWindow):
             view.set_overlay_enabled(self._overlay_enabled)
             view.set_selected(camera_id == self._selected_camera_id)
             self._sync_view_recording_state(camera_id)
-            if (
-                camera_id == "local-camera"
-                and not self._local_camera_preview_requested
-            ):
+            if not self._camera_stream_requested(camera_id):
                 message = (
                     "노트북 카메라 사용이 꺼져 있습니다."
-                    if not load_local_camera_enabled(self.local_publisher.data_root)
+                    if camera_id == "local-camera"
+                    and not load_local_camera_enabled(self.local_publisher.data_root)
                     else self._local_camera_stopped_message
+                    if camera_id == "local-camera"
+                    else "송출이 중지되어 있습니다."
                 )
                 view.show_stopped(message)
             if self._view_mode == "grid":
@@ -477,10 +496,14 @@ class CCTVMainWindow(ReferenceWindow):
                 self._start_camera_worker(camera_id)
 
     def _camera_stream_requested(self, camera_id):
-        return (
-            camera_id != "local-camera"
-            or self._local_camera_preview_requested
-        )
+        if camera_id in self._busy_recording_cameras:
+            return False
+        if camera_id == "local-camera":
+            return (
+                self._local_camera_preview_requested
+                and self._camera_streams.get(camera_id, True)
+            )
+        return self._camera_streams.get(camera_id, True)
 
     def pause_local_camera_preview(self, message="노트북 카메라 송출이 중지되어 있습니다."):
         self._local_camera_preview_requested = False
@@ -749,44 +772,6 @@ class CCTVMainWindow(ReferenceWindow):
         self._run_bulk_recording_action(True)
 
     def stop_all_recording(self):
-        if self.api is None and publisher_status(self.local_publisher.data_root).get("status") == "running":
-            self.pause_local_camera_preview("노트북 카메라 송출을 중지하는 중입니다.")
-            self._bulk_recording_busy = True
-            self._update_recording_controls()
-            task = BackgroundTask(
-                lambda _progress: self.local_publisher.stop(), self
-            )
-            self._recording_tasks.add(task)
-            task.result.connect(
-                lambda _result: (
-                    self._set_local_camera_stopped_message(
-                        "노트북 카메라 송출이 중지되었습니다."
-                    ),
-                    self._set_recording_notice("노트북 카메라 송출을 중지했습니다."),
-                )
-            )
-            task.failed.connect(
-                lambda message: (
-                    self._set_local_camera_stopped_message(
-                        f"로컬 카메라 중지 확인 실패: {message}"
-                    ),
-                    self._set_recording_notice(
-                        f"로컬 카메라 송출 중지 오류: {message}"
-                    ),
-                )
-            )
-
-            def local_stop_finished():
-                self._bulk_recording_busy = False
-                self._recording_tasks.discard(task)
-                self._update_recording_controls()
-                task.deleteLater()
-                if self._closing and not self._recording_tasks and not self._workers:
-                    QTimer.singleShot(0, self.close)
-
-            task.finished.connect(local_stop_finished)
-            task.start()
-            return
         if not self._ensure_logged_in_for_recording():
             return
         self._run_bulk_recording_action(False)
@@ -794,45 +779,58 @@ class CCTVMainWindow(ReferenceWindow):
     def _start_local_camera_for_recording(self, api):
         data_root = self.local_publisher.data_root
         if not load_local_camera_enabled(data_root):
-            return False
+            raise RuntimeError("설정에서 노트북 카메라 사용을 켜세요.")
         device_name = load_device_setting(data_root)
         if not device_name:
             raise RuntimeError("노트북 카메라 사용이 켜져 있지만 장치가 선택되지 않았습니다.")
         current = publisher_status(data_root)
-        if current.get("status") == "running":
-            if (
-                current.get("camera_id") == "local-camera"
-                and current.get("device_name") == device_name
-            ):
-                return False
+        already_running = (
+            current.get("status") == "running"
+            and current.get("camera_id") == "local-camera"
+            and current.get("device_name") == device_name
+        )
+        previously_recording = bool(
+            self._camera_recording_info("local-camera").get("recording_enabled")
+        )
+        if current.get("status") == "running" and not already_running:
             self.local_publisher.stop()
-        try:
-            result = api.register_local_camera("local-camera", device_name)
-        except Exception as exc:
-            if getattr(exc, "status_code", None) != 409:
-                raise
-            api.camera(
-                "local-camera", method="PATCH", payload={"name": device_name, "enabled": True}
+        if not already_running:
+            try:
+                registered = api.register_local_camera("local-camera", device_name)
+            except Exception as exc:
+                if getattr(exc, "status_code", None) != 409:
+                    raise
+                api.camera(
+                    "local-camera", method="PATCH", payload={"name": device_name, "enabled": True}
+                )
+                registered = api.camera(
+                    "local-camera", "/publish-credentials/rotate", "POST"
+                )
+            credentials = registered.get("publish_credentials") or {}
+            username, password = credentials.get("username"), credentials.get("password")
+            if not username or not password:
+                raise RuntimeError("노트북 카메라 송출 계정을 발급받지 못했습니다.")
+            stream_url = rtsp_publish_url(
+                self.rtsp_host, self.rtsp_port, "local-camera", username, password
             )
-            result = api.camera(
-                "local-camera", "/publish-credentials/rotate", "POST"
-            )
-        credentials = result.get("publish_credentials") or {}
-        username, password = credentials.get("username"), credentials.get("password")
-        if not username or not password:
-            raise RuntimeError("노트북 카메라 송출 계정을 발급받지 못했습니다.")
-        stream_url = rtsp_publish_url(
-            self.rtsp_host, self.rtsp_port, "local-camera", username, password
-        )
-        self.local_publisher.start(
-            device_name, stream_url, camera_id="local-camera"
-        )
+
+        result = api.start_camera_recording("local-camera")
+        started_here = False
         try:
+            if not already_running:
+                self.local_publisher.start(device_name, stream_url, camera_id="local-camera")
+                started_here = True
             self._wait_for_local_camera(api)
         except Exception:
-            self.local_publisher.stop()
+            if started_here and publisher_status(data_root).get("status") == "running":
+                self.local_publisher.stop()
+            if not previously_recording:
+                try:
+                    api.stop_camera_recording("local-camera")
+                except Exception:
+                    LOGGER.exception("Failed to restore stopped state after local start failure")
             raise
-        return True
+        return result
 
     def _wait_for_local_camera(self, api):
         live = api.camera("local-camera", "/live?protocol=hls")
@@ -863,123 +861,127 @@ class CCTVMainWindow(ReferenceWindow):
     def stop_video(self):
         self.stop_all_recording()
 
-    def _run_bulk_recording_action(self, start: bool):
-        if not self.api or self._bulk_recording_busy:
-            return
-        if not start:
-            self.pause_local_camera_preview(
-                "전체 녹화 중지에 따라 노트북 카메라를 중지하는 중입니다."
-            )
-        api = self.api
-        self._bulk_recording_busy = True
-        self._set_recording_notice(None)
-        self._update_recording_controls()
-        for cid in self._available_camera_ids():
-            self._sync_view_recording_state(cid)
+    def _perform_camera_recording_action(self, api, camera_id: str, start: bool):
+        if start:
+            if camera_id == "local-camera":
+                return self._start_local_camera_for_recording(api)
+            return api.start_camera_recording(camera_id)
 
-        def operation(_progress):
-            if start:
-                started_local = self._start_local_camera_for_recording(api)
-                try:
-                    return api.start_all_recording()
-                except Exception:
-                    if started_local:
-                        self.local_publisher.stop()
-                    raise
-            local_error = None
+        result = None
+        errors = []
+        try:
+            result = api.stop_camera_recording(camera_id)
+        except Exception as exc:
+            errors.append(f"서버 중지 실패: {exc}")
+        if camera_id == "local-camera" and publisher_status(
+            self.local_publisher.data_root
+        ).get("status") == "running":
             try:
                 self.local_publisher.stop()
             except OSError as exc:
-                local_error = str(exc)
-            try:
-                payload = api.stop_all_recording()
-            except Exception as server_error:
-                if local_error:
-                    raise RuntimeError(
-                        f"서버 녹화 중지 오류: {server_error}; 로컬 카메라 중지 오류: {local_error}"
-                    ) from None
-                raise
-            if local_error:
-                if isinstance(payload, dict):
-                    payload["local_camera_stop_error"] = local_error
-                else:
-                    raise RuntimeError(
-                        f"로컬 카메라 중지 오류: {local_error}"
-                    ) from None
-            return payload
+                errors.append(f"로컬 publisher 중지 실패: {exc}")
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        return result
+
+    def _run_bulk_recording_action(self, start: bool):
+        if not self.api or self._bulk_recording_busy or self._busy_recording_cameras:
+            return
+        api = self.api
+        if start:
+            camera_ids = self._available_camera_ids()
+            if load_local_camera_enabled(self.local_publisher.data_root):
+                camera_ids = list(dict.fromkeys([*camera_ids, "local-camera"]))
+            else:
+                camera_ids = [cid for cid in camera_ids if cid != "local-camera"]
+        else:
+            camera_ids = list(dict.fromkeys(
+                str(item["camera_id"]) for item in self.cameras if item.get("camera_id")
+            ))
+            if publisher_status(self.local_publisher.data_root).get("status") == "running":
+                camera_ids = list(dict.fromkeys([*camera_ids, "local-camera"]))
+        if not camera_ids:
+            self._set_recording_notice("제어할 카메라가 없습니다.")
+            return
+
+        self._bulk_recording_busy = True
+        self._busy_recording_cameras.update(camera_ids)
+        self._set_recording_notice(None)
+        if not start:
+            self.pause_local_camera_preview("전체 녹화 중지 요청을 적용하고 있습니다.")
+            for camera_id in camera_ids:
+                self._camera_streams[camera_id] = False
+                worker = self._workers.get(camera_id)
+                if worker is not None:
+                    worker.stop()
+                view = self._views.get(camera_id)
+                if view is not None:
+                    view.show_stopped("녹화 및 송출을 중지하고 있습니다.")
+        for camera_id in camera_ids:
+            self._sync_view_recording_state(camera_id)
+        self._update_recording_controls()
+
+        def operation(_progress):
+            items = []
+            for camera_id in camera_ids:
+                try:
+                    item = self._perform_camera_recording_action(api, camera_id, start)
+                    item = dict(item or {})
+                    item.update(camera_id=camera_id, ok=True)
+                except Exception as exc:
+                    item = {
+                        "camera_id": camera_id,
+                        "ok": False,
+                        "enabled": True,
+                        "recording_enabled": False if not start else True,
+                        "stream_requested": False if not start else True,
+                        "recording_state": "error",
+                        "error_code": "RECORDING_CONTROL_FAILED",
+                        "message": str(exc),
+                    }
+                    try:
+                        item.update(api.camera_recording(camera_id))
+                    except Exception:
+                        pass
+                    item.update(ok=False, error_code="RECORDING_CONTROL_FAILED", message=str(exc))
+                items.append(item)
+            failed = sum(not item.get("ok", False) for item in items)
+            return {
+                "items": items,
+                "total": len(items),
+                "succeeded": len(items) - failed,
+                "failed": failed,
+            }
 
         task = BackgroundTask(operation, self)
         self._recording_tasks.add(task)
 
         def handle_result(payload):
-            self._bulk_recording_busy = False
+            self._apply_recording_items(payload.get("items", []))
             if start:
                 self._resume_local_camera_preview()
-            items = payload.get("items", []) if isinstance(payload, dict) else []
-            local_stop_error = (
-                payload.get("local_camera_stop_error")
-                if isinstance(payload, dict)
-                else None
-            )
-            if not start:
-                self._set_local_camera_stopped_message(
-                    f"로컬 카메라 중지 확인 실패: {local_stop_error}"
-                    if local_stop_error
-                    else "전체 녹화 중지에 따라 노트북 카메라 송출이 중지되었습니다."
-                )
-            self._apply_recording_items(items)
-            failed_count = int(payload.get("failed", 0)) if isinstance(payload, dict) else 0
-            total_count = int(payload.get("total", len(items))) if isinstance(payload, dict) else len(items)
-            action_text = "녹화 시작" if start else "녹화 중지"
-            if failed_count > 0:
-                failures = [
-                    f"{item.get('camera_id')}: {item.get('error_code') or 'ERROR'}"
-                    + (f" · {item['message']}" if item.get("message") else "")
-                    for item in items
-                    if isinstance(item, dict) and not item.get("ok", True)
-                ]
-                summary = f"전체 {action_text} 일부 실패 ({failed_count}/{total_count})"
-                if failures:
-                    summary += " · " + " | ".join(failures)
-                self._set_recording_notice(summary)
-            elif local_stop_error:
+            failures = [
+                f"{item.get('camera_id')}: {item.get('message') or item.get('error_code') or '오류'}"
+                for item in payload.get("items", []) if not item.get("ok", True)
+            ]
+            action = "시작" if start else "중지"
+            if failures:
                 self._set_recording_notice(
-                    f"서버 녹화는 중지됐지만 로컬 카메라 종료 확인에 실패했습니다: {local_stop_error}"
+                    f"전체 녹화 {action} 일부 실패: " + " | ".join(failures)
                 )
             else:
-                self._recording_notice = None
-                self.cam_status.setToolTip("")
-                self.cam_status.setText(f"전체 카메라 {action_text} 적용됨")
+                self._set_recording_notice(f"전체 녹화 {action}를 적용했습니다.")
 
         def handle_failed(message):
-            self._bulk_recording_busy = False
-            if start:
-                self._resume_local_camera_preview()
-            else:
-                local_stop_error = "로컬 카메라 중지 오류:" in message
-                self._set_local_camera_stopped_message(
-                    f"로컬 카메라 중지 확인 실패: {message}"
-                    if local_stop_error
-                    else "전체 녹화 중지에 따라 노트북 카메라 송출이 중지되었습니다."
-                )
-            for cid in self._available_camera_ids():
-                self._apply_recording_item(
-                    {
-                        "camera_id": cid,
-                        "enabled": True,
-                        "recording_enabled": start,
-                        "recording_state": "error",
-                        "error_code": "RECORDING_CONTROL_FAILED",
-                        "message": message,
-                    }
-                )
             self._set_recording_notice(f"전체 녹화 제어 오류: {message}")
 
         def handle_finished():
             self._bulk_recording_busy = False
+            self._busy_recording_cameras.difference_update(camera_ids)
             self._recording_tasks.discard(task)
-            for cid in self._available_camera_ids():
-                self._sync_view_recording_state(cid)
+            self._sync_workers(self._display_ids())
+            for camera_id in camera_ids:
+                self._sync_view_recording_state(camera_id)
             self._update_recording_controls()
             task.deleteLater()
             if self._closing and not self._recording_tasks and not self._workers:
@@ -997,37 +999,65 @@ class CCTVMainWindow(ReferenceWindow):
         self._run_single_camera_recording_action(camera_id, False)
 
     def _run_single_camera_recording_action(self, camera_id: str, start: bool):
-        if not self.api or not camera_id or camera_id in self._busy_recording_cameras:
+        if (not self.api or not camera_id or self._bulk_recording_busy
+                or camera_id in self._busy_recording_cameras):
             return
         api = self.api
         self._busy_recording_cameras.add(camera_id)
+        if not start:
+            self._camera_streams[camera_id] = False
+            if camera_id == "local-camera":
+                self.pause_local_camera_preview("노트북 카메라 녹화 및 송출을 중지하고 있습니다.")
+            worker = self._workers.get(camera_id)
+            if worker is not None:
+                worker.stop()
+            view = self._views.get(camera_id)
+            if view is not None:
+                view.show_stopped("녹화 및 송출을 중지하고 있습니다.")
         self._set_recording_notice(None)
         self._sync_view_recording_state(camera_id)
 
         def operation(_progress):
-            return (
-                api.start_camera_recording(camera_id)
-                if start
-                else api.stop_camera_recording(camera_id)
-            )
+            try:
+                return self._perform_camera_recording_action(api, camera_id, start)
+            except Exception as exc:
+                try:
+                    status = api.camera_recording(camera_id)
+                except Exception:
+                    status = {
+                        "camera_id": camera_id,
+                        "enabled": True,
+                        "recording_enabled": False,
+                        "stream_requested": False,
+                        "recording_state": "error",
+                    }
+                status.update(ok=False, error_code="RECORDING_CONTROL_FAILED", message=str(exc))
+                return status
 
         task = BackgroundTask(operation, self)
         self._recording_tasks.add(task)
 
         def handle_result(payload):
-            self._busy_recording_cameras.discard(camera_id)
-            self._recording_notice = None
-            self.cam_status.setToolTip("")
+            if start and camera_id == "local-camera":
+                self._resume_local_camera_preview()
             if isinstance(payload, dict):
                 self._apply_recording_item(payload)
+            if isinstance(payload, dict) and not payload.get("ok", True):
+                self._set_recording_notice(
+                    f"{camera_id} 녹화 제어 일부 실패: "
+                    f"{payload.get('message') or payload.get('error_code') or '오류'}"
+                )
+            else:
+                self._recording_notice = None
+                self.cam_status.setToolTip("")
 
         def handle_failed(message):
-            self._busy_recording_cameras.discard(camera_id)
             self._apply_recording_item(
                 {
                     "camera_id": camera_id,
                     "enabled": True,
-                    "recording_enabled": start,
+                    "recording_enabled": False if not start else True,
+                    "stream_requested": False if not start else True,
                     "recording_state": "error",
                     "error_code": "RECORDING_CONTROL_FAILED",
                     "message": message,
@@ -1038,6 +1068,7 @@ class CCTVMainWindow(ReferenceWindow):
         def handle_finished():
             self._busy_recording_cameras.discard(camera_id)
             self._recording_tasks.discard(task)
+            self._sync_workers(self._display_ids())
             self._sync_view_recording_state(camera_id)
             self._update_recording_controls()
             task.deleteLater()
@@ -1048,7 +1079,6 @@ class CCTVMainWindow(ReferenceWindow):
         task.failed.connect(handle_failed)
         task.finished.connect(handle_finished)
         task.start()
-
     def stop_display_workers(self):
         """창 종료나 로그아웃 시 실시간 영상 화면 연결만 정리한다."""
         self._recording_poll_timer.stop()

@@ -149,6 +149,7 @@ class CameraCreate(StrictModel):
     edge_auth_token: str | None = Field(default=None, min_length=32, max_length=4096)
     source_url: str | None = Field(default=None, max_length=2048)
     enabled: bool = True
+    stream_requested: bool = False
     recording_enabled: bool = False
     recording_last_error_code: str | None = Field(default=None, max_length=128)
     status: CameraStatus = CameraStatus.offline
@@ -199,6 +200,7 @@ class CameraUpdate(StrictModel):
     edge_auth_token: str | None = Field(default=None, min_length=32, max_length=4096)
     source_url: str | None = Field(default=None, max_length=2048)
     enabled: bool | None = None
+    stream_requested: bool | None = None
     recording_enabled: bool | None = None
     recording_last_error_code: str | None = Field(default=None, max_length=128)
     status: CameraStatus | None = None

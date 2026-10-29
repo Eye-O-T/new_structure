@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 import httpx
@@ -154,6 +156,34 @@ class EdgeHttpClient:
 
     async def get_video_capabilities(self) -> dict[str, Any]:
         return await self._request("GET", "internal/v1/capabilities/video")
+
+    async def set_capture_control(
+        self, *, stream_enabled: bool, recording_enabled: bool
+    ) -> dict[str, Any]:
+        if not stream_enabled and recording_enabled:
+            raise ValueError("recording cannot remain enabled while the stream is stopped")
+        await self._request(
+            "PUT",
+            "internal/v1/config/capture",
+            json={
+                "stream_enabled": bool(stream_enabled),
+                "recording_enabled": bool(recording_enabled),
+            },
+        )
+        deadline = time.monotonic() + self._client.timeout.read
+        while time.monotonic() < deadline:
+            status = await self.get_status()
+            if (
+                status.get("stream_enabled") is bool(stream_enabled)
+                and status.get("recording_enabled") is bool(recording_enabled)
+            ):
+                return status
+            await asyncio.sleep(0.5)
+        raise EdgeControlError(
+            "CAPTURE_CONTROL_TIMEOUT",
+            "The Edge device did not apply the capture request before the timeout.",
+            status_code=504,
+        )
 
     # Edge가 applied를 명시해야 성공으로 보고 이미 일지에 기록된 실패인지도 표시한다.
     async def apply_video_profile(self, profile: str) -> dict[str, Any]:

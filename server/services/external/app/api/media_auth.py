@@ -183,8 +183,11 @@ async def internal_auth_verify(
 
     if selected_camera_id is not None:
         camera = await _ensure_camera_access(data, principal, selected_camera_id)
-        if original_path.startswith("/hls/") and not bool(camera.get("enabled", True)):
-            raise DataForbidden("disabled camera has no live stream")
+        if original_path.startswith("/hls/") and (
+            not bool(camera.get("enabled", True))
+            or not bool(camera.get("stream_requested", True))
+        ):
+            raise DataForbidden("camera has no requested live stream")
     elif resource_type is not None:
         if resource_id is None:
             raise HTTPException(status_code=400, detail="resource_id is required")
@@ -345,6 +348,8 @@ async def internal_media_auth(
                 safe_camera_id,
                 (time.monotonic() - started_at) * 1000,
             )
+            raise _auth_error("Media authentication failed")
+        if not bool(camera.get("stream_requested", True)):
             raise _auth_error("Media authentication failed")
 
         if action == "read":

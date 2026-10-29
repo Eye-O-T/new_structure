@@ -1,4 +1,4 @@
-# 모바일 등 외부 클라이언트와 주고받는 JSON의 필드·형식을 정의한다.
+﻿# 紐⑤컮?????몃? ?대씪?댁뼵?몄? 二쇨퀬諛쏅뒗 JSON???꾨뱶쨌?뺤떇???뺤쓽?쒕떎.
 from __future__ import annotations
 
 from datetime import datetime
@@ -12,7 +12,7 @@ Role = Literal["admin", "viewer"]
 RecordingState = Literal["recording", "waiting", "stopped", "error"]
 
 
-# 공개 요청은 알 수 없는 필드를 거절하고 문자열 양끝 공백을 정리한다.
+# 怨듦컻 ?붿껌? ?????녿뒗 ?꾨뱶瑜?嫄곗젅?섍퀬 臾몄옄???묐걹 怨듬갚???뺣━?쒕떎.
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -43,8 +43,9 @@ class CameraCreate(StrictModel):
         default=None, min_length=32, max_length=4096
     )
     enabled: bool = True
+    stream_requested: bool = False
 
-    # Edge를 등록할 때 식별자·관리 주소·복구 주소·인증값을 모두 함께 요구한다.
+    # Edge瑜??깅줉?????앸퀎?먃룰?由?二쇱냼쨌蹂듦뎄 二쇱냼쨌?몄쬆媛믪쓣 紐⑤몢 ?④퍡 ?붽뎄?쒕떎.
     @model_validator(mode="after")
     def complete_edge_metadata(self) -> "CameraCreate":
         values = (
@@ -83,7 +84,7 @@ class VideoProfilePatch(StrictModel):
     profile: Literal["hd", "fhd"]
 
 
-# 응답 모델에 선언하지 않은 내부 필드는 직렬화 결과에서 제외한다.
+# ?묐떟 紐⑤뜽???좎뼵?섏? ?딆? ?대? ?꾨뱶??吏곷젹??寃곌낵?먯꽌 ?쒖쇅?쒕떎.
 class PublicResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -99,6 +100,7 @@ class CameraResponse(PublicResponse):
     name: str | None = None
     stream_path: str | None = None
     enabled: bool | None = None
+    stream_requested: bool | None = None
     recording_enabled: bool | None = None
     recording_state: RecordingState | None = None
     recording_last_error_code: str | None = None
@@ -117,6 +119,7 @@ class CameraRecordingResponse(PublicResponse):
     camera_id: str = Field(pattern=CAMERA_ID_PATTERN.pattern)
     enabled: bool
     recording_enabled: bool
+    stream_requested: bool = False
     recording_state: RecordingState
     stream_ready: bool = False
     recording_file_active: bool = False
@@ -133,6 +136,7 @@ class CameraRecordingBulkItemResponse(PublicResponse):
     ok: bool
     enabled: bool
     recording_enabled: bool
+    stream_requested: bool = False
     recording_state: RecordingState
     stream_ready: bool = False
     recording_file_active: bool = False
@@ -334,7 +338,7 @@ class UserPatch(StrictModel):
 class CameraPermissions(StrictModel):
     camera_ids: list[str] = Field(max_length=256)
 
-    # 카메라 ID 형식을 확인하면서 최초 입력 순서를 유지한 중복 없는 권한 목록을 만든다.
+    # 移대찓??ID ?뺤떇???뺤씤?섎㈃??理쒖큹 ?낅젰 ?쒖꽌瑜??좎???以묐났 ?녿뒗 沅뚰븳 紐⑸줉??留뚮뱺??
     def normalized_camera_ids(self) -> list[str]:
         normalized: list[str] = []
         seen: set[str] = set()
@@ -353,7 +357,7 @@ class AuthVerifyRequest(StrictModel):
     resource_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
-# MediaMTX가 추가 필드를 보내도 수용하되 인증에 사용하는 값의 길이를 제한한다.
+# MediaMTX媛 異붽? ?꾨뱶瑜?蹂대궡???섏슜?섎릺 ?몄쬆???ъ슜?섎뒗 媛믪쓽 湲몄씠瑜??쒗븳?쒕떎.
 class MediaAuthRequest(BaseModel):
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 

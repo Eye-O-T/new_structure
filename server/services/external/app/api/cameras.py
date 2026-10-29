@@ -1,7 +1,8 @@
-# 카메라 설정과 영상·녹화 제어를 처리하며 Data·Edge·MediaMTX 작업 순서를 조정한다.
+﻿# 카메라 설정과 영상·녹화 제어를 처리하며 Data·Edge·MediaMTX 작업 순서를 조정한다.
 from __future__ import annotations
 
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import quote, urlsplit
@@ -55,6 +56,11 @@ from ..security.permissions import (
 from .validation import _public_media_url
 
 router = APIRouter()
+
+
+@asynccontextmanager
+async def _no_camera_lock():
+    yield
 
 
 def _new_media_client(
@@ -141,6 +147,7 @@ def _compute_recording_status(
         "camera_id": str(camera["camera_id"]),
         "enabled": enabled,
         "recording_enabled": recording_enabled,
+        "stream_requested": bool(camera.get("recording_enabled", False)),
         "recording_state": state,
         "stream_ready": stream_ready,
         "recording_file_active": file_active,
@@ -154,6 +161,7 @@ async def sync_camera_recording_paths(
     data: DataClient,
     *,
     media_client_factory: Callable[[], MediaMtxClient] | None = None,
+    camera_lock_factory: Callable[[str], Any] | None = None,
 ) -> dict[str, int]:
     """DB에 저장된 카메라별 녹화 희망 상태를 MediaMTX 경로 설정과 동기화한다."""
 
@@ -169,29 +177,59 @@ async def sync_camera_recording_paths(
     try:
         for camera in cameras_list:
             camera_id = str(camera["camera_id"])
-            should_record = bool(camera.get("enabled", True)) and bool(
-                camera.get("recording_enabled", False)
-            )
-            try:
-                await client.set_path_recording(camera_id, should_record)
-                if camera.get("recording_last_error_code") is not None:
-                    await data.update_camera(
-                        camera_id, {"recording_last_error_code": None}
+            lock_context = (camera_lock_factory or (lambda _camera_id: _no_camera_lock()))(camera_id)
+            async with lock_context:
+                try:
+                    camera = await data.get_camera(camera_id, user_id="0")
+                    should_record = bool(camera.get("enabled", True)) and bool(
+                        camera.get("recording_enabled", False)
                     )
-                synced += 1
-            except MediaControlError as exc:
-                failed += 1
-                if camera.get("recording_last_error_code") != exc.code:
-                    try:
+                    await client.set_path_recording(camera_id, should_record)
+                    await _set_edge_capture_control(
+                        camera,
+                        settings,
+                        data,
+                        stream_enabled=should_record,
+                        recording_enabled=should_record,
+                    )
+                    if camera.get("recording_last_error_code") is not None:
                         await data.update_camera(
-                            camera_id, {"recording_last_error_code": exc.code}
+                            camera_id, {"recording_last_error_code": None}
                         )
-                    except DataServiceError:
-                        pass
+                    synced += 1
+                except (MediaControlError, EdgeControlError, DataServiceError) as exc:
+                    failed += 1
+                    error_code = getattr(exc, "code", "EDGE_CAPTURE_CONTROL_FAILED")
+                    if camera.get("recording_last_error_code") != error_code:
+                        try:
+                            await data.update_camera(
+                                camera_id, {"recording_last_error_code": error_code}
+                            )
+                        except DataServiceError:
+                            pass
     finally:
         await client.close()
     return {"total": len(cameras_list), "synced": synced, "failed": failed}
 
+
+async def _set_edge_capture_control(
+    camera: dict[str, Any], settings: Settings, data: DataClient,
+    *, stream_enabled: bool, recording_enabled: bool,
+) -> None:
+    if not camera.get("edge_device_id"):
+        return
+    target = await data.get_camera_control_target(str(camera["camera_id"]))
+    edge = EdgeHttpClient(
+        base_url=str(target["management_url"]),
+        auth_token=str(target["auth_token"]),
+        timeout_seconds=settings.edge_control_timeout_seconds,
+    )
+    try:
+        status = await edge.set_capture_control(stream_enabled=stream_enabled, recording_enabled=recording_enabled)
+        if status.get("camera_id") != camera["camera_id"]:
+            raise EdgeControlError("INVALID_EDGE_RESPONSE", "The Edge camera ID did not match.")
+    finally:
+        await edge.close()
 
 async def _apply_camera_recording(
     request: Request,
@@ -214,24 +252,48 @@ async def _apply_camera_recording(
             camera_id,
             {
                 "recording_enabled": bool(desired_recording),
+                "stream_requested": bool(desired_recording),
                 "recording_last_error_code": None,
             },
         )
         should_record = bool(camera.get("enabled", True)) and bool(desired_recording)
         client = _new_media_client(settings, request)
+        failure = None
+        path_status = None
         try:
-            await client.set_path_recording(camera_id, should_record)
-            path_status = await client.get_path_status(camera_id)
-        except MediaControlError as exc:
+            try:
+                await client.set_path_recording(camera_id, should_record)
+            except MediaControlError as exc:
+                failure = exc
+            if not desired_recording:
+                try:
+                    await _disconnect_camera_publisher(settings, camera_id, request)
+                except MediaControlError as exc:
+                    failure = failure or exc
+            try:
+                await _set_edge_capture_control(
+                    camera,
+                    settings,
+                    data,
+                    stream_enabled=should_record,
+                    recording_enabled=should_record,
+                )
+            except (EdgeControlError, DataServiceError) as exc:
+                failure = failure or exc
+            try:
+                path_status = await client.get_path_status(camera_id)
+            except MediaControlError as exc:
+                failure = failure or exc
+        finally:
+            await client.close()
+        if failure:
             try:
                 await data.update_camera(
-                    camera_id, {"recording_last_error_code": exc.code}
+                    camera_id, {"recording_last_error_code": failure.code}
                 )
             except DataServiceError:
                 pass
-            raise
-        finally:
-            await client.close()
+            raise failure
         refreshed = await data.get_camera(camera_id, user_id=user_id)
         return _compute_recording_status(refreshed, path_status)
 
@@ -273,6 +335,7 @@ async def _apply_bulk_camera_recording(
                     "ok": True,
                     "enabled": status_payload["enabled"],
                     "recording_enabled": status_payload["recording_enabled"],
+                    "stream_requested": status_payload["stream_requested"],
                     "recording_state": status_payload["recording_state"],
                     "stream_ready": status_payload["stream_ready"],
                     "recording_file_active": status_payload["recording_file_active"],
@@ -280,8 +343,12 @@ async def _apply_bulk_camera_recording(
                     "message": None,
                 }
             )
-        except (MediaControlError, DataServiceError, HTTPException) as exc:
+        except (MediaControlError, EdgeControlError, DataServiceError, HTTPException) as exc:
             failed += 1
+            try:
+                current = await data.get_camera(camera_id, user_id=principal.user_id)
+            except DataServiceError:
+                current = camera
             if isinstance(exc, MediaControlError):
                 error_code = exc.code
                 message = exc.message
@@ -295,11 +362,12 @@ async def _apply_bulk_camera_recording(
                 {
                     "camera_id": camera_id,
                     "ok": False,
-                    "enabled": bool(camera.get("enabled", True)),
-                    "recording_enabled": bool(desired_recording),
+                    "enabled": bool(current.get("enabled", True)),
+                    "recording_enabled": bool(current.get("recording_enabled", False)),
+                    "stream_requested": bool(current.get("recording_enabled", False)),
                     "recording_state": "error",
                     "stream_ready": False,
-                    "recording_file_active": bool(camera.get("recording_file_active")),
+                    "recording_file_active": bool(current.get("recording_file_active")),
                     "error_code": error_code,
                     "message": message,
                 }
@@ -602,7 +670,6 @@ async def stop_all_cameras_recording(
     )
 
 
-# 부분 설정을 검증하고 활성 상태 변경 시 오래된 실행 상태와 송출 연결도 정리한다.
 @router.patch("/api/v1/cameras/{camera_id}", response_model=CameraResponse)
 async def update_camera(
     request: Request,
@@ -614,6 +681,7 @@ async def update_camera(
 ) -> Any:
     if not CAMERA_ID_PATTERN.fullmatch(camera_id):
         raise HTTPException(status_code=400, detail="Invalid camera ID")
+    previous = await data.get_camera(camera_id, user_id="0")
     body = payload.model_dump(exclude_unset=True)
     body.pop("edge_auth_token", None)
     if payload.edge_auth_token is not None:
@@ -625,6 +693,9 @@ async def update_camera(
     _validate_edge_url(body.get("edge_recovery_url"), "edge_recovery_url")
     if body.get("stream_path") is not None and body["stream_path"] != camera_id:
         raise HTTPException(status_code=400, detail="stream_path must match camera_id")
+    if body.get("enabled") is False:
+        body["recording_enabled"] = False
+        body["stream_requested"] = False
     if "enabled" in body:
         body["status"] = "offline" if body["enabled"] else "disabled"
     async with (
@@ -632,6 +703,15 @@ async def update_camera(
         camera_admission_lock(request, camera_id),
     ):
         updated = await data.update_camera(camera_id, body)
+        if "enabled" in body:
+            should_record = bool(updated.get("enabled", True)) and bool(
+                updated.get("recording_enabled", False)
+            )
+            await _set_edge_capture_control(
+                updated, settings, data,
+                stream_enabled=should_record,
+                recording_enabled=should_record,
+            )
         if "enabled" in body:
             await data.put_camera_runtime_status(
                 camera_id,

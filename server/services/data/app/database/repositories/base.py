@@ -43,6 +43,8 @@ def _camera(row: sqlite3.Row | None) -> dict[str, Any] | None:
     result = _as_dict(row)
     if result is not None:
         result["enabled"] = bool(result["enabled"])
+        if "stream_requested" in result:
+            result["stream_requested"] = bool(result["stream_requested"])
         if "recording_enabled" in result:
             result["recording_enabled"] = bool(result["recording_enabled"])
     return result
