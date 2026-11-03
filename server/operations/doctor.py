@@ -22,6 +22,8 @@ from .compose import ComposeAdapter, default_server_dir
 def _compose_rows(raw: str) -> list[dict]:
     """Compose의 JSON 배열과 줄별 JSON 출력을 같은 목록으로 정규화한다."""
 
+    if not isinstance(raw, str):
+        raise ValueError("Compose status output is unavailable")
     text = raw.strip()
     if not text:
         return []
@@ -143,24 +145,42 @@ def _preprocessing_checks(payload: dict) -> list[Check]:
             "ready" if ready else "degraded or readiness could not be confirmed",
         )
     )
+    if payload.get("inference_enabled") is False:
+        results.append(Check("WARN", "Object inference", "disabled by runtime configuration"))
+    elif payload.get("inference_enabled") is True and payload.get("worker_count") == 0:
+        results.append(Check("WARN", "Object inference", "enabled, but no active camera workers"))
     workers = payload.get("workers", {})
     if not isinstance(workers, dict) or any(
         not isinstance(worker, dict) for worker in workers.values()
     ):
         raise ValueError("invalid camera status response")
+    if payload.get("gpu_requested") is True and any(
+        worker.get("model_ready") is True
+        and not str(worker.get("execution_device", "")).startswith("cuda")
+        for worker in workers.values()
+    ):
+        results.append(
+            Check("WARN", "Preprocessing GPU", "GPU access is configured, but detection is running on CPU")
+        )
+    elif payload.get("gpu_requested") is True:
+        results.append(Check("OK", "Preprocessing GPU", "GPU access is configured"))
     for camera_id, worker in sorted(workers.items()):
         online = worker.get("state") == "online"
         model_ready = worker.get("model_ready") is True
         fresh = worker.get("frame_stale") is False
         delivery_error = bool(worker.get("event_delivery_error"))
+        live_delivery_failures = worker.get("live_objects_consecutive_failures", 0)
         results.append(
             Check(
                 "OK"
                 if online and model_ready and fresh and not delivery_error
+                and not (type(live_delivery_failures) is int and live_delivery_failures >= 3)
                 else "WARN",
                 f"Camera {camera_id}",
                 f"online={online}, model_ready={model_ready}, frame_fresh={fresh}, "
-                f"event_delivery_error={delivery_error}",
+                f"event_delivery_error={delivery_error}, "
+                f"live_objects_delivery_failures={live_delivery_failures}, "
+                f"detections={worker.get('detection_object_count', 'unknown')}",
             )
         )
     identity = payload.get("identity")
@@ -210,13 +230,20 @@ def _runtime_checks(adapter: ComposeAdapter) -> list[Check]:
         ps = adapter.run("ps", "--format", "json", capture=True)
     except (OSError, subprocess.SubprocessError) as exc:
         return [Check("ERROR", "Compose services", str(exc))]
-    rows = _compose_rows(ps.stdout) if ps.returncode == 0 else []
     if ps.returncode != 0:
         results.append(
             Check(
-                "ERROR", "Compose services", ps.stderr.strip() or "status query failed"
+                "ERROR",
+                "Compose services",
+                (ps.stderr or "").strip() or "status query failed",
             )
         )
+        return results
+    try:
+        rows = _compose_rows(ps.stdout)
+    except ValueError as exc:
+        results.append(Check("ERROR", "Compose services", str(exc)))
+        return results
     by_service = {str(row.get("Service") or row.get("Name")): row for row in rows}
     for service in (
         "data",
@@ -316,11 +343,13 @@ def checks(
                     [docker, *arguments],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=20,
                     check=False,
                 )
                 message = (
-                    (result.stdout or result.stderr).strip()
+                    (result.stdout or result.stderr or "").strip()
                     if name == "Docker Compose"
                     else "running"
                     if result.returncode == 0

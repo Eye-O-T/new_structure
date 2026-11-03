@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -89,7 +90,13 @@ def create_app(settings: Settings | None = None):
         identity = worker_status(app.state.identity_worker)
         if app.state.identity_error:
             identity["last_error"] = app.state.identity_error
-        return {**detection, "identity": identity}
+        return {
+            **detection,
+            "inference_enabled": runtime_settings.inference_enabled,
+            "gpu_requested": os.getenv("PREPROCESSING_GPU", "false").strip().lower() in {"1", "true", "yes", "on"},
+            "worker_count": len(detection.get("workers", {})),
+            "identity": identity,
+        }
 
     @app.get("/health/live")
     def health_live():
@@ -107,13 +114,30 @@ def create_app(settings: Settings | None = None):
             not worker["model_ready"]
             or worker.get("state") in {"offline", "stopped", "error"}
             or worker.get("event_delivery_error")
+            or (worker.get("live_objects_consecutive_failures", 0) >= 3
+                and worker.get("detection_object_count") is not None)
             or worker.get("frame_stale")
             for worker in state["workers"].values()
+        )
+        model_degraded = model_degraded or (
+            runtime_settings.inference_enabled
+            and bool(state.get("workers"))
+            and not any(worker.get("model_ready") for worker in state["workers"].values())
+        )
+        workers = state.get("workers", {})
+        gpu_degraded = state["gpu_requested"] and runtime_settings.inference_enabled and (
+            not workers
+            or any(
+                worker.get("model_ready")
+                and not str(worker.get("execution_device", "")).startswith("cuda")
+                for worker in workers.values()
+            )
         )
         identity = state["identity"]
         delivery = state.get("event_delivery", {})
         degraded = (
             model_degraded
+            or gpu_degraded
             or not identity["ready"]
             or not identity["model_ready"]
             or identity["stalled"]
@@ -121,7 +145,8 @@ def create_app(settings: Settings | None = None):
             or bool(delivery.get("last_error"))
             or bool(delivery.get("rejected"))
         )
-        return {"status": "degraded" if degraded else "ready", **state}
+        detection_status = "idle" if not state.get("workers") else ("ready" if not model_degraded else "degraded")
+        return {"status": "degraded" if degraded else detection_status, **state}
 
     @app.get("/internal/v1/status")
     def internal_status():

@@ -610,9 +610,9 @@ class CCTVMainWindow(ReferenceWindow):
         event = {**event, "camera_id": camera_id}
         self._camera_events.setdefault(camera_id, []).insert(0, event)
         del self._camera_events[camera_id][30:]
-        if event.get("type") in {"error", "network_failure"}:
+        if event.get("type") in {"error", "network_failure", "objects_error"}:
             view = self._views.get(camera_id)
-            if view:
+            if view and event.get("type") != "objects_error":
                 view.show_error(event.get("message", "영상 연결 오류"))
         if camera_id == self._selected_camera_id:
             self._render_selected_summary()

@@ -282,6 +282,7 @@ class ServerApiClient:
         payload: Mapping[str, Any] | None = None,
         *,
         authenticated: bool = True,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         headers = {"Accept": "application/json"}
         data = None
@@ -298,7 +299,7 @@ class ServerApiClient:
             f"{self.base_url}{path}", data=data, headers=headers, method=method
         )
         try:
-            with self._opener(request, timeout=self.timeout) as response:
+            with self._opener(request, timeout=self.timeout if timeout is None else timeout) as response:
                 raw = response.read()
         except HTTPError as exc:
             raw = exc.read()

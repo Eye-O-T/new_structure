@@ -24,13 +24,16 @@ def migrate_detection_model(env_file: Path) -> bool:
     values = read_deployment_env(env_file)
     current = values.get("MODEL_FILE", "")
     models_root_value = values.get("MODELS_DIR")
-    if not models_root_value or current not in DETECTION_MODEL_MIGRATION:
+    if not models_root_value:
         return False
 
     models_root = Path(models_root_value).expanduser()
     current_path = models_root / (current or "default.pt")
     replacement = models_root / "yolo11n.pt"
-    if current_path.is_file() or not replacement.is_file():
+    from server.installer.models import is_par_bundle
+
+    known_invalid = current_path.is_file() and is_par_bundle(current_path)
+    if (current not in DETECTION_MODEL_MIGRATION and not known_invalid) or not replacement.is_file():
         return False
 
     content = env_file.read_text(encoding="utf-8")
@@ -127,6 +130,8 @@ def installation_prerequisites(server_dir: str | Path) -> list[Prerequisite]:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=20,
         )
         compose = subprocess.run(
@@ -134,6 +139,8 @@ def installation_prerequisites(server_dir: str | Path) -> list[Prerequisite]:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=20,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -152,7 +159,7 @@ def installation_prerequisites(server_dir: str | Path) -> list[Prerequisite]:
         Prerequisite(
             compose.returncode == 0,
             "Docker Compose",
-            (compose.stdout or compose.stderr).strip()
+            (compose.stdout or compose.stderr or "").strip()
             or "Docker Compose is unavailable.",
         )
     )
@@ -261,6 +268,13 @@ class ComposeAdapter:
             required_files["Inference model"] = (
                 models_root / model_name if models_root is not None and model_name else None
             )
+            detection_path = required_files["Inference model"]
+            if detection_path is not None and detection_path.is_file():
+                try:
+                    from server.installer.models import _validated_local_model
+                    _validated_local_model(detection_path)
+                except (OSError, ValueError):
+                    required_files["Inference model"] = None
             from server.installer.models import (
                 IDENTITY_PLUGIN,
                 deployed_identity_model,
@@ -308,6 +322,8 @@ class ComposeAdapter:
             cwd=self.server_dir,
             check=False,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=capture,
         )
 

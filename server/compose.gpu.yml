@@ -4,6 +4,8 @@ services:
     gpus: all
     environment:
       LD_LIBRARY_PATH: /usr/local/lib/python3.11/site-packages/nvidia/cudnn/lib:/usr/local/lib/python3.11/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.11/site-packages/nvidia/cufft/lib:/usr/local/lib/python3.11/site-packages/nvidia/curand/lib:/usr/local/lib/python3.11/site-packages/nvidia/cusparse/lib:/usr/local/lib/python3.11/site-packages/nvidia/cusolver/lib:/usr/local/lib/python3.11/site-packages/nvidia/nvjitlink/lib:/usr/local/lib/python3.11/site-packages/nvidia/cuda_nvrtc/lib
+      PREPROCESSING_GPU: "true"
     build:
       args:
-        TORCH_INDEX_URL: ${PREPROCESSING_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu126
+        ONNX_RUNTIME_PACKAGE: onnxruntime-gpu==1.20.2

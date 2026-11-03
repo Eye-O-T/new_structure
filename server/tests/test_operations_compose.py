@@ -1,5 +1,8 @@
 import json
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +16,8 @@ from server.operations.compose import (
     STOP_ARGUMENTS,
     default_server_dir,
 )
-from server.operations.services import _deployment_state
+from server.operations.services import _deployment_state, _run
+from server.operations.doctor import _compose_rows
 
 
 class DefaultServerDirTests(unittest.TestCase):
@@ -82,6 +86,53 @@ class ComposeAdapterCommandTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         run_mock.assert_called_once_with(*STOP_ARGUMENTS)
         self.assertEqual(STOP_ARGUMENTS, ("--profile", "ai", "stop"))
+
+    def test_compose_adapter_decodes_unicode_as_utf8(self):
+        adapter = ComposeAdapter(self.server, self.env)
+        with patch("server.operations.compose.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+            adapter.run("version", capture=True)
+        self.assertEqual(run_mock.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(run_mock.call_args.kwargs["errors"], "replace")
+
+    def test_diagnostic_rows_reject_missing_output(self):
+        with self.assertRaisesRegex(ValueError, "output is unavailable"):
+            _compose_rows(None)
+
+    def test_diagnostic_rows_accept_unicode_json_output(self):
+        self.assertEqual(
+            _compose_rows('{"Service":"preprocessing","Status":"점검 중"}'),
+            [{"Service": "preprocessing", "Status": "점검 중"}],
+        )
+
+    def test_start_failure_reports_missing_package_and_redacts_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "test-package"):
+                _run(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; print('No matching distribution found for test-package', file=sys.stderr); sys.exit(1)",
+                    ],
+                    directory=Path(directory),
+                    deadline=time.monotonic() + 10,
+                    capture=False,
+                )
+
+            with self.assertRaises(RuntimeError) as raised:
+                _run(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; print('rtsp://reader:secret@camera/stream'); print('DATA_INFERENCE_TOKEN=private-token'); sys.exit(1)",
+                    ],
+                    directory=Path(directory),
+                    deadline=time.monotonic() + 10,
+                    capture=False,
+                )
+        self.assertIn("<redacted>", str(raised.exception))
+        self.assertNotIn("secret", str(raised.exception))
+        self.assertNotIn("private-token", str(raised.exception))
 
     def test_reset_incompatible_deployment_stops_instead_of_down(self):
         with patch(

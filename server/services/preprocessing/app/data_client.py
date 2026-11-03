@@ -48,12 +48,14 @@ class DataClient:
         )
         response.raise_for_status()
 
-    def put_live_objects(self, camera_id: str, payload: dict) -> None:
+    def put_live_objects(self, camera_id: str, payload: dict) -> dict[str, Any]:
         # 실시간 좌표는 오래 기다리면 가치가 줄어 일반 요청보다 짧은 시간제한을 적용한다.
         response = self._client.put(
             f"/cameras/{camera_id}/objects", json=payload, timeout=2.0
         )
         response.raise_for_status()
+        result = response.json()
+        return result if isinstance(result, dict) else {}
 
     # Data가 이벤트를 수락하지 않으면 호출자가 전송 실패를 기록할 수 있도록 예외를 전달한다.
     def create_event(self, event: dict[str, Any]) -> None:

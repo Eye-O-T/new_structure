@@ -8,6 +8,7 @@ import posixpath
 import re
 import signal
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -127,10 +128,13 @@ def _run(
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise RuntimeError(_TIMEOUT_MESSAGE)
+    output_file = None if capture else tempfile.TemporaryFile(
+        mode="w+t", encoding="utf-8", errors="replace"
+    )
     options: dict[str, Any] = {
         "cwd": directory,
-        "stdout": subprocess.PIPE if capture else subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE if capture else output_file,
+        "stderr": subprocess.PIPE if capture else subprocess.STDOUT,
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
@@ -144,9 +148,11 @@ def _run(
     try:
         process = subprocess.Popen(command, **options)
     except (OSError, ValueError):
+        if output_file is not None:
+            output_file.close()
         raise RuntimeError(_DOCKER_ERROR) from None
     try:
-        stdout, _ = process.communicate(
+        stdout, stderr = process.communicate(
             timeout=min(remaining, QUERY_TIMEOUT_SECONDS) if capture else remaining
         )
     except subprocess.TimeoutExpired:
@@ -158,9 +164,46 @@ def _run(
                 "Docker Desktop의 작업 상태를 확인한 뒤 다시 시도하세요."
             ) from None
         raise RuntimeError(_TIMEOUT_MESSAGE) from None
+    finally:
+        if output_file is not None:
+            output_file.flush()
+            output_file.seek(0, os.SEEK_END)
+            output_size = output_file.tell()
+            output_file.seek(max(0, output_size - 8192))
+            file_output = output_file.read()
+            output_file.close()
+    command_output = file_output if not capture else "\n".join(
+        part for part in (stdout, stderr) if isinstance(part, str) and part
+    )
     if process.returncode:
-        raise RuntimeError(_DOCKER_ERROR)
-    return stdout or ""
+        package = re.search(
+            r"No matching distribution found for ([A-Za-z0-9_.+-]+)",
+            command_output or "",
+        )
+        if package:
+            raise RuntimeError(
+                f"Docker operation failed (exit {process.returncode}): "
+                f"Python package {package.group(1)} is unavailable from the configured index."
+            )
+        safe_lines = []
+        for line in (command_output or "").splitlines()[-8:]:
+            if re.search(
+                r"(?i)(?:DATA_[A-Z0-9_]*(?:TOKEN|PASSWORD|SECRET)|JWT_SECRET|INTERNAL_SERVICE_TOKEN|MEDIA_READ_PASSWORD)",
+                line,
+            ):
+                line = "[sensitive command output redacted]"
+            line = re.sub(
+                r"(?i)(rtsp|rtsps|https?)://[^\s/@]+@",
+                r"\1://<redacted>@",
+                line,
+            )
+            safe_lines.append(line[-300:])
+        summary = "\n".join(safe_lines).strip()
+        raise RuntimeError(
+            f"Docker operation failed (exit {process.returncode})."
+            + (f"\n{summary}" if summary else " See Docker Desktop for command details.")
+        )
+    return (stdout or "") if capture else ""
 
 
 # Docker JSON 파싱 실패를 공통 오류로 바꿔 응답 본문이 화면으로 흘러가지 않게 한다.

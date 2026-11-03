@@ -25,7 +25,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: .;lib
-        run: python -m pytest server/tests server/setup/install_helper/tests server/services/data server/services/external/tests -q
+        run: python -m pytest server/tests server/setup/install_helper/tests server/services/data server/services/external/tests server/services/analysis/tests -q
 
   edge:
     runs-on: ubuntu-24.04

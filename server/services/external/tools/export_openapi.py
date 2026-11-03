@@ -196,7 +196,7 @@ OPERATIONS = {
     ),
     "get_live_objects": (
         "최신 객체 좌표",
-        "원본 픽셀 기준 bbox=[x1,y1,x2,y2]다. 화면 비율·여백을 반영해 그린다. 최근 3초 이내 관측만 반환하고 없거나 오래됐거나 미래 시각이면 stale=true와 빈 objects를 반환한다. stale일 때 세션·크기·관측 시각 필드는 없다. HLS 프레임과 정확히 동기화되지 않는다.",
+        "원본 픽셀 기준 bbox=[x1,y1,x2,y2]다. 화면 비율·여백을 반영해 그린다. 최근 3초 이내 관측만 반환하고 없거나 오래됐거나 미래 시각이면 stale=true와 빈 objects를 반환한다. stale 응답은 stale_reason(no_observation/expired/future_timestamp)과 observed_age_seconds, received_age_seconds를 제공한다. HLS 프레임과 정확히 동기화되지 않는다.",
     ),
     "list_recordings": (
         "녹화 구간 검색",
@@ -320,7 +320,7 @@ def _supplement_responses(document: dict[str, Any]) -> None:
         _add_model(schemas, model)
     schemas["PublicLiveObjects"] = {
         "oneOf": [_ref("FreshLiveObjects"), _ref("StaleLiveObjects")],
-        "description": "Data get_live_objects의 최신/만료 응답. stale에 따라 필드가 다르다.",
+        "description": "Data get_live_objects의 최신/만료 응답. 만료 시 stale_reason과 관측/수신 나이를 제공한다.",
     }
     schemas["PushStatus"] = {
         "type": "object",

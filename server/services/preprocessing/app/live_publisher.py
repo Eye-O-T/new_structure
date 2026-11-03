@@ -3,6 +3,13 @@
 
 import queue
 import threading
+import logging
+import time
+from datetime import datetime, timezone
+
+LOGGER = logging.getLogger("ai_cctv.preprocessing")
+
+from .performance import TimingWindow
 
 
 # 최신 좌표 한 건만 보관하는 비동기 전송기로 탐지 스레드의 네트워크 대기를 줄인다.
@@ -13,6 +20,12 @@ class LivePublisher:
         # 대기 공간을 한 칸만 두고, 전송 중 새 결과가 쌓이면 가장 최신 결과만 남긴다.
         self.pending = queue.Queue(maxsize=1)
         self.stopped = threading.Event()
+        self._status_lock = threading.Lock()
+        self._last_success_at = None
+        self._last_error_code = None
+        self._consecutive_failures = 0
+        self._reported_error_code = None
+        self._timings = TimingWindow()
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
@@ -41,10 +54,62 @@ class LivePublisher:
                 continue
             if self.stopped.is_set():
                 break
+            started = time.monotonic()
+            timings = {}
             try:
-                self.data.put_live_objects(self.camera_id, payload)
-            except Exception:
-                pass  # 좌표는 일시적인 상태다. 소비자는 오래된 박스를 버리고 다음 갱신을 기다린다.
+                timings = self.data.put_live_objects(self.camera_id, payload) or {}
+                for key in ("db_lock_wait_seconds", "db_transaction_seconds"):
+                    value = timings.get(key)
+                    if isinstance(value, (int, float)):
+                        self._timings.record(key, value)
+            except Exception as exc:
+                code = self._error_code(exc)
+                with self._status_lock:
+                    self._last_error_code = code
+                    self._consecutive_failures += 1
+                    should_log = code != self._reported_error_code
+                    self._reported_error_code = code
+                if should_log:
+                    LOGGER.warning(
+                        "live object delivery failed",
+                        extra={"camera_id": self.camera_id, "error_code": code},
+                    )
+            else:
+                with self._status_lock:
+                    recovered = self._consecutive_failures > 0
+                    self._last_success_at = datetime.now(timezone.utc).isoformat()
+                    self._last_error_code = None
+                    self._consecutive_failures = 0
+                    self._reported_error_code = None
+                if recovered:
+                    LOGGER.info(
+                        "live object delivery recovered",
+                        extra={"camera_id": self.camera_id},
+                    )
+            finally:
+                self._timings.record("data_put_seconds", time.monotonic() - started)
+
+    @staticmethod
+    def _error_code(exc):
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+        if status is not None:
+            return f"HTTP_{status}" if status in {401, 403, 404, 409, 422} else "HTTP_ERROR"
+        name = type(exc).__name__.lower()
+        if "timeout" in name:
+            return "TIMEOUT"
+        if "connect" in name or "network" in name:
+            return "CONNECTION_ERROR"
+        return "DELIVERY_ERROR"
+
+    def status(self):
+        with self._status_lock:
+            return {
+                "last_success_at": self._last_success_at,
+                "last_error_code": self._last_error_code,
+                "consecutive_failures": self._consecutive_failures,
+                "timings": self._timings.snapshot(),
+            }
 
     # 종료를 요청하고 제한 시간만 기다린다. 남은 좌표를 모두 전송하는 보장은 하지 않는다.
     def close(self):

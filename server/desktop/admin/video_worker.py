@@ -42,6 +42,7 @@ LIVE_RTSP_OPTIONS = {
 }
 OBJECT_POLL_INTERVAL_SECONDS = 0.5
 EVENT_POLL_INTERVAL_SECONDS = 2.0
+POLL_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 def _safe_stream_error(exc):
@@ -196,46 +197,63 @@ class VideoWorker(QThread):
     def poll(self):
         api, camera_id = self.source
         adapter = ObservationAdapter()
-        start = datetime.now(timezone.utc).isoformat()
-        seen = set()
         failed = False
-        last_event_poll = 0.0
         while not self._stop.is_set():
             try:
-                payload = api.camera(camera_id, "/objects")
-                self.objects_ready.emit(payload)
+                payload = api.camera(
+                    camera_id,
+                    "/objects",
+                    timeout=POLL_REQUEST_TIMEOUT_SECONDS,
+                )
+                if isinstance(payload, dict):
+                    self.objects_ready.emit(payload)
+                else:
+                    raise ValueError("Invalid live objects response")
                 self.metrics_ready.emit(adapter.metrics(payload))
-                now = time.monotonic()
-                if now - last_event_poll >= EVENT_POLL_INTERVAL_SECONDS:
-                    end = datetime.now(timezone.utc).isoformat()
-                    cursor = None
-                    current = set()
-                    while not self._stop.is_set():
-                        page = api.events(camera_id, start, cursor)
-                        for event in page.get("items", []):
-                            key = str(event["id"])
-                            current.add(key)
-                            if key not in seen:
-                                self.event_ready.emit(legacy_event(event))
-                        cursor = page.get("next_cursor")
-                        if not page.get("has_more") or not cursor:
-                            break
-                    seen = current
-                    start = end  # overlap at request start to include events arriving during pagination.
-                    last_event_poll = now
                 failed = False
             except Exception as exc:
                 self.objects_ready.emit({"objects": [], "stale": True})
                 self.metrics_ready.emit({"current_objects": "—", "tracked_total": len(adapter.tracks)})
                 if not failed:
-                    self.event_ready.emit({"type": "error", "message": safe_error(exc)})
+                    self.event_ready.emit({"type": "objects_error", "message": safe_error(exc)})
                 failed = True
             self._stop.wait(OBJECT_POLL_INTERVAL_SECONDS)
 
+    def poll_events(self):
+        api, camera_id = self.source
+        start = datetime.now(timezone.utc).isoformat()
+        seen = set()
+        failed = False
+        while not self._stop.is_set():
+            try:
+                end = datetime.now(timezone.utc).isoformat()
+                cursor = None
+                current = set()
+                while not self._stop.is_set():
+                    page = api.events(camera_id, start, cursor)
+                    for event in page.get("items", []):
+                        key = str(event["id"])
+                        current.add(key)
+                        if key not in seen:
+                            self.event_ready.emit(legacy_event(event))
+                    cursor = page.get("next_cursor")
+                    if not page.get("has_more") or not cursor:
+                        break
+                seen = current
+                start = end  # overlap at request start to include events arriving during pagination.
+                failed = False
+            except Exception as exc:
+                if not failed:
+                    self.event_ready.emit({"type": "event_error", "message": safe_error(exc)})
+                failed = True
+            self._stop.wait(EVENT_POLL_INTERVAL_SECONDS)
+
     def run(self):
         api, camera_id = self.source
-        poller = threading.Thread(target=self.poll)
+        poller = threading.Thread(target=self.poll, daemon=True)
+        event_poller = threading.Thread(target=self.poll_events, daemon=True)
         poller.start()
+        event_poller.start()
         frames = Queue(maxsize=LIVE_FRAME_QUEUE_SIZE)
         self._decode_thread = threading.Thread(
             target=self._decode_loop, args=(frames,), daemon=True
@@ -290,7 +308,8 @@ class VideoWorker(QThread):
             self._stop.set()
             if self._decode_thread is not None:
                 self._decode_thread.join(timeout=2)
-            poller.join()
+            poller.join(timeout=POLL_REQUEST_TIMEOUT_SECONDS + 1)
+            event_poller.join(timeout=POLL_REQUEST_TIMEOUT_SECONDS + 1)
 
     def _decode_loop(self, frames):
         api, camera_id = self.source

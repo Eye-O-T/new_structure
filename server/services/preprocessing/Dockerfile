@@ -14,9 +14,10 @@ WORKDIR /app
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 ARG TORCH_VERSION=2.8.0
 ARG TORCHVISION_VERSION=0.23.0
+ARG ONNX_RUNTIME_PACKAGE=onnxruntime==1.20.1
 RUN pip install --no-cache-dir "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}" --index-url "${TORCH_INDEX_URL}"
 COPY server/services/preprocessing/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir "${ONNX_RUNTIME_PACKAGE}" -r /tmp/requirements.txt
 COPY lib /opt/ai-cctv-core
 RUN pip install --no-cache-dir '/opt/ai-cctv-core[processing]'
 COPY server/services/preprocessing/app /app/server/services/preprocessing/app

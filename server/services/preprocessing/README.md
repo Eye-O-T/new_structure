@@ -2,7 +2,7 @@
 
 ## 실행 장치와 Docker 이미지
 
-기본 이미지는 Python 3.11과 PyTorch `2.8.0` CPU wheel을 사용하므로 GPU가 없는 환경에서도 실행됩니다. GPU 환경에서는 `compose.gpu.yml`이 PyTorch `2.8.0` CUDA `cu128` wheel과 Docker `gpus: all` 설정을 선택합니다. NVIDIA Driver와 NVIDIA Container Toolkit(또는 Docker Desktop GPU 지원)이 필요합니다.
+기본 이미지는 Python 3.11과 PyTorch `2.8.0` CPU wheel을 사용하므로 GPU가 없는 환경에서도 실행됩니다. GPU 환경에서는 `compose.gpu.yml`이 PyTorch `2.8.0` CUDA `cu126` wheel, GPU ONNX Runtime,과 Docker `gpus: all` 설정을 선택합니다. NVIDIA Driver와 NVIDIA Container Toolkit(또는 Docker Desktop GPU 지원)이 필요합니다.
 
 ```powershell
 # CPU 또는 자동 선택
@@ -102,3 +102,6 @@ docker compose --env-file server/.env -f server/compose.yml exec preprocessing p
 서비스는 OSNet 입력·출력 계약, 손상·상수 크롭 거부, 작업 처리와 외관 특징 호환을 유지한다. 모델 대역 동작과 실제 가중치 추론은 구분한다.
 
 공식 가중치로 ONNX를 실제 생성하고 PyTorch 2.8.0 CPU와 OpenCV 4.11의 세 입력 출력을 비교했다. 변환 기록 `.onnx.json`에는 해시·버전·검증 수치가 남는다. 자세한 재현 방법은 [모델 준비 도구 안내](../../tools/README.md)를 따른다. 이 확인은 변환·실행 호환성의 근거이며 CCTV 재식별 정확도를 보증하지 않는다. Docker·실제 카메라에서의 정확도·처리량·전체 기동은 별도 검증이 필요하다. 준비한 YOLO와 OSNet을 읽기 전용 모델 폴더에 두고 이 문서의 [실행과 검증](#실행과-검증)에 따라 실제 프레임·등장 이벤트·crop·전역 연결·장애 복구를 확인한다.
+
+
+`/internal/v1/status` reports the recent 100-sample p50/p95 and last timings per camera: capture read, capture-to-inference wait, model, IPC, postprocessing, image/event persistence, Data PUT, and SQLite lock/transaction. `capture_frames_replaced` counts frames skipped while inference was busy.

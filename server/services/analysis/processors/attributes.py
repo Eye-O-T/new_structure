@@ -8,7 +8,10 @@
 정지 이미지의 추정이므로 가림·조명·해상도에 영향을 받는다.
 """
 
+import math
 import os
+import re
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +29,9 @@ BACKBONE_FEATURE_DIM = 512  # resnet34의 풀링된 특징 차원
 MAX_TAGS = 3  # 다중 라벨 속성에서 표시할 최대 개수
 SCORE_DIGITS = 4
 METADATA_SCHEMA_VERSION = 1
+SUPPORTED_FORMAT_VERSION = 1
+SUPPORTED_BACKBONE = "resnet34"
+ATTRIBUTE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 class _MultiHeadNetwork(nn.Module):
@@ -48,12 +54,107 @@ class _MultiHeadNetwork(nn.Module):
 def _load_bundle(path: Path) -> dict:
     if not path.is_file():
         raise FileNotFoundError(f"Model bundle is missing: {path}")
-    bundle = torch.load(path, map_location="cpu", weights_only=False)
+    # 제출 파일은 코드 객체가 아니라 텐서와 기본 자료형만 담는 번들이다. 제한 로더를
+    # 사용해 모델 파일이 임의 Python 객체를 역직렬화하지 못하게 한다.
+    bundle = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(bundle, dict) or bundle.get("format") != BUNDLE_FORMAT:
         raise ValueError(f"Model file is not a {BUNDLE_FORMAT}: {path}")
-    for key in ("attributes", "multi_label", "display_rules", "input_size", "normalize", "state_dict"):
+    for key in (
+        "format_version",
+        "backbone",
+        "attributes",
+        "multi_label",
+        "display_rules",
+        "input_size",
+        "normalize",
+        "state_dict",
+    ):
         if key not in bundle:
             raise ValueError(f"Model bundle is missing '{key}': {path}")
+    if (
+        isinstance(bundle["format_version"], bool)
+        or bundle["format_version"] != SUPPORTED_FORMAT_VERSION
+    ):
+        raise ValueError("Unsupported model bundle format version")
+    if bundle["backbone"] != SUPPORTED_BACKBONE:
+        raise ValueError("Unsupported model backbone")
+
+    attributes = bundle["attributes"]
+    if not isinstance(attributes, dict) or not attributes:
+        raise ValueError("Model attributes must be a nonempty object")
+    for name, classes in attributes.items():
+        if not isinstance(name, str) or not ATTRIBUTE_NAME.fullmatch(name):
+            raise ValueError("Model attribute names must be safe identifiers")
+        if (
+            not isinstance(classes, list)
+            or not classes
+            or any(not isinstance(label, str) or not label.strip() for label in classes)
+            or len(set(classes)) != len(classes)
+        ):
+            raise ValueError(f"Model attribute '{name}' has invalid classes")
+
+    multi_label = bundle["multi_label"]
+    if (
+        not isinstance(multi_label, list)
+        or any(not isinstance(name, str) or name not in attributes for name in multi_label)
+        or len(set(multi_label)) != len(multi_label)
+    ):
+        raise ValueError("Model multi-label attributes are invalid")
+
+    display_rules = bundle["display_rules"]
+    if not isinstance(display_rules, dict) or any(
+        name not in multi_label for name in display_rules
+    ):
+        raise ValueError("Model display rules reference an unknown attribute")
+    for name, rule in display_rules.items():
+        if not isinstance(rule, dict) or set(rule) - {"always_top", "threshold"}:
+            raise ValueError(f"Model display rule for '{name}' is invalid")
+        always_top = rule.get("always_top", False)
+        threshold = rule.get("threshold")
+        if not isinstance(always_top, bool) or (
+            threshold is not None
+            and (
+                isinstance(threshold, bool)
+                or not isinstance(threshold, (int, float))
+                or not math.isfinite(threshold)
+                or not 0 <= threshold <= 1
+            )
+        ):
+            raise ValueError(f"Model display rule for '{name}' is invalid")
+
+    input_size = bundle["input_size"]
+    if (
+        not isinstance(input_size, (list, tuple))
+        or len(input_size) != 2
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in input_size
+        )
+    ):
+        raise ValueError("Model input size must contain two positive integers")
+
+    normalize = bundle["normalize"]
+    if not isinstance(normalize, dict) or set(normalize) != {"mean", "std"}:
+        raise ValueError("Model normalization is invalid")
+    for key in ("mean", "std"):
+        values = normalize[key]
+        if (
+            not isinstance(values, (list, tuple))
+            or len(values) != 3
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or (key == "std" and value <= 0)
+                for value in values
+            )
+        ):
+            raise ValueError(f"Model normalization '{key}' is invalid")
+    if not isinstance(bundle["state_dict"], Mapping) or not bundle["state_dict"]:
+        raise ValueError("Model state_dict must be nonempty")
+    version = bundle.get("model_version", "unknown")
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError("Model version must be a nonempty string")
     return bundle
 
 

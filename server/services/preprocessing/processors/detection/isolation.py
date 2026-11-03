@@ -25,20 +25,26 @@ def _serve(connection, reference, arguments):
                     tracker.reset()
                     result = None
                 elif operation == "process":
+                    started = time.monotonic()
                     result = DetectionResult.model_validate(
                         tracker.process(frame)
                     ).model_dump(mode="json")
+                    model_seconds = max(0, time.monotonic() - started)
                 else:
                     raise ValueError("Invalid detection operation")
-                connection.send({"kind": "result", "value": result})
+                response = {"kind": "result", "value": result}
+                if operation == "process":
+                    response["model_seconds"] = model_seconds
+                connection.send(response)
             except Exception:
                 # 모델 예외의 원문에 경로·인증 정보를 포함하지 않는다.
                 connection.send({"kind": "error"})
     except (EOFError, BrokenPipeError, OSError):
         pass
-    except Exception:
+    except Exception as exc:
         try:
-            connection.send({"kind": "startup_error"})
+            error_code = "MODEL_FORMAT_INVALID" if "PAR attribute bundles" in str(exc) else "DETECTION_STARTUP_FAILED"
+            connection.send({"kind": "startup_error", "error_code": error_code})
         except (EOFError, BrokenPipeError, OSError):
             pass
     finally:
@@ -69,6 +75,8 @@ class IsolatedDetector:
         parent, child = context.Pipe()
         self._connection = parent
         self.runtime = None
+        self.last_model_seconds = None
+        self.last_ipc_seconds = None
         self._process = context.Process(
             target=_serve,
             args=(child, reference, (model_path, confidence, device)),
@@ -79,7 +87,10 @@ class IsolatedDetector:
             child.close()
             ready = self._exchange(startup_timeout_seconds)
             if ready.get("kind") != "ready":
-                raise RuntimeError("DETECTION_STARTUP_FAILED")
+                code = ready.get("error_code")
+                if code not in {"MODEL_FORMAT_INVALID", "DETECTION_STARTUP_FAILED"}:
+                    code = "DETECTION_STARTUP_FAILED"
+                raise RuntimeError(code)
             self.runtime = ready.get("runtime")
         except BaseException:
             child.close()
@@ -128,9 +139,15 @@ class IsolatedDetector:
             try:
                 if self._closed or self._stop.is_set():
                     raise RuntimeError("DETECTION_STOPPED")
+                started = time.monotonic()
                 result = self._exchange(self.timeout_seconds, (operation, frame))
                 if result.get("kind") != "result":
                     raise RuntimeError("DETECTION_MODEL_FAILED")
+                if operation == "process":
+                    self.last_model_seconds = result.get("model_seconds")
+                    self.last_ipc_seconds = max(
+                        0, time.monotonic() - started - (self.last_model_seconds or 0)
+                    )
                 return result["value"]
             except BaseException:
                 self.close()

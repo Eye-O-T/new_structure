@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import pickletools
 import tempfile
+import zipfile
 from pathlib import Path
 
 
@@ -130,7 +132,30 @@ def _validated_local_model(path: Path) -> Path:
         raise ValueError("model file is empty")
     if size > MAX_MODEL_BYTES:
         raise ValueError("model file exceeds the 2 GiB size limit")
+    if source.suffix.lower() == ".pt":
+        _reject_par_bundle(source)
     return source.resolve()
+
+
+def _reject_par_bundle(path: Path) -> None:
+    """Reject the known PAR checkpoint format without unpickling model data."""
+    if is_par_bundle(path):
+        raise ValueError("PAR attribute bundles cannot be used as YOLO detection models")
+
+
+def is_par_bundle(path: Path) -> bool:
+    """Identify the known PAR format from bounded, non-executing pickle opcodes."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entry = next(name for name in archive.namelist() if name.endswith("data.pkl"))
+            info = archive.getinfo(entry)
+            if info.file_size > 16 * 1024 * 1024:
+                return False
+            opcodes = pickletools.genops(archive.read(entry))
+            strings = [arg for opcode, arg, _ in opcodes if opcode.name in {"BINUNICODE", "SHORT_BINUNICODE", "UNICODE"} and isinstance(arg, str)]
+    except (OSError, ValueError, StopIteration, zipfile.BadZipFile):
+        return False
+    return "par-serving-bundle" in strings
 
 
 # SHA-256은 파일 내용의 지문이다. 복사 전후 지문을 비교해 복사 중 변경·손상을 확인한다.

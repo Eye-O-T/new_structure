@@ -19,8 +19,9 @@ router = APIRouter()
 def put_objects(camera_id: str, payload: LiveObjects, repository: Repo):
     if repository.get_camera(camera_id) is None:
         raise _not_found("camera")
-    repository.put_live_objects(camera_id, payload)
-    return {"accepted": True}
+    timings = {}
+    repository.put_live_objects(camera_id, payload, timings)
+    return {"accepted": True, **timings}
 
 
 # 없는 카메라의 404와 관측이 오래되어 빈 객체 목록이 된 상태를 구분한다.

@@ -264,6 +264,7 @@ services:
         TORCH_INDEX_URL: ${PREPROCESSING_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
         TORCH_VERSION: ${PREPROCESSING_TORCH_VERSION:-2.8.0}
         TORCHVISION_VERSION: ${PREPROCESSING_TORCHVISION_VERSION:-0.23.0}
+        ONNX_RUNTIME_PACKAGE: onnxruntime==1.20.1
     image: ai-cctv-preprocessing:${AI_CCTV_VERSION:-0.3.0}
     # 작업자 종료 상한(최대 60초)과 자식 모델 정리 시간을 보장한다.
     stop_grace_period: 75s
@@ -277,6 +278,7 @@ services:
     env_file:
       - ${PREPROCESSING_SECRETS_FILE:-./secrets/preprocessing.env}
     environment:
+      PREPROCESSING_GPU: ${PREPROCESSING_GPU:-false}
       DETECTION_PLUGIN: ${DETECTION_PLUGIN:-server.services.preprocessing.processors.detection.yolo:YoloTracker}
       IDENTITY_PLUGIN: ${IDENTITY_PLUGIN:-server.services.preprocessing.processors.identity:OsNetIdentity}
       IDENTITY_MODEL_PATH: ${IDENTITY_MODEL_PATH-/models/osnet_x0_25_msmt17.onnx}

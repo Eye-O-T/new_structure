@@ -142,10 +142,34 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
     identity = _object(payload.get("identity"))
     delivery = _object(payload.get("event_delivery"))
     cameras = []
+    timing_stages = {
+        "capture_read_seconds",
+        "capture_to_inference_seconds",
+        "capture_replaced_frames",
+        "inference_total_seconds",
+        "model_seconds",
+        "ipc_seconds",
+        "result_postprocess_seconds",
+        "image_persistence_seconds",
+        "event_persistence_seconds",
+        "data_put_seconds",
+        "db_lock_wait_seconds",
+        "db_transaction_seconds",
+    }
     for camera_id, raw in _object(payload.get("workers")).items():
         if not isinstance(camera_id, str) or not CAMERA_ID_PATTERN.fullmatch(camera_id):
             continue
         worker = _object(raw)
+        timings = {**_object(worker.get("timings")), **_object(worker.get("live_delivery_timings"))}
+        safe_timings = {}
+        for stage, raw_timing in timings.items():
+            if stage not in timing_stages:
+                continue
+            timing = _object(raw_timing)
+            safe_timings[stage] = {
+                key: _number(timing.get(key))
+                for key in ("samples", "last_seconds", "p50_seconds", "p95_seconds")
+            }
         cameras.append(
             {
                 "camera_id": camera_id,
@@ -162,6 +186,26 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
                 "event_shutdown_losses": _number(worker.get("event_shutdown_losses")),
                 "model_timeouts": _number(worker.get("model_timeouts")),
                 "last_inference_seconds": _number(worker.get("last_inference_seconds")),
+                "requested_device": _state(worker.get("requested_device"), {"auto", "cpu", "cuda", "cuda:0", "cuda:1", "cuda:2", "cuda:3"}),
+                "execution_device": _state(worker.get("execution_device"), {"cpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"}),
+                "timings": safe_timings,
+                "last_detection_at": _timestamp(worker.get("last_detection_at")),
+                "detection_object_count": _number(worker.get("detection_object_count")),
+                "live_objects_last_success_at": _timestamp(
+                    worker.get("live_objects_last_success_at")
+                ),
+                "live_objects_last_error_code": (
+                    _state(
+                        worker.get("live_objects_last_error_code"),
+                        {"HTTP_401", "HTTP_403", "HTTP_404", "HTTP_409", "HTTP_422",
+                         "HTTP_ERROR", "TIMEOUT", "CONNECTION_ERROR", "DELIVERY_ERROR"},
+                    )
+                    if worker.get("live_objects_last_error_code")
+                    else None
+                ),
+                "live_objects_consecutive_failures": _number(
+                    worker.get("live_objects_consecutive_failures")
+                ),
                 "observation_candidates": _number(worker.get("observation_candidates")),
                 "observation_buffer_bytes": _number(
                     worker.get("observation_buffer_bytes")
@@ -172,8 +216,11 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
             }
         )
     return {
-        "status": _state(payload.get("status"), {"ready", "degraded"}),
+        "status": _state(payload.get("status"), {"ready", "degraded", "idle"}),
         "data_ready": payload.get("data_ready") is True,
+        "inference_enabled": payload.get("inference_enabled") is True,
+        "gpu_requested": payload.get("gpu_requested") is True,
+        "worker_count": _number(payload.get("worker_count")),
         "cameras": cameras,
         "identity": {
             "ready": identity.get("ready") is True,
@@ -222,7 +269,7 @@ async def system_diagnostics(
                     payload, dict
                 ):
                     raise ValueError("invalid health response")
-                if payload.get("status") not in {"ready", "degraded"}:
+                if payload.get("status") not in {"ready", "degraded", "idle"}:
                     raise ValueError("invalid health status")
                 return public_preprocessing_status(payload)
             except Exception:

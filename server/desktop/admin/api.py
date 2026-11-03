@@ -81,7 +81,7 @@ class DesktopApi(ServerApiClient):
             self._access_token = self._refresh_token = None
             raise
 
-    def _request(self, method, path, payload=None, *, authenticated=True):
+    def _request(self, method, path, payload=None, *, authenticated=True, timeout=None):
         if not path.startswith("/api/v1/") or "#" in path:
             raise ValueError("Invalid API path")
         # Keep network requests concurrent: object/event polls from one camera
@@ -90,14 +90,14 @@ class DesktopApi(ServerApiClient):
         with self._lock:
             token_used = self._access_token
         try:
-            return super()._request(method, path, payload, authenticated=authenticated)
+            return super()._request(method, path, payload, authenticated=authenticated, timeout=timeout)
         except ServerApiError as exc:
             if exc.status_code != 401 or not authenticated:
                 raise
             with self._lock:
                 if self._access_token == token_used:
                     self._refresh()
-                return super()._request(method, path, payload, authenticated=authenticated)
+                return super()._request(method, path, payload, authenticated=authenticated, timeout=timeout)
 
     def login(self, username, password):
         with self._lock:
@@ -153,8 +153,8 @@ class DesktopApi(ServerApiClient):
             }
         )
 
-    def camera(self, camera_id, suffix="", method="GET", payload=None):
-        return self._request(method, camera_path(camera_id) + suffix, payload)
+    def camera(self, camera_id, suffix="", method="GET", payload=None, *, timeout=None):
+        return self._request(method, camera_path(camera_id) + suffix, payload, timeout=timeout)
 
     def cameras_recording(self):
         return self._request("GET", "/api/v1/cameras/recording")
@@ -178,7 +178,7 @@ class DesktopApi(ServerApiClient):
         query = {"camera_id": camera_id, "from": start, "order": "asc", "limit": 100}
         if cursor:
             query["cursor"] = cursor
-        return self._request("GET", "/api/v1/events?" + urlencode(query))
+        return self._request("GET", "/api/v1/events?" + urlencode(query), timeout=10)
 
     def event(self, event_id):
         return self._request("GET", f"/api/v1/events/{quote(str(event_id), safe='')}")

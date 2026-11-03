@@ -24,6 +24,8 @@ from .objects import clip_detections, save_observation, write_jpeg_atomic
 from .live_publisher import LivePublisher
 from .event_publisher import EventPublisher
 from .observation_buffer import ObservationBuffer
+from .camera_capture import LatestFrameCapture
+from .performance import TimingWindow
 
 LOGGER = logging.getLogger("ai_cctv.preprocessing")
 
@@ -44,6 +46,17 @@ class WorkerStatus:
     observation_persistence_failures: int = 0
     model_timeouts: int = 0
     last_inference_seconds: float | None = None
+    last_detection_at: str | None = None
+    detection_object_count: int | None = None
+    live_objects_last_success_at: str | None = None
+    live_objects_last_error_code: str | None = None
+    live_objects_consecutive_failures: int = 0
+    last_processor_seconds: float | None = None
+    last_model_seconds: float | None = None
+    last_ipc_seconds: float | None = None
+    last_postprocess_seconds: float | None = None
+    capture_frames_replaced: int = 0
+    capture_failures: int = 0
     requested_device: str | None = None
     execution_device: str | None = None
     device_name: str | None = None
@@ -78,6 +91,8 @@ class CameraWorker(threading.Thread):
         self._last_status_attempt = 0.0
         self._created_monotonic = time.monotonic()
         self._last_frame_monotonic: float | None = None
+        self._capture: LatestFrameCapture | None = None
+        self._timings = TimingWindow()
         self._tracker = None
         self._observations = ObservationBuffer(
             settings.observation_window_seconds, settings.observation_buffer_max_bytes
@@ -96,7 +111,12 @@ class CameraWorker(threading.Thread):
     def status_snapshot(self) -> dict[str, Any]:
         # 처리 스레드가 모델이나 저장소에서 멈춰도 API 스레드가 프레임 노후화를 계산한다.
         result = dict(vars(self.status))
-        last_frame = self._last_frame_monotonic
+        capture = self._capture.current() if self._capture is not None else None
+        last_frame = (
+            capture.last_frame_monotonic
+            if capture is not None
+            else self._last_frame_monotonic
+        )
         age = time.monotonic() - (
             self._created_monotonic if last_frame is None else last_frame
         )
@@ -106,6 +126,19 @@ class CameraWorker(threading.Thread):
         )
         result["observation_candidates"] = len(self._observations.pending)
         result["observation_buffer_bytes"] = self._observations.bytes_used
+        result["timings"] = {**self._timings.snapshot(), **(capture.timings if capture else {})}
+        if capture is not None:
+            result["last_frame_at"] = capture.last_frame_at
+            result["capture_connected"] = capture.connected
+            result["capture_failures"] = capture.failures
+            result["capture_frames_replaced"] = capture.replaced_frames
+            result["capture_error_code"] = capture.last_error_code
+        if self._publisher is not None:
+            publisher_status = self._publisher.status()
+            result["live_delivery_timings"] = publisher_status.pop("timings", {})
+            result.update(
+                {f"live_objects_{key}": value for key, value in publisher_status.items()}
+            )
         return result
 
     # 이벤트의 최상위 필드와 부가 메타데이터를 나누어 Data 입력 계약에 맞게 전송한다.
@@ -285,6 +318,7 @@ class CameraWorker(threading.Thread):
         try:
             self._run()
         finally:
+            self.stop_event.set()
             self.status.state = "stopped"
             self._publisher.close()
 
@@ -352,120 +386,102 @@ class CameraWorker(threading.Thread):
                 self._release_tracker()
 
     def _run_stream(self) -> None:
-        import cv2
-
         tracker = None
         state = TrackState(self.settings.disappear_seconds)
         source = self.settings.rtsp_source_url(self.stream_path)
-        timeout_ms = max(1, int(self.settings.capture_timeout_seconds * 1000))
-        parameters = [
-            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
-            timeout_ms,
-            cv2.CAP_PROP_READ_TIMEOUT_MSEC,
-            timeout_ms,
-        ]
-        delay = 1.0
+        capture = LatestFrameCapture(
+            source, self.settings.capture_timeout_seconds, self.stop_event
+        )
+        self._capture = capture
+        capture.start()
         frame_interval = 1.0 / self.settings.analysis_fps
         last_analysis = float("-inf")
         last_publish = float("-inf")
-        while not self.stop_event.is_set():
-            if tracker is None:
-                tracker = self._prepare_tracker()
-            if self.stop_event.is_set():
-                break
-            capture = None
-            try:
-                capture = cv2.VideoCapture(source, cv2.CAP_FFMPEG, parameters)
-                if not capture.isOpened():
-                    self._inference_stream_lost("rtsp_open_failed")
-                else:
-                    # 번호를 재사용하는 추적기를 새 세션으로 분리해 이전 관측과 섞지 않는다.
+        last_sequence = last_revision = last_failures = 0
+        active_generation = None
+        try:
+            while not self.stop_event.is_set():
+                if tracker is None:
+                    tracker = self._prepare_tracker()
+                snapshot = capture.snapshot(last_sequence, last_revision, 0.1)
+                last_revision = snapshot.revision
+                if snapshot.failures > last_failures:
+                    last_failures = snapshot.failures
+                    self._inference_stream_lost("rtsp_capture_failed")
+                item = snapshot.frame
+                if item is None:
+                    continue
+                previous_sequence = last_sequence
+                last_sequence = item.sequence
+                skipped = max(0, item.sequence - previous_sequence - 1)
+                if skipped:
+                    self._timings.record("capture_replaced_frames", skipped)
+                if active_generation != item.generation:
                     self._flush_observations()
-                    self.tracking_session_id = uuid.uuid4().hex
-                    state = TrackState(self.settings.disappear_seconds)
-                    if tracker is not None:
+                    if active_generation is not None and tracker is not None:
                         try:
                             tracker.reset()
                         except Exception as exc:
                             self._release_tracker()
                             tracker = None
                             self.status.model_ready = False
-                            self.status.last_error = (
-                                f"model reset failed: {type(exc).__name__}"
-                            )
-                            LOGGER.warning(
-                                "model reset failed; a later retry is scheduled"
-                            )
-                            self._next_model_attempt = (
-                                time.monotonic() + self.settings.model_retry_seconds
-                            )
-                    stream_confirmed = False
-                    while not self.stop_event.is_set():
-                        ok, frame = capture.read()
-                        if not ok or self.stop_event.is_set():
-                            break
-                        now = time.monotonic()
-                        observed_at = utc_now()
-                        self._last_frame_monotonic = now
-                        self.status.last_frame_at = format_utc(observed_at)
-                        if not stream_confirmed:
-                            # 실제 프레임 수신 뒤에만 영상 연결 복구를 보고한다.
-                            self._inference_stream_restored()
-                            self._status("online")
-                            delay = 1.0
-                            stream_confirmed = True
-                        if (
-                            now - self._last_status_attempt
-                            >= self.settings.refresh_seconds
-                        ):
-                            self._flush_status()
-                        if tracker is None:
-                            tracker = self._prepare_tracker()
-                            if tracker is not None:
-                                # 모델 재준비도 추적 ID가 초기화되므로 새로운 관측 세션이다.
-                                self._flush_observations()
-                                self.tracking_session_id = uuid.uuid4().hex
-                                state = TrackState(self.settings.disappear_seconds)
-                                last_analysis = last_publish = float("-inf")
-                        if tracker is None or now - last_analysis < frame_interval:
-                            continue
-                        last_analysis = now
-                        try:
-                            last_publish = self._process_frame(
-                                frame, tracker, state, now, last_publish, observed_at
-                            )
-                        except Exception as exc:
-                            self._release_tracker()
-                            if isinstance(exc, TimeoutError):
-                                self.status.model_timeouts += 1
-                            tracker = None
-                            self.status.model_ready = False
-                            self.status.last_error = (
-                                f"inference unavailable: {type(exc).__name__}"
-                            )
-                            self._next_model_attempt = (
-                                time.monotonic() + self.settings.model_retry_seconds
-                            )
-                            LOGGER.warning(
-                                "inference failed; video monitoring and model retry continue"
-                            )
-                    if not self.stop_event.is_set():
-                        self._inference_stream_lost("rtsp_read_failed")
-            except Exception as exc:
-                self.status.last_error = f"video unavailable: {type(exc).__name__}"
-                self._inference_stream_lost("rtsp_capture_failed")
-                LOGGER.warning("video capture failed; reconnect is scheduled")
-            finally:
-                if capture is not None:
-                    capture.release()
-            if self._pending_status and not self.stop_event.is_set():
-                if (
-                    time.monotonic() - self._last_status_attempt
-                    >= self.settings.refresh_seconds
-                ):
+                            self.status.last_error = f"model reset failed: {type(exc).__name__}"
+                            self._next_model_attempt = time.monotonic() + self.settings.model_retry_seconds
+                            LOGGER.warning("model reset failed; a later retry is scheduled")
+                    active_generation = item.generation
+                    self.tracking_session_id = uuid.uuid4().hex
+                    state = TrackState(self.settings.disappear_seconds)
+                    last_analysis = last_publish = float("-inf")
+                    if self._failure_reported:
+                        self._inference_stream_restored()
+                    self._status("online")
+                now = item.received_monotonic
+                self._last_frame_monotonic = now
+                self.status.last_frame_at = format_utc(item.observed_at)
+                if now - self._last_status_attempt >= self.settings.refresh_seconds:
                     self._flush_status()
-            self.stop_event.wait(delay)
-            delay = min(delay * 2, 15.0)
+                if tracker is None:
+                    tracker = self._prepare_tracker()
+                    if tracker is not None:
+                        self._flush_observations()
+                        self.tracking_session_id = uuid.uuid4().hex
+                        state = TrackState(self.settings.disappear_seconds)
+                        last_analysis = last_publish = float("-inf")
+                if tracker is None or now - last_analysis < frame_interval:
+                    continue
+                self._timings.record(
+                    "capture_to_inference_seconds", time.monotonic() - now
+                )
+                last_analysis = now
+                try:
+                    last_publish = self._process_frame(
+                        item.image,
+                        tracker,
+                        state,
+                        now,
+                        last_publish,
+                        item.observed_at,
+                    )
+                except Exception as exc:
+                    self._release_tracker()
+                    if isinstance(exc, TimeoutError):
+                        self.status.model_timeouts += 1
+                    tracker = None
+                    self.status.model_ready = False
+                    error_code = getattr(exc, "error_code", type(exc).__name__)
+                    self.status.last_error = f"inference unavailable: {error_code}"
+                    self._next_model_attempt = time.monotonic() + self.settings.model_retry_seconds
+                    LOGGER.warning(
+                        "inference failed; video monitoring and model retry continue",
+                        extra={"camera_id": self.camera_id, "error_code": error_code},
+                    )
+                if self._pending_status and not self.stop_event.is_set():
+                    if time.monotonic() - self._last_status_attempt >= self.settings.refresh_seconds:
+                        self._flush_status()
+        finally:
+            self.stop_event.set()
+            capture.join(self.settings.capture_timeout_seconds + 2)
+            self._capture = None
 
     # 모델 실행·좌표 발행·관측 파일 생성은 같은 카메라 스레드에서 순서대로 처리한다.
     def _process_frame(
@@ -487,9 +503,22 @@ class CameraWorker(threading.Thread):
         self.status.last_inference_seconds = max(
             0, time.monotonic() - inference_started
         )
+        self.status.last_processor_seconds = self.status.last_inference_seconds
+        self.status.last_model_seconds = getattr(tracker, "last_model_seconds", None)
+        self.status.last_ipc_seconds = getattr(tracker, "last_ipc_seconds", None)
+        self._timings.record("inference_total_seconds", self.status.last_inference_seconds)
+        if self.status.last_model_seconds is not None:
+            self._timings.record("model_seconds", self.status.last_model_seconds)
+        if self.status.last_ipc_seconds is not None:
+            self._timings.record("ipc_seconds", self.status.last_ipc_seconds)
+        postprocess_started = time.monotonic()
+        self.status.last_detection_at = format_utc(utc_now())
         detections = clip_detections(
             [item.model_dump() for item in result.objects], width, height
         )
+        self.status.last_postprocess_seconds = max(0, time.monotonic() - postprocess_started)
+        self._timings.record("result_postprocess_seconds", self.status.last_postprocess_seconds)
+        self.status.detection_object_count = len(detections)
         if self._publisher is not None and now - last_publish >= 0.5:
             # 모바일 박스용 최신 좌표는 최대 초당 2번 보낸다. 영상 전송과
             # 별개이므로 모바일에서 보이는 영상 프레임과 정확히 동기화되지는 않는다.
@@ -538,11 +567,14 @@ class CameraWorker(threading.Thread):
         return last_publish
 
     def _publish_observation(self, candidate):
+        started = time.monotonic()
         snapshot = self._snapshot(candidate.frame, candidate.person_id)
         observation = self._observation(candidate.frame, candidate.detection)
+        self._timings.record("image_persistence_seconds", time.monotonic() - started)
         if observation is None:
             return False
-        return self._event(
+        started = time.monotonic()
+        accepted = self._event(
             "person_appeared",
             occurred_at=candidate.occurred_at,
             person_id=candidate.person_id,
@@ -555,6 +587,8 @@ class CameraWorker(threading.Thread):
                 "window_seconds": self.settings.observation_window_seconds,
             },
         )
+        self._timings.record("event_persistence_seconds", time.monotonic() - started)
+        return accepted
 
     def _flush_observations(self):
         for candidate in self._observations.drain():

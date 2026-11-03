@@ -32,10 +32,10 @@ class ObjectRepositoryMixin:
             return result.rowcount
 
     # 관측 시각이 더 최신인 자료만 덮어써 늦게 도착한 좌표가 화면을 되돌리지 않게 한다.
-    def put_live_objects(self, camera_id, payload):
+    def put_live_objects(self, camera_id, payload, timings=None):
         stamp = format_utc(utc_now())
         observed = format_utc(payload.observed_at)
-        with self.database.transaction() as connection:
+        with self.database.transaction(timings) as connection:
             changed = connection.execute(
                 "INSERT INTO live_objects VALUES (?,?,?,?) ON CONFLICT(camera_id) DO UPDATE SET payload_json=excluded.payload_json,observed_at=excluded.observed_at,received_at=excluded.received_at WHERE excluded.observed_at>live_objects.observed_at",
                 (camera_id, payload.model_dump_json(), observed, stamp),
@@ -62,11 +62,26 @@ class ObjectRepositoryMixin:
                 (camera_id,),
             ).fetchone()
             # 3초보다 오래된 좌표는 화면에 남기지 않는다. 미래 시각도 비정상으로 보고 제외한다.
-            if (
-                row is None
-                or not 0 <= (now - parse_utc(row["observed_at"])).total_seconds() <= 3
-            ):
-                return {"camera_id": camera_id, "objects": [], "stale": True}
+            if row is None:
+                return {
+                    "camera_id": camera_id,
+                    "objects": [],
+                    "stale": True,
+                    "stale_reason": "no_observation",
+                    "observed_age_seconds": None,
+                    "received_age_seconds": None,
+                }
+            observed_age = (now - parse_utc(row["observed_at"])).total_seconds()
+            received_age = (now - parse_utc(row["received_at"])).total_seconds()
+            if not 0 <= observed_age <= 3:
+                return {
+                    "camera_id": camera_id,
+                    "objects": [],
+                    "stale": True,
+                    "stale_reason": "future_timestamp" if observed_age < 0 else "expired",
+                    "observed_age_seconds": max(0, observed_age),
+                    "received_age_seconds": max(0, received_age),
+                }
             result = json.loads(row["payload_json"])
             links = {
                 r["person_id"]: r["global_person_id"]
@@ -77,7 +92,14 @@ class ObjectRepositoryMixin:
             }
             for obj in result["objects"]:
                 obj["global_person_id"] = links.get(obj["person_id"])
-            return {**result, "camera_id": camera_id, "stale": False}
+            return {
+                **result,
+                "camera_id": camera_id,
+                "stale": False,
+                "stale_reason": None,
+                "observed_age_seconds": max(0, observed_age),
+                "received_age_seconds": max(0, received_age),
+            }
 
     # 객체 관찰이 있는 이벤트에만 식별·분석 작업을 만들며 이벤트의 트랜잭션을 공유한다.
     def _enqueue_object_jobs(self, connection, event_id, values):

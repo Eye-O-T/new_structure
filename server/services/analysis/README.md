@@ -11,6 +11,14 @@ Data에서 작업과 사람 영역 이미지(크롭)의 경로를 받아 추가 
 
 기본 `LocalAppearanceAnalyzer`는 OpenCV·NumPy로 단일 사람 크롭의 상·하의 후보 영역 색과 영상 품질을 실제 측정한다. 외부 모델 파일이나 다운로드가 필요 없는 CPU 구현이다. `ANALYSIS_PLUGIN=server.services.analysis.processors:LocalAppearanceAnalyzer`가 기본이며, `패키지.모듈:팩토리` 형태의 인자 없는 생성 함수로 교체할 수 있다. 이전 `MetadataBlackBox`를 명시적으로 선택하면 종전처럼 `unconfigured`를 반환한다.
 
+학습된 PAR 번들을 사용할 때는 검증한 `par_serving_exp3.pt`를 호스트의 `MODELS_DIR`에 두고 다음 플러그인을 선택한다.
+
+```dotenv
+ANALYSIS_PLUGIN=server.services.analysis.processors.attributes:PersonAttributeAnalyzer
+```
+
+기본 컨테이너 경로는 `/models/par_serving_exp3.pt`다. 현재 Compose는 `PAR_MODEL_PATH`를 컨테이너 환경으로 전달하지 않으므로 첫 배포에서는 이 파일명을 사용한다. PAR 분석기는 CPU에서 ResNet34 번들을 제한 로더로 읽고 `gender`, `age`, `hat`, `upper_color`, `lower_color`, `sleeve`, `lower_type`, `carrying`을 `metadata.attributes`에 반환한다. 속성 점수는 모델 출력의 상대 점수이며 실제 신원·나이 또는 정답 확률을 뜻하지 않는다. 이 모델에는 위험도·흉기·행동 분류가 없다.
+
 이 분석기는 `global_person_id`를 지정할 수 없다. 인물 연결 작업과 완료 순서는 독립적이다. 스냅샷·모델은 읽기 전용이며 DB는 직접 열지 않는다.
 
 ## 현행 입출력과 구현 기준
@@ -33,7 +41,7 @@ Data에서 작업과 사람 영역 이미지(크롭)의 경로를 받아 추가 
 
 ## 실행과 검증
 
-중앙 Compose로 실행한다. 플러그인 선택은 `server/.env`의 `ANALYSIS_PLUGIN`, Data 인증키는 `server/secrets/analysis.env`의 `DATA_ANALYSIS_TOKEN`이 기본 위치다. 이 토큰은 32자 이상이며 Data에 설정한 같은 이름의 토큰과 일치해야 한다. 모델 의존성은 이 서비스의 `requirements.txt`에 추가하고 이미지를 다시 빌드한다. 모델은 `MODELS_DIR`에서 컨테이너의 `/models`에 읽기 전용으로 연결되며, 사용할 파일은 플러그인이 선택한다.
+중앙 Compose로 실행한다. 소스 배포에서는 `server/.env`, 설치 배포에서는 설치 저장소의 `config/compose.env`에 `ANALYSIS_PLUGIN`을 둔다. Data 인증키는 해당 배포의 `ANALYSIS_SECRETS_FILE`이 가리키는 파일에 두며, 개발 기본 위치는 `server/secrets/analysis.env`다. 이 토큰은 32자 이상이며 Data에 설정한 같은 이름의 토큰과 일치해야 한다. 모델 의존성은 이 서비스의 `requirements.txt`에 추가하고 이미지를 다시 빌드한다. 모델은 `MODELS_DIR`에서 컨테이너의 `/models`에 읽기 전용으로 연결되며, 사용할 파일은 플러그인이 선택한다.
 
 중앙 Compose로 실행하며 배포 파일·인증·모델 준비는 [배포 안내](../../../docs/deployment-guide.md)를 따른다.
 

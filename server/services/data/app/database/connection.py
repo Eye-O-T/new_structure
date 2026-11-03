@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -44,18 +45,30 @@ class Database:
 
     # 조회 후 쓰기를 하나의 배타적 쓰기 트랜잭션으로 묶어 경쟁하는 갱신을 직렬화한다.
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
+    def transaction(self, timings: dict[str, float] | None = None) -> Iterator[sqlite3.Connection]:
         with self.connection() as connection:
             # 조회 후 갱신까지 쓰기 권한을 확보해, 두 작업자가 같은 대기 작업을 가져가지 않게 한다.
             # 중간에 예외가 나면 전체를 취소하고, 정상 종료할 때만 변경을 확정한다.
-            connection.execute("BEGIN IMMEDIATE")
+            started = time.perf_counter()
             try:
-                yield connection
-            except Exception:
-                connection.rollback()
-                raise
-            else:
-                connection.commit()
+                connection.execute("BEGIN IMMEDIATE")
+                acquired = time.perf_counter()
+                try:
+                    yield connection
+                except Exception:
+                    connection.rollback()
+                    raise
+                else:
+                    connection.commit()
+            finally:
+                if timings is not None:
+                    ended = time.perf_counter()
+                    timings["db_lock_wait_seconds"] = max(
+                        0, acquired - started
+                    ) if "acquired" in locals() else max(0, ended - started)
+                    timings["db_transaction_seconds"] = max(
+                        0, ended - (acquired if "acquired" in locals() else started)
+                    )
 
     # 미적용 SQL을 파일명 순으로 실행하고 스키마 변경과 적용 이력을 함께 확정한다.
     def initialize(self) -> None:
