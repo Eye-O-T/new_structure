@@ -126,8 +126,11 @@ def search_events(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     cursor: Annotated[str | None, Query(min_length=1, max_length=1024)] = None,
+    after_event_id: Annotated[int | None, Query(ge=0)] = None,
     order: Literal["asc", "desc"] = "asc",
 ) -> dict[str, Any]:
+    if after_event_id is not None and (cursor is not None or offset or order != "asc"):
+        raise ApiError(422, "INVALID_EVENT_CURSOR", "증분 조회에는 cursor, offset, desc를 함께 지정할 수 없습니다.")
     start = parse_utc(from_time) if from_time is not None else None
     end = parse_utc(to_time) if to_time is not None else None
     if start is not None and end is not None and end <= start:
@@ -137,6 +140,25 @@ def search_events(
          format_utc(end) if end else None, order], separators=(",", ":")
     ).encode()).hexdigest()
     after_time = after_id = None
+    if after_event_id is not None:
+        maximum = repository.event_snapshot_max_id()
+        items = repository.search_events(
+            camera_id=camera_id,
+            event_type=event_type,
+            start_time=format_utc(start) if start else None,
+            end_time=format_utc(end) if end else None,
+            limit=limit + 1,
+            offset=0,
+            snapshot_max_id=maximum,
+            after_event_id=after_event_id,
+        )
+        has_more = len(items) > limit
+        items = items[:limit]
+        return {
+            **_page(items, limit, 0), "snapshot_max_id": maximum,
+            "has_more": has_more, "next_cursor": None,
+            "next_after_event_id": int(items[-1]["id"]) if has_more and items else None,
+        }
     if cursor is not None:
         if offset:
             raise ApiError(422, "INVALID_EVENT_CURSOR", "커서 조회에는 offset을 함께 지정할 수 없습니다.")
@@ -153,6 +175,7 @@ def search_events(
         snapshot_max_id=maximum,
         after_time=after_time,
         after_id=after_id,
+        after_event_id=None,
         descending=order == "desc",
     )
     has_more = len(items) > limit

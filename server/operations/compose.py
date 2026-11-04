@@ -206,8 +206,9 @@ class ComposeAdapter:
         values = _env_values(self.env_file)
         if values.get("PREPROCESSING_GPU", "false").lower() in {"true", "1", "yes"}:
             gpu_file = self.server_dir / "compose.gpu.yml"
-            if gpu_file.is_file():
-                command += ["-f", str(gpu_file)]
+            if not gpu_file.is_file():
+                raise FileNotFoundError("GPU is enabled but compose.gpu.yml is missing")
+            command += ["-f", str(gpu_file)]
         return [*command, *arguments]
 
     # 서비스를 띄우기 전에 설정·모델·인증서가 실제 파일인지 확인한다. 실행 성공까지 보장하는 검사는 아니다.
@@ -341,7 +342,7 @@ class ComposeAdapter:
     def start_optional_service(self, service: str) -> int:
         if service not in {"preprocessing", "analysis"}:
             raise ValueError("unsupported optional service")
-        return self.run("up", "-d", "--build", "--wait", service).returncode
+        return self.run("up", "-d", "--build", "--wait", "--no-deps", service).returncode
 
     def stop_optional_service(self, service: str) -> int:
         if service not in {"preprocessing", "analysis"}:

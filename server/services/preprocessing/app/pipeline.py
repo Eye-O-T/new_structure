@@ -519,7 +519,7 @@ class CameraWorker(threading.Thread):
         self.status.last_postprocess_seconds = max(0, time.monotonic() - postprocess_started)
         self._timings.record("result_postprocess_seconds", self.status.last_postprocess_seconds)
         self.status.detection_object_count = len(detections)
-        if self._publisher is not None and now - last_publish >= 0.5:
+        if self._publisher is not None and now - last_publish >= 0.2:
             # 모바일 박스용 최신 좌표는 최대 초당 2번 보낸다. 영상 전송과
             # 별개이므로 모바일에서 보이는 영상 프레임과 정확히 동기화되지는 않는다.
             self._publisher.submit(

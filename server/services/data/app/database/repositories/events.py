@@ -196,6 +196,7 @@ class EventsRepositoryMixin:
         snapshot_max_id: int | None = None,
         after_time: str | None = None,
         after_id: int | None = None,
+        after_event_id: int | None = None,
         descending: bool = False,
     ) -> list[dict[str, Any]]:
         conditions: list[str] = []
@@ -219,6 +220,9 @@ class EventsRepositoryMixin:
             operator = "<" if descending else ">"
             conditions.append(f"(occurred_at {operator} ? OR (occurred_at = ? AND id {operator} ?))")
             parameters.extend((after_time, after_time, after_id))
+        if after_event_id is not None:
+            conditions.append("id > ?")
+            parameters.append(after_event_id)
         where = " WHERE " + " AND ".join(conditions) if conditions else ""
         order = "DESC" if descending else "ASC"
         with self.database.connection() as connection:
@@ -226,7 +230,7 @@ class EventsRepositoryMixin:
             connection.execute("BEGIN")
             rows = connection.execute(
                 f"SELECT * FROM events{where} "
-                f"ORDER BY occurred_at {order}, id {order} LIMIT ? OFFSET ?",
+                f"ORDER BY {'id ASC' if after_event_id is not None else f'occurred_at {order}, id {order}'} LIMIT ? OFFSET ?",
                 (*parameters, limit, offset),
             ).fetchall()
             return [_event_details(connection, row) for row in rows]

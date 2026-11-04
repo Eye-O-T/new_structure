@@ -65,11 +65,17 @@ class ObservationBuffer:
             for item in transitions
             if item.event_type == "person_disappeared"
         }
+        due = []
+        expired = set()
+        for person, candidate in list(self.pending.items()):
+            if now - candidate.started >= self.window_seconds or person in departed:
+                due.append(self.pending.pop(person))
+                expired.add(person)
         retained_frame = None
         for detection in detections:
             person = detection["person_id"]
             previous = self.pending.get(person)
-            if previous is None and person not in appeared:
+            if previous is None and (person not in appeared or person in expired):
                 continue
             score = quality(frame, detection)
             if previous is not None and score <= previous.score:
@@ -85,7 +91,6 @@ class ObservationBuffer:
                 dict(detection),
                 score,
             )
-        due = []
         for person, candidate in list(self.pending.items()):
             if now - candidate.started >= self.window_seconds or person in departed:
                 due.append(self.pending.pop(person))

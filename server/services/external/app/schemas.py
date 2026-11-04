@@ -272,6 +272,7 @@ class EventPageResponse(PublicResponse):
     offset: int | None = Field(default=None, ge=0)
     snapshot_max_id: int | None = Field(default=None, ge=0)
     next_cursor: str | None = None
+    next_after_event_id: int | None = Field(default=None, ge=0)
     has_more: bool = False
 
 

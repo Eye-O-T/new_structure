@@ -40,7 +40,7 @@ Edge를 수동으로 추가할 때는 [Edge 수동 연결](../../../edge/README.
 
 진단 조회는 기본 3초(`SYSTEM_PROBE_TIMEOUT_SECONDS`, 최대 10초) 기한 안에서 병렬 수행한다. 전처리 주소 기본값은 `PREPROCESSING_HEALTH_URL=http://preprocessing:8000/health/ready`다. 내부 주소·오류 원문·단말 토큰은 공개하지 않는다. `data.queue_metrics`는 큐별 가장 오래 기다린 작업의 경과 초와 보존된 작업 중 최근 성공·실패 시각을 제공한다. `push.delivery_confirmed`는 이번 External 실행에서 실제 발송 성공을 기록했는지 나타내며, `waiting`은 아직 발송 확인이 없는 상태다. Edge·카메라 상태는 `/api/v1/cameras/{camera_id}/status`에서 별도로 조회한다. 준비 검사 성공만으로 영상이나 단말 수신 성공을 보장하지 않는다.
 
-이벤트의 많은 이력을 읽을 때는 `/api/v1/events`의 `next_cursor`를 다음 요청의 `cursor`로 전달한다. 첫 응답의 `snapshot_max_id` 이후 추가된 이벤트는 같은 조회에 섞이지 않는다. 같은 시각의 이벤트는 ID로 순서를 구분한다. `order=desc`로 최신순을 선택할 수 있으며 기본은 `asc`다. 후속 요청은 카메라·유형·시작/종료 시각·정렬 조건을 유지하고 offset을 생략한다. `has_more=false`와 `next_cursor=null`이면 완료다. 조회 조건을 바꾸거나 새 수신 이벤트를 보고 싶으면 커서를 비우고 처음부터 조회한다.
+이벤트의 많은 이력을 읽을 때는 `/api/v1/events`의 `next_cursor`를 다음 요청의 `cursor`로 전달한다. 첫 응답의 `snapshot_max_id` 이후 추가된 이벤트는 같은 조회에 섞이지 않는다. 같은 시각의 이벤트는 ID로 순서를 구분한다. `order=desc`로 최신순을 선택할 수 있으며 기본은 `asc`다. 후속 요청은 카메라·유형·시작/종료 시각·정렬 조건을 유지하고 offset을 생략한다. `has_more=false`와 `next_cursor=null`이면 완료다. 조회 조건을 바꾸거나 새 수신 이벤트를 보고 싶으면 커서를 비우고 처음부터 조회한다. 실시간 증분 수신에는 `after_event_id`를 사용한다. 이 모드는 ID 오름차순이며, `has_more=true`이면 `next_after_event_id`로 다음 페이지를 요청한다. 발생 시각이 오래됐어도 watermark보다 뒤에 저장된 이벤트를 반환하며 cursor·offset·`order=desc`와 함께 사용할 수 없다.
 
 ## 유지해야 하는 경계
 

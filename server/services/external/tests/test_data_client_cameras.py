@@ -32,6 +32,30 @@ class DataClientCameraListTests(unittest.IsolatedAsyncioTestCase):
             dict(requests[0].url.params), {"limit": "200", "offset": "0"}
         )
 
+    async def test_event_id_watermark_is_forwarded_for_incremental_delivery(self):
+        requests = []
+
+        def handle(request):
+            requests.append(request)
+            return httpx.Response(200, json={"items": [], "has_more": False})
+
+        client = DataClient(
+            base_url="http://data",
+            health_url="http://data/health/ready",
+            internal_token="test-token",
+            transport=httpx.MockTransport(handle),
+        )
+        try:
+            await client.list_events(camera_id="cam_001", after_event_id=42, limit=100)
+        finally:
+            await client.close()
+
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            dict(requests[0].url.params),
+            {"camera_id": "cam_001", "limit": "100", "after_event_id": "42"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -174,8 +174,13 @@ class DesktopApi(ServerApiClient):
     def stop_camera_recording(self, camera_id):
         return self.camera(camera_id, "/recording/stop", "POST")
 
-    def events(self, camera_id, start, cursor=None):
-        query = {"camera_id": camera_id, "from": start, "order": "asc", "limit": 100}
+    def events(self, camera_id, start=None, cursor=None, *, after_event_id=None,
+               limit=100, order="asc"):
+        query = {"camera_id": camera_id, "order": order, "limit": limit}
+        if after_event_id is not None:
+            query["after_event_id"] = after_event_id
+        elif start is not None:
+            query["from"] = start
         if cursor:
             query["cursor"] = cursor
         return self._request("GET", "/api/v1/events?" + urlencode(query), timeout=10)

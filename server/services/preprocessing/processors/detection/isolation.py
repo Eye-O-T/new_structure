@@ -43,7 +43,23 @@ def _serve(connection, reference, arguments):
         pass
     except Exception as exc:
         try:
-            error_code = "MODEL_FORMAT_INVALID" if "PAR attribute bundles" in str(exc) else "DETECTION_STARTUP_FAILED"
+            message = str(exc).lower()
+            if "PAR attribute bundles" in str(exc):
+                error_code = "MODEL_FORMAT_INVALID"
+            elif str(arguments[2]).startswith("cuda"):
+                try:
+                    import torch
+                    cuda_build_missing = torch.version.cuda is None
+                except Exception:
+                    cuda_build_missing = False
+                if cuda_build_missing or "not compiled with cuda" in message:
+                    error_code = "GPU_CUDA_BUILD_MISSING"
+                elif "cuda" in message:
+                    error_code = "GPU_DEVICE_UNAVAILABLE"
+                else:
+                    error_code = "DETECTION_STARTUP_FAILED"
+            else:
+                error_code = "DETECTION_STARTUP_FAILED"
             connection.send({"kind": "startup_error", "error_code": error_code})
         except (EOFError, BrokenPipeError, OSError):
             pass
@@ -88,7 +104,10 @@ class IsolatedDetector:
             ready = self._exchange(startup_timeout_seconds)
             if ready.get("kind") != "ready":
                 code = ready.get("error_code")
-                if code not in {"MODEL_FORMAT_INVALID", "DETECTION_STARTUP_FAILED"}:
+                if code not in {
+                    "MODEL_FORMAT_INVALID", "DETECTION_STARTUP_FAILED",
+                    "GPU_CUDA_BUILD_MISSING", "GPU_DEVICE_UNAVAILABLE",
+                }:
                     code = "DETECTION_STARTUP_FAILED"
                 raise RuntimeError(code)
             self.runtime = ready.get("runtime")

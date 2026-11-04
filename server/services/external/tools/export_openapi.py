@@ -220,7 +220,7 @@ OPERATIONS = {
     ),
     "list_events": (
         "이벤트 검색",
-        "viewer는 camera_id를 반드시 지정해야 한다. admin은 생략하여 전체를 검색할 수 있다. event_type·from·to는 선택이며 시각 범위는 from 이상·to 미만이다. 인물 연결·분석 결과는 나중에 갱신될 수 있다.",
+        "viewer는 camera_id를 반드시 지정해야 한다. admin은 생략하여 전체를 검색할 수 있다. event_type·from·to는 선택이며 시각 범위는 from 이상·to 미만이다. after_event_id는 실시간 증분 수신용이며 ID 오름차순으로 저장된 뒤늦은 이벤트도 반환한다. has_more이면 next_after_event_id로 다음 페이지를 요청한다. cursor·offset·desc와 함께 사용할 수 없다. 인물 연결·분석 결과는 나중에 갱신될 수 있다.",
     ),
     "get_event_snapshot": (
         "Event snapshot",

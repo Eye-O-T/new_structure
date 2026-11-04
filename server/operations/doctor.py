@@ -154,16 +154,16 @@ def _preprocessing_checks(payload: dict) -> list[Check]:
         not isinstance(worker, dict) for worker in workers.values()
     ):
         raise ValueError("invalid camera status response")
-    if payload.get("gpu_requested") is True and any(
-        worker.get("model_ready") is True
-        and not str(worker.get("execution_device", "")).startswith("cuda")
-        for worker in workers.values()
-    ):
-        results.append(
-            Check("WARN", "Preprocessing GPU", "GPU access is configured, but detection is running on CPU")
-        )
-    elif payload.get("gpu_requested") is True:
-        results.append(Check("OK", "Preprocessing GPU", "GPU access is configured"))
+    if payload.get("gpu_requested") is True:
+        ready_workers = [worker for worker in workers.values() if worker.get("model_ready")]
+        if not workers:
+            results.append(Check("WARN", "Preprocessing GPU", "GPU is requested; no active camera workers, so detection execution is unverified"))
+        elif not ready_workers:
+            results.append(Check("WARN", "Preprocessing GPU", "GPU is requested; no detection model is ready"))
+        elif any(not str(worker.get("execution_device", "")).startswith("cuda") for worker in ready_workers):
+            results.append(Check("WARN", "Preprocessing GPU", "GPU is requested, but a ready detector is running on CPU"))
+        else:
+            results.append(Check("OK", "Preprocessing GPU", "ready detection workers are using CUDA"))
     for camera_id, worker in sorted(workers.items()):
         online = worker.get("state") == "online"
         model_ready = worker.get("model_ready") is True
@@ -267,6 +267,40 @@ def _runtime_checks(adapter: ComposeAdapter) -> list[Check]:
         )
     if by_service.get("preprocessing") is None:
         return results
+    environment = read_deployment_env(adapter.env_file)
+    if environment.get("PREPROCESSING_GPU", "false").lower() in {"true", "1", "yes"}:
+        container_result = adapter.run("ps", "-q", "preprocessing", capture=True)
+        container_id = (container_result.stdout or "").strip().splitlines()
+        if container_result.returncode != 0 or not container_id:
+            results.append(Check("WARN", "Preprocessing GPU runtime", "container allocation could not be inspected"))
+        else:
+            allocation = subprocess.run(
+                ["docker", "inspect", "--format", "{{json .HostConfig.DeviceRequests}}", container_id[0]],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            requests_gpu = False
+            if allocation.returncode == 0:
+                try:
+                    requests_gpu = bool(json.loads(allocation.stdout.strip()))
+                except ValueError:
+                    pass
+            runtime = adapter.run(
+                "exec", "-T", "preprocessing", "python", "-c",
+                "import json,torch; a=torch.cuda.is_available(); "
+                "print(json.dumps({'available':a,'count':torch.cuda.device_count(),"
+                "'device':torch.cuda.get_device_name(0) if a else None}))",
+                capture=True,
+            )
+            try:
+                device = json.loads(runtime.stdout.strip()) if runtime.returncode == 0 else {}
+            except ValueError:
+                device = {}
+            ready = requests_gpu and device.get("available") is True and device.get("count", 0) > 0
+            detail = (
+                f"DeviceRequests={requests_gpu}, CUDA available={device.get('available', False)}, "
+                f"device={device.get('device') or 'unavailable'}"
+            )
+            results.append(Check("OK" if ready else "ERROR", "Preprocessing GPU runtime", detail))
     try:
         camera_probe = adapter.run(
             "exec",
@@ -379,12 +413,18 @@ def checks(
                 str(gpu_compose) if gpu_compose.is_file() else "compose.gpu.yml is missing",
             )
         )
-        gpu_configured = gpu_compose.is_file() and "gpus:" in gpu_compose.read_text(encoding="utf-8")
+        try:
+            config = adapter.run("--profile", "ai", "config", "--format", "json", capture=True)
+            config_payload = json.loads(config.stdout) if config.returncode == 0 else {}
+            preprocessing = config_payload.get("services", {}).get("preprocessing", {})
+            gpu_configured = bool(preprocessing.get("gpus"))
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            gpu_configured = False
         results.append(
             Check(
                 "OK" if gpu_configured else "ERROR",
                 "GPU container request",
-                "preprocessing requests Docker GPU access" if gpu_configured else "preprocessing GPU request is missing",
+                "resolved Compose requests Docker GPU access" if gpu_configured else "resolved Compose GPU request is missing",
             )
         )
         results.append(

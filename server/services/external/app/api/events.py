@@ -78,6 +78,7 @@ async def list_events(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     cursor: str | None = Query(default=None, min_length=1, max_length=1024),
+    after_event_id: int | None = Query(default=None, ge=0),
     order: Literal["asc", "desc"] = Query(default="asc"),
     principal: Principal = Depends(get_current_principal),
     data: DataClient = Depends(get_data_client),
@@ -91,6 +92,8 @@ async def list_events(
         )
     if camera_id is not None:
         await _ensure_camera_access(data, principal, camera_id)
+    if after_event_id is not None and (cursor is not None or offset or order != "asc"):
+        raise HTTPException(status_code=422, detail="Invalid incremental event query")
     start_utc, end_utc = _validated_time_range(start, end)
     result = await data.list_events(
         user_id=principal.user_id,
@@ -101,6 +104,7 @@ async def list_events(
         limit=limit,
         offset=offset,
         cursor=cursor,
+        after_event_id=after_event_id,
         order=order,
     )
     result["items"] = [_public_event(item) for item in result.get("items", [])]

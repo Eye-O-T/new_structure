@@ -285,6 +285,44 @@ class StreamDiagnosticsTests(unittest.TestCase):
         self.assertEqual(hls_resource_type("/hls/cam/unknown"), "other")
 
 
+class EventPollingTests(unittest.TestCase):
+    def test_late_stored_event_uses_id_watermark_after_initial_recent_events(self):
+        api = Mock()
+        api.events.side_effect = [
+            {
+                "items": [{"id": 40, "event_type": "person_appeared",
+                           "occurred_at": "2026-11-03T07:00:00Z"}],
+                "snapshot_max_id": 40,
+            },
+            {
+                "items": [{"id": 41, "event_type": "person_appeared",
+                           "occurred_at": "2026-11-03T06:59:00Z"}],
+                "has_more": False,
+            },
+        ]
+        worker = video.VideoWorker((api, "cam-001"))
+        worker._stop = threading.Event()
+        received = []
+
+        def on_event(event):
+            received.append(event)
+            if event.get("id") == 41:
+                worker.stop()
+
+        worker.event_ready.connect(on_event, Qt.DirectConnection)
+        worker.poll_events()
+
+        self.assertEqual([event["id"] for event in received], [40, 41])
+        self.assertEqual(
+            api.events.call_args_list[0].kwargs,
+            {"limit": 30, "order": "desc"},
+        )
+        self.assertEqual(
+            api.events.call_args_list[1].kwargs,
+            {"after_event_id": 40},
+        )
+
+
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is needed to generate HLS")
 class HlsTests(unittest.TestCase):
     def test_real_decoder_starts_at_latest_segment_through_media_bridge(self):

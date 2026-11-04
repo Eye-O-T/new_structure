@@ -499,6 +499,7 @@ class DataClient:
                 "limit": params.get("limit"),
                 "offset": params.get("offset"),
                 "cursor": params.get("cursor"),
+                "after_event_id": params.get("after_event_id"),
                 "order": params.get("order"),
             },
         )

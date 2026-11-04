@@ -4,6 +4,7 @@ import argparse
 import logging
 import sys
 import time
+from datetime import datetime, timezone
 from urllib.error import HTTPError
 
 from PyQt5.QtCore import QTimer, Qt, QUrl
@@ -99,6 +100,8 @@ class CCTVMainWindow(ReferenceWindow):
         self._views = {}
         self._camera_metrics = {}
         self._camera_events = {}
+        self._rendered_event_signatures = {}
+        self._last_coordinate_diagnostics = {}
         self._view_mode = "single"
         self._selected_camera_id = None
         self._updating_camera_picker = False
@@ -601,6 +604,18 @@ class CCTVMainWindow(ReferenceWindow):
         if not self._accept_worker_data(camera_id, worker):
             return
         self._camera_metrics[camera_id] = metrics
+        received = metrics.get("coordinate_received_monotonic")
+        ui_delay = max(0, time.monotonic() - received) if isinstance(received, (int, float)) else None
+        now = time.monotonic()
+        if now - self._last_coordinate_diagnostics.get(camera_id, 0) >= 5:
+            LOGGER.debug(
+                "coordinate diagnostics camera=%s request_seconds=%s observed_age_seconds=%s ui_dispatch_seconds=%s",
+                camera_id,
+                metrics.get("coordinate_request_seconds"),
+                metrics.get("coordinate_age_seconds"),
+                ui_delay,
+            )
+            self._last_coordinate_diagnostics[camera_id] = now
         if camera_id == self._selected_camera_id:
             self._render_selected_summary()
 
@@ -608,7 +623,26 @@ class CCTVMainWindow(ReferenceWindow):
         if not self._accept_worker_data(camera_id, worker):
             return
         event = {**event, "camera_id": camera_id}
+        event_id = event.get("id")
+        if event_id is not None and any(
+            str(item.get("id")) == str(event_id)
+            for item in self._camera_events.get(camera_id, [])
+        ):
+            return
+        created_at = event.get("created_at")
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(created_at.replace("Z", "+00:00"))).total_seconds()
+        except (ValueError, TypeError, AttributeError):
+            age = None
+        if event_id is not None:
+            LOGGER.debug(
+                "event timeline delivery camera=%s event_id=%s created_age_seconds=%s",
+                camera_id, event_id, age,
+            )
         self._camera_events.setdefault(camera_id, []).insert(0, event)
+        self._camera_events[camera_id].sort(
+            key=lambda item: self._event_timestamp(item), reverse=True
+        )
         del self._camera_events[camera_id][30:]
         if event.get("type") in {"error", "network_failure", "objects_error"}:
             view = self._views.get(camera_id)
@@ -616,6 +650,14 @@ class CCTVMainWindow(ReferenceWindow):
                 view.show_error(event.get("message", "영상 연결 오류"))
         if camera_id == self._selected_camera_id:
             self._render_selected_summary()
+
+    @staticmethod
+    def _event_timestamp(event):
+        value = event.get("occurred_at") or event.get("time")
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError, AttributeError, OverflowError):
+            return float("-inf")
 
     def _on_loading(self, camera_id, worker, message):
         if self._accept_worker_data(camera_id, worker):
@@ -654,6 +696,13 @@ class CCTVMainWindow(ReferenceWindow):
         self.metric_current["value"].setText(str(metrics.get("current_objects", 0)))
         self.metric_total["value"].setText(str(metrics.get("tracked_total", 0)))
         events = self._camera_events.get(camera_id, [])
+        signature = tuple(
+            (str(event.get("id")), event.get("type"), event.get("time"), event.get("message"))
+            for event in events
+        )
+        if self._rendered_event_signatures.get(camera_id) == signature:
+            return
+        self._rendered_event_signatures[camera_id] = signature
         self.appear_count = self.disappear_count = 0
         while self.event_list.count():
             item = self.event_list.takeAt(0)

@@ -40,8 +40,8 @@ LIVE_RTSP_OPTIONS = {
     "analyzeduration": "100000",
     "probesize": "262144",
 }
-OBJECT_POLL_INTERVAL_SECONDS = 0.5
-EVENT_POLL_INTERVAL_SECONDS = 2.0
+OBJECT_POLL_INTERVAL_SECONDS = 0.2
+EVENT_POLL_INTERVAL_SECONDS = 0.5
 POLL_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
@@ -125,6 +125,7 @@ def legacy_event(event):
         "confidence": event.get("confidence"),
         "time": event["occurred_at"],
         "occurred_at": event.get("occurred_at"),
+        "created_at": event.get("created_at"),
         "recording_segment_ids": event.get("recording_segment_ids", []),
         "media": event.get("media", {}),
     }
@@ -136,6 +137,7 @@ class ObservationAdapter:
 
     def metrics(self, payload):
         observed = payload.get("observed_at")
+        age = None
         try:
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(observed.replace("Z", "+00:00"))).total_seconds()
             fresh = 0 <= age <= 5
@@ -144,7 +146,11 @@ class ObservationAdapter:
         objects = payload.get("objects", []) if fresh else []
         session = payload.get("tracking_session_id")
         self.tracks.update((session, item["person_id"]) for item in objects)
-        return {"current_objects": len(objects) if fresh else "—", "tracked_total": len(self.tracks)}
+        return {
+            "current_objects": len(objects) if fresh else "—",
+            "tracked_total": len(self.tracks),
+            "coordinate_age_seconds": age,
+        }
 
 
 class VideoWorker(QThread):
@@ -200,6 +206,7 @@ class VideoWorker(QThread):
         failed = False
         while not self._stop.is_set():
             try:
+                request_started = time.monotonic()
                 payload = api.camera(
                     camera_id,
                     "/objects",
@@ -209,7 +216,11 @@ class VideoWorker(QThread):
                     self.objects_ready.emit(payload)
                 else:
                     raise ValueError("Invalid live objects response")
-                self.metrics_ready.emit(adapter.metrics(payload))
+                received = time.monotonic()
+                metrics = adapter.metrics(payload)
+                metrics["coordinate_request_seconds"] = received - request_started
+                metrics["coordinate_received_monotonic"] = received
+                self.metrics_ready.emit(metrics)
                 failed = False
             except Exception as exc:
                 self.objects_ready.emit({"objects": [], "stale": True})
@@ -221,26 +232,28 @@ class VideoWorker(QThread):
 
     def poll_events(self):
         api, camera_id = self.source
-        start = datetime.now(timezone.utc).isoformat()
-        seen = set()
+        after_event_id = 0
+        initialized = False
         failed = False
         while not self._stop.is_set():
             try:
-                end = datetime.now(timezone.utc).isoformat()
-                cursor = None
-                current = set()
-                while not self._stop.is_set():
-                    page = api.events(camera_id, start, cursor)
-                    for event in page.get("items", []):
-                        key = str(event["id"])
-                        current.add(key)
-                        if key not in seen:
+                if not initialized:
+                    page = api.events(camera_id, limit=30, order="desc")
+                    current = page.get("items", [])
+                    after_event_id = int(page.get("snapshot_max_id") or 0)
+                    for event in reversed(current):
+                        self.event_ready.emit(legacy_event(event))
+                    initialized = True
+                else:
+                    while not self._stop.is_set():
+                        page = api.events(camera_id, after_event_id=after_event_id)
+                        current = page.get("items", [])
+                        for event in current:
                             self.event_ready.emit(legacy_event(event))
-                    cursor = page.get("next_cursor")
-                    if not page.get("has_more") or not cursor:
-                        break
-                seen = current
-                start = end  # overlap at request start to include events arriving during pagination.
+                        if current:
+                            after_event_id = max(after_event_id, max(int(event["id"]) for event in current))
+                        if not page.get("has_more") or not current:
+                            break
                 failed = False
             except Exception as exc:
                 if not failed:

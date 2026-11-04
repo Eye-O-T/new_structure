@@ -452,7 +452,7 @@ def run_service_action(
         if action == "preprocessing-off":
             commands.append(("stop", "analysis"))
         commands.append(
-            ("up", "-d", "--build", "--wait", service)
+            ("up", "-d", "--build", "--wait", "--no-deps", service)
             if operation == "on"
             else ("stop", service)
         )
