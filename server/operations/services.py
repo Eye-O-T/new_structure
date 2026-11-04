@@ -373,13 +373,14 @@ def _deployment_state(
     return "matching"
 
 
-# 알려진 서비스·상태 이름만 표시해 Docker 응답에 포함될 수 있는 임의 값 노출을 제한한다.
-def _status(adapter: ComposeAdapter, deadline: float) -> str:
+def _compose_ps_rows(adapter: ComposeAdapter, deadline: float) -> list[dict[str, Any]]:
     output = _run(
         _command(adapter, "ps", "--all", "--format", "json"),
         directory=adapter.server_dir,
         deadline=deadline,
     ).strip()
+    if not output:
+        return []
     rows = (
         _json(output)
         if output.startswith("[")
@@ -387,6 +388,37 @@ def _status(adapter: ComposeAdapter, deadline: float) -> str:
     )
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise RuntimeError(_DOCKER_ERROR)
+    return rows
+
+
+def get_optional_service_states(
+    server_dir: Path,
+    installed: DeploymentContext,
+) -> dict[str, bool]:
+    """선택한 배포의 preprocessing·analysis 컨테이너가 실행 중인지 반환한다."""
+
+    states = {"preprocessing": False, "analysis": False}
+    deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS
+    adapter = ComposeAdapter(server_dir, installed.env_file)
+    try:
+        if _deployment_state(adapter, installed, deadline) != "matching":
+            return states
+        rows = _compose_ps_rows(adapter, deadline)
+    except (OSError, UnicodeError, ValueError, RuntimeError):
+        return states
+    for row in rows:
+        service = str(row.get("Service", ""))
+        if service in states and str(row.get("State", "")).lower() in {
+            "running",
+            "restarting",
+        }:
+            states[service] = True
+    return states
+
+
+# 알려진 서비스·상태 이름만 표시해 Docker 응답에 포함될 수 있는 임의 값 노출을 제한한다.
+def _status(adapter: ComposeAdapter, deadline: float) -> str:
+    rows = _compose_ps_rows(adapter, deadline)
     if not rows:
         return "실행 중이거나 중지된 서버 컨테이너가 없습니다. ‘서버 시작’을 눌러 시작하세요."
     lines = ["선택한 저장 위치의 서버 상태입니다."]

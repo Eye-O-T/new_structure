@@ -16,7 +16,11 @@ from server.operations.compose import (
     STOP_ARGUMENTS,
     default_server_dir,
 )
-from server.operations.services import _deployment_state, _run
+from server.operations.services import (
+    _deployment_state,
+    _run,
+    get_optional_service_states,
+)
 from server.operations.doctor import _compose_rows
 
 
@@ -223,6 +227,140 @@ class ComposeAdapterCommandTests(unittest.TestCase):
         with patch("server.operations.services._run", side_effect=fake_run):
             state = _deployment_state(adapter, installed, deadline=999999999.0)
         self.assertEqual(state, "matching")
+
+    def test_get_optional_service_states_reflects_running_and_stopped_containers(self):
+        installed = DeploymentContext(
+            data_root=self.root,
+            env_file=self.env,
+            config_file=self.root / "config" / "config.yaml",
+            public_url="http://127.0.0.1",
+            rtsp_host="127.0.0.1",
+            rtsp_port=8554,
+            admin_username="admin",
+            allow_insecure_http=True,
+        )
+        rows = [
+            {"Service": "preprocessing", "State": "running"},
+            {"Service": "analysis", "State": "exited"},
+        ]
+        with patch(
+            "server.operations.services._deployment_state", return_value="matching"
+        ), patch("server.operations.services._compose_ps_rows", return_value=rows):
+            states = get_optional_service_states(self.server, installed)
+        self.assertEqual(states, {"preprocessing": True, "analysis": False})
+
+        with patch(
+            "server.operations.services._deployment_state", return_value="empty"
+        ):
+            empty_states = get_optional_service_states(self.server, installed)
+        self.assertEqual(empty_states, {"preprocessing": False, "analysis": False})
+
+
+class ServerManagerToggleButtonTests(unittest.TestCase):
+    def setUp(self):
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PyQt5.QtWidgets import QApplication
+
+        self.app = QApplication.instance() or QApplication([])
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.server = self.root / "server"
+        self.server.mkdir()
+        self.env = self.root / "config" / "compose.env"
+        self.env.parent.mkdir()
+        self.env.write_text(
+            "PUBLIC_SCHEME=http\n"
+            "PUBLIC_BASE_URL=http://127.0.0.1\n"
+            "PUBLIC_BIND_ADDRESS=127.0.0.1\n"
+            "PUBLIC_HTTP_PORT=80\n"
+            "PUBLIC_HTTPS_PORT=443\n"
+            "RTSP_BIND_ADDRESS=127.0.0.1\n"
+            "RTSP_PORT=8554\n"
+            "ALLOW_INSECURE_HTTP=true\n"
+            "COOKIE_SECURE=false\n",
+            encoding="utf-8",
+        )
+        self.config_file = self.root / "config" / "config.yaml"
+        self.config_file.write_text("schema_version: 1\n", encoding="utf-8")
+        self.deployment = DeploymentContext(
+            data_root=self.root,
+            env_file=self.env,
+            config_file=self.config_file,
+            public_url="http://127.0.0.1",
+            rtsp_host="127.0.0.1",
+            rtsp_port=8554,
+            admin_username="admin",
+            allow_insecure_http=True,
+        )
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def _wait_task(self, window):
+        if window._task is not None:
+            window._task.wait(2000)
+        self.app.processEvents()
+
+    def test_buttons_show_turn_on_when_off_and_turn_off_when_on(self):
+        from server.desktop.server_manager.application import ServerManagerWindow
+
+        current_states = {"preprocessing": False, "analysis": True}
+        actions = []
+
+        def fake_get_states(_server_dir, _deployment):
+            return dict(current_states)
+
+        def fake_run_action(_server_dir, _deployment, action, _progress):
+            actions.append(action)
+            if action == "preprocessing-on":
+                current_states["preprocessing"] = True
+            elif action == "preprocessing-off":
+                current_states["preprocessing"] = False
+                current_states["analysis"] = False
+            elif action == "analysis-on":
+                current_states["preprocessing"] = True
+                current_states["analysis"] = True
+            elif action == "analysis-off":
+                current_states["analysis"] = False
+            return f"ran {action}"
+
+        with patch(
+            "server.desktop.server_manager.application.inspect_installation",
+            return_value=self.deployment,
+        ), patch(
+            "server.desktop.server_manager.application.get_optional_service_states",
+            side_effect=fake_get_states,
+        ), patch(
+            "server.desktop.server_manager.application.run_service_action",
+            side_effect=fake_run_action,
+        ):
+            window = ServerManagerWindow(
+                server_dir=self.server, data_root=self.root
+            )
+            self._wait_task(window)
+
+            self.assertEqual(window.preprocessing_button.text(), "감지·식별 켜기")
+            self.assertEqual(window.analysis_button.text(), "이벤트 분석 끄기")
+
+            window.preprocessing_button.click()
+            self._wait_task(window)
+            self.assertEqual(actions[-1], "preprocessing-on")
+            self.assertEqual(window.preprocessing_button.text(), "감지·식별 끄기")
+            self.assertEqual(window.analysis_button.text(), "이벤트 분석 끄기")
+
+            window.preprocessing_button.click()
+            self._wait_task(window)
+            self.assertEqual(actions[-1], "preprocessing-off")
+            self.assertEqual(window.preprocessing_button.text(), "감지·식별 켜기")
+            self.assertEqual(window.analysis_button.text(), "이벤트 분석 켜기")
+
+            window.analysis_button.click()
+            self._wait_task(window)
+            self.assertEqual(actions[-1], "analysis-on")
+            self.assertEqual(window.preprocessing_button.text(), "감지·식별 끄기")
+            self.assertEqual(window.analysis_button.text(), "이벤트 분석 끄기")
 
 
 if __name__ == "__main__":

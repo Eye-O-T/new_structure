@@ -39,7 +39,10 @@ from server.operations.network import (
     load_network_settings,
     validate_network_settings,
 )
-from server.operations.services import run_service_action
+from server.operations.services import (
+    get_optional_service_states,
+    run_service_action,
+)
 
 
 class ServerManagerWindow(QWidget):
@@ -55,6 +58,10 @@ class ServerManagerWindow(QWidget):
                 "설치된 서버 설정이 없습니다. 먼저 서버 설치 도우미를 실행하세요."
             )
         self._task: BackgroundTask | None = None
+        self._optional_states: dict[str, bool] = {
+            "preprocessing": False,
+            "analysis": False,
+        }
         self.setWindowTitle("AI CCTV 서버 제어판")
         self.resize(760, 720)
 
@@ -75,6 +82,7 @@ class ServerManagerWindow(QWidget):
 
         self._load_network()
         self._refresh_summary()
+        self._refresh_optional_states()
 
     def _service_group(self) -> QGroupBox:
         group = QGroupBox("서버 운영")
@@ -84,10 +92,6 @@ class ServerManagerWindow(QWidget):
             ("재시작", "restart"),
             ("중지", "stop"),
             ("상태 확인", "status"),
-            ("감지·식별 켜기", "preprocessing-on"),
-            ("감지·식별 끄기", "preprocessing-off"),
-            ("이벤트 분석 켜기", "analysis-on"),
-            ("이벤트 분석 끄기", "analysis-off"),
         )
         self.action_buttons = []
         for index, (label, action) in enumerate(actions):
@@ -97,11 +101,44 @@ class ServerManagerWindow(QWidget):
             )
             grid.addWidget(button, index // 2, index % 2)
             self.action_buttons.append(button)
+        self.preprocessing_button = QPushButton("감지·식별 켜기")
+        self.preprocessing_button.clicked.connect(
+            lambda _checked=False: self._toggle_optional_service("preprocessing")
+        )
+        grid.addWidget(self.preprocessing_button, 2, 0)
+        self.action_buttons.append(self.preprocessing_button)
+        self.analysis_button = QPushButton("이벤트 분석 켜기")
+        self.analysis_button.clicked.connect(
+            lambda _checked=False: self._toggle_optional_service("analysis")
+        )
+        grid.addWidget(self.analysis_button, 2, 1)
+        self.action_buttons.append(self.analysis_button)
         doctor = QPushButton("통합 진단")
         doctor.clicked.connect(self._doctor)
-        grid.addWidget(doctor, 4, 0, 1, 2)
+        grid.addWidget(doctor, 3, 0, 1, 2)
         self.action_buttons.append(doctor)
+        self._update_optional_buttons(self._optional_states)
         return group
+
+    def _update_optional_buttons(self, states: dict[str, bool]) -> None:
+        self._optional_states = {
+            "preprocessing": bool(states.get("preprocessing")),
+            "analysis": bool(states.get("analysis")),
+        }
+        self.preprocessing_button.setText(
+            "감지·식별 끄기"
+            if self._optional_states["preprocessing"]
+            else "감지·식별 켜기"
+        )
+        self.analysis_button.setText(
+            "이벤트 분석 끄기"
+            if self._optional_states["analysis"]
+            else "이벤트 분석 켜기"
+        )
+
+    def _toggle_optional_service(self, service: str) -> None:
+        state = "off" if self._optional_states.get(service) else "on"
+        self._service_action(f"{service}-{state}")
 
     def _desktop_group(self) -> QGroupBox:
         group = QGroupBox("CCTV 관제")
@@ -237,25 +274,59 @@ class ServerManagerWindow(QWidget):
         for button in (*self.action_buttons, *self.network_buttons):
             button.setEnabled(not busy)
 
-    def _run(self, operation, completed, description: str) -> None:
+    def _run(
+        self,
+        operation,
+        completed,
+        description: str,
+        *,
+        finished_text: str = "작업 완료",
+        refresh_states: bool = True,
+    ) -> None:
         if self._task is not None:
             return
         self._set_busy(True)
         self.activity.setText(description)
-        task = BackgroundTask(operation, self)
+        latest_states: dict[str, bool] | None = None
+
+        def tracked_operation(progress):
+            nonlocal latest_states
+            try:
+                return operation(progress)
+            finally:
+                if refresh_states and self.deployment is not None:
+                    latest_states = get_optional_service_states(
+                        self.server_dir, self.deployment
+                    )
+
+        task = BackgroundTask(tracked_operation, self)
         self._task = task
         task.progress.connect(self.activity.setText)
         task.result.connect(completed)
         task.failed.connect(lambda message: self.output.setPlainText(message))
 
         def finished() -> None:
+            if latest_states is not None:
+                self._update_optional_buttons(latest_states)
             self._task = None
             self._set_busy(False)
-            self.activity.setText("작업 완료")
+            self.activity.setText(finished_text)
             task.deleteLater()
 
         task.finished.connect(finished)
         task.start()
+
+    def _refresh_optional_states(self) -> None:
+        deployment = self.deployment
+        self._run(
+            lambda _progress: get_optional_service_states(
+                self.server_dir, deployment
+            ),
+            self._update_optional_buttons,
+            "컨테이너 상태를 확인하고 있습니다…",
+            finished_text="준비됨",
+            refresh_states=False,
+        )
 
     def _service_action(self, action: str) -> None:
         deployment = self.deployment
