@@ -52,6 +52,9 @@ _CAMERA_RECORDING_LABELS = {
     "error": "오류",
 }
 RECORDING_POLL_INTERVAL_MS = 2000
+_ANALYSIS_STATUS_LABELS = {"pending": "대기 중", "running": "분석 중", "complete": "완료", "failed": "실패", "unconfigured": "분석기 미설정"}
+_ANALYSIS_COLOR_LABELS = {"black": "검정", "white": "흰색", "gray": "회색", "red": "빨강", "orange": "주황", "yellow": "노랑", "green": "초록", "cyan": "청록", "blue": "파랑", "purple": "보라", "pink": "분홍", "brown": "갈색", "beige": "베이지"}
+_ANALYSIS_QUALITY_FLAGS = {"mostly_dark": "대체로 어두움", "mostly_bright": "대체로 밝음", "low_contrast": "대비 낮음", "low_edge_energy": "윤곽 에너지 낮음"}
 
 
 def _breakable_path(value: str) -> str:
@@ -1199,16 +1202,28 @@ class CCTVMainWindow(ReferenceWindow):
         loading = QLabel("이벤트 정보를 불러오는 중입니다.")
         loading.setWordWrap(True)
         layout.addWidget(loading)
+        analysis_title = QLabel("분석 결과")
+        analysis_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(analysis_title)
+        analysis_layout = QVBoxLayout()
+        layout.addLayout(analysis_layout)
         layout.addStretch()
         scroll.setWidget(content_widget)
         outer_layout.addWidget(scroll, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(dialog.reject)
+        refresh_button = buttons.addButton("분석 결과 새로고침", QDialogButtonBox.ActionRole)
+        refresh_button.setEnabled(False)
         outer_layout.addWidget(buttons)
 
-        state = {"open": True}
-        dialog.destroyed.connect(lambda: state.__setitem__("open", False))
+        state = {"open": True, "busy": True, "detail": None}
+
+        def mark_closed(*_args):
+            state["open"] = False
+
+        dialog.destroyed.connect(mark_closed)
+        dialog.finished.connect(mark_closed)
 
         def _add_wrapped_label(text: str) -> QLabel:
             lbl = QLabel(text)
@@ -1216,6 +1231,103 @@ class CCTVMainWindow(ReferenceWindow):
             lbl.setTextFormat(Qt.PlainText)
             layout.insertWidget(layout.count() - 1, lbl)
             return lbl
+
+        def render_analysis(detail, refresh_error=None):
+            while analysis_layout.count():
+                item = analysis_layout.takeAt(0)
+                if item.widget() is not None:
+                    item.widget().deleteLater()
+            metadata = detail.get("metadata")
+            metadata = metadata if isinstance(metadata, dict) else {}
+            analysis = metadata.get("analysis")
+            analysis = analysis if isinstance(analysis, dict) else None
+            lines = []
+            if analysis is None:
+                lines.append("이 이벤트에 저장된 분석 정보가 없습니다.")
+            else:
+                status = analysis.get("status")
+                lines.append(f"상태: {_ANALYSIS_STATUS_LABELS.get(status, '알 수 없음')}")
+                updated_at = analysis.get("updated_at")
+                if updated_at:
+                    try:
+                        stamp = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+                        if stamp.tzinfo is not None:
+                            stamp = stamp.astimezone()
+                        lines.append(f"{'분석 완료' if status == 'complete' else '상태 갱신'} 시각: {stamp.isoformat(sep=' ', timespec='seconds')}")
+                    except ValueError:
+                        lines.append(f"상태 갱신 시각: {updated_at}")
+                result = analysis.get("result")
+                result = result if isinstance(result, dict) else {}
+                if status == "failed" and result.get("error_code"):
+                    lines.append(f"오류 코드: {result['error_code']}")
+                if status == "complete":
+                    image = result.get("image") if isinstance(result.get("image"), dict) else {}
+                    quality = image.get("quality") if isinstance(image.get("quality"), dict) else {}
+                    colors = result.get("clothing_colors") if isinstance(result.get("clothing_colors"), dict) else {}
+                    for key, title in (("upper", "상의 후보"), ("lower", "하의 후보")):
+                        region = colors.get(key) if isinstance(colors.get(key), dict) else {}
+                        dominant = region.get("dominant_color") if isinstance(region.get("dominant_color"), dict) else None
+                        if dominant:
+                            color = _ANALYSIS_COLOR_LABELS.get(dominant.get("name"), "알 수 없음")
+                            rgb = dominant.get("rgb")
+                            rgb_text = f"RGB {', '.join(map(str, rgb))}" if isinstance(rgb, list) and len(rgb) == 3 else "RGB 제공 안 됨"
+                            confidence = dominant.get("confidence")
+                            score = f"신뢰 지표 {confidence:.4f}" if isinstance(confidence, (int, float)) else "신뢰 지표 제공 안 됨"
+                            lines.append(f"{title}: {color} · {rgb_text} · {score}")
+                        else:
+                            lines.append(f"{title}: 이 분석기에서 제공되지 않음")
+                    sizes = [image.get(key) for key in ("width", "height", "sample_width", "sample_height")]
+                    if all(isinstance(value, int) for value in sizes):
+                        lines.append(f"이미지 크기(원본 W×H, 표본 W×H): {sizes[0]} × {sizes[1]} · {sizes[2]} × {sizes[3]}")
+                    for key, title in (("luminance_mean", "밝기 평균"), ("luminance_stddev", "밝기 표준편차"), ("laplacian_variance", "윤곽 에너지")):
+                        value = quality.get(key)
+                        if isinstance(value, (int, float)):
+                            lines.append(f"{title}: {value:.4f}")
+                    for key, title in (("dark_pixel_fraction", "암부 픽셀 비율"), ("bright_pixel_fraction", "명부 픽셀 비율")):
+                        value = quality.get(key)
+                        if isinstance(value, (int, float)):
+                            lines.append(f"{title}: {value:.2%}")
+                    flags = quality.get("flags")
+                    if isinstance(flags, list):
+                        descriptions = [_ANALYSIS_QUALITY_FLAGS.get(flag, "알 수 없는 품질 플래그") for flag in flags]
+                        lines.append("품질 표시: " + (", ".join(descriptions) if descriptions else "해당 플래그 없음"))
+                    lines.append("단일 사람 이미지의 후보 영역 측정값입니다. 신뢰 지표는 정답 확률이 아닙니다.")
+            if refresh_error:
+                lines.append(f"새로고침 실패, 이전 조회 결과 표시 중: {refresh_error}")
+            for line in lines:
+                label = QLabel(line)
+                label.setWordWrap(True)
+                label.setTextFormat(Qt.PlainText)
+                analysis_layout.addWidget(label)
+
+        def refresh_analysis():
+            if state["busy"] or not state["open"]:
+                return
+            state["busy"] = True
+            refresh_button.setEnabled(False)
+            task = BackgroundTask(lambda _progress: self.api.event(event_id), self)
+            self._event_detail_tasks.add(task)
+
+            def refreshed(detail):
+                if state["open"] and dialog.isVisible():
+                    state["detail"] = detail
+                    render_analysis(detail)
+
+            def refresh_failed(message):
+                if state["open"] and dialog.isVisible():
+                    render_analysis(state["detail"] or {}, safe_error(message))
+
+            def finished():
+                state["busy"] = False
+                refresh_button.setEnabled(state["open"] and state["detail"] is not None)
+                self._finish_event_detail_task(task)
+
+            task.result.connect(refreshed)
+            task.failed.connect(refresh_failed)
+            task.finished.connect(finished)
+            task.start()
+
+        refresh_button.clicked.connect(refresh_analysis)
 
         def operation(_progress):
             detail = self.api.event(event_id)
@@ -1256,6 +1368,10 @@ class CCTVMainWindow(ReferenceWindow):
                 return
             loading.deleteLater()
             detail, media_results, recording_results = result
+            state["detail"] = detail
+            state["busy"] = False
+            refresh_button.setEnabled(True)
+            render_analysis(detail)
             for name, value in (
                 ("Event ID", detail.get("id", event_id)),
                 ("이벤트 유형", detail.get("event_type", "-")),
@@ -1263,7 +1379,7 @@ class CCTVMainWindow(ReferenceWindow):
                 ("발생 시각", detail.get("occurred_at", "-")),
                 ("Person ID", detail.get("person_id") or "-"),
                 ("Global Person ID", detail.get("global_person_id") or "-"),
-                ("Confidence", detail.get("confidence", "-")),
+                ("감지 Confidence", detail.get("confidence", "-")),
             ):
                 _add_wrapped_label(f"{name}: {value}")
             for label, content, _content_type, error in media_results:
@@ -1302,6 +1418,8 @@ class CCTVMainWindow(ReferenceWindow):
         def failed(message):
             if state["open"] and dialog.isVisible():
                 loading.setText(f"이벤트 정보를 불러오지 못했습니다: {message}")
+            state["busy"] = False
+            refresh_button.setEnabled(state["open"] and state["detail"] is not None)
 
         task = BackgroundTask(operation, self)
         tasks = getattr(self, "_event_detail_tasks", set())
