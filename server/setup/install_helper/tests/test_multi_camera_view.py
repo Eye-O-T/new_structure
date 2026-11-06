@@ -92,3 +92,118 @@ class MultiCameraViewTests(unittest.TestCase):
         self.window.cameras[2]["enabled"] = False
         self.assertEqual(self.window._display_ids(), ["cam-1"])
         self.assertEqual(self.window._selected_camera_id, "cam-1")
+
+    def test_analysis_completed_card_format_and_excludes_from_appear_disappear_counts(self):
+        self.window.add_event(
+            {
+                "id": 1,
+                "type": "appear",
+                "person_id": "7",
+                "global_person_id": None,
+                "occurred_at": "2026-11-06T06:00:00Z",
+                "time": "2026-11-06T06:00:00Z",
+            }
+        )
+        self.window.add_event(
+            {
+                "id": 2,
+                "type": "analysis_completed",
+                "event_type": "analysis_completed",
+                "person_id": "7",
+                "global_person_id": None,
+                "occurred_at": "2026-11-06T06:00:02Z",
+                "time": "2026-11-06T06:00:02Z",
+            }
+        )
+        self.window.add_event(
+            {
+                "id": 3,
+                "type": "analysis_completed",
+                "event_type": "analysis_completed",
+                "person_id": "7",
+                "global_person_id": 42,
+                "occurred_at": "2026-11-06T06:00:03Z",
+                "time": "2026-11-06T06:00:03Z",
+            }
+        )
+        self.window.add_event(
+            {
+                "id": 4,
+                "type": "disappear",
+                "person_id": "7",
+                "global_person_id": 42,
+                "occurred_at": "2026-11-06T06:00:05Z",
+                "time": "2026-11-06T06:00:05Z",
+            }
+        )
+        self.assertEqual(self.window.appear_count, 1)
+        self.assertEqual(self.window.disappear_count, 1)
+        self.assertEqual(self.window.metric_appear["value"].text(), "1")
+        self.assertEqual(self.window.metric_disappear["value"].text(), "1")
+        descriptions = [
+            self.window.event_list.itemAt(index)
+            .widget()
+            .layout()
+            .itemAt(1)
+            .widget()
+            .text()
+            for index in range(self.window.event_list.count())
+        ]
+        self.assertEqual(
+            descriptions,
+            [
+                "pid:7 gpid:null 출현",
+                "pid:7/gpid:null 분석 완료",
+                "pid:7/gpid:42 분석 완료",
+                "pid:7 gpid:42 사라짐",
+            ],
+        )
+
+    def test_on_event_updates_existing_event_gpid_without_duplicate_card(self):
+        worker = type("DummyWorker", (), {"running": True, "stop": lambda self: None})()
+        self.window._selected_camera_id = "cam-1"
+        self.window._workers["cam-1"] = worker
+        self.window._camera_recordings["cam-1"] = {
+            "camera_id": "cam-1",
+            "enabled": True,
+            "recording_enabled": True,
+            "recording_state": "recording",
+        }
+        self.window._on_event(
+            "cam-1",
+            worker,
+            {
+                "id": 50,
+                "type": "analysis_completed",
+                "event_type": "analysis_completed",
+                "person_id": "7",
+                "global_person_id": None,
+                "occurred_at": "2026-11-06T06:00:03Z",
+                "time": "2026-11-06T06:00:03Z",
+            },
+        )
+        self.assertEqual(self.window.event_list.count(), 1)
+        self.assertEqual(
+            self.window.event_list.itemAt(0).widget().layout().itemAt(1).widget().text(),
+            "pid:7/gpid:null 분석 완료",
+        )
+
+        # Same event ID arrives with resolved global_person_id=42
+        self.window._on_event(
+            "cam-1",
+            worker,
+            {
+                "id": 50,
+                "type": "analysis_completed",
+                "event_type": "analysis_completed",
+                "person_id": "7",
+                "global_person_id": 42,
+                "occurred_at": "2026-11-06T06:00:03Z",
+                "time": "2026-11-06T06:00:03Z",
+            },
+        )
+        self.assertEqual(self.window.event_list.count(), 1)
+        self.assertEqual(
+            self.window.event_list.itemAt(0).widget().layout().itemAt(1).widget().text(),
+            "pid:7/gpid:42 분석 완료",
+        )

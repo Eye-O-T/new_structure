@@ -22,12 +22,12 @@ def _link_segment_to_events(
     upper = format_utc(parse_utc(segment["end_time"]) + timedelta(seconds=pre_roll_seconds))
     connection.execute(
         "INSERT OR IGNORE INTO event_recording_segments(event_id,recording_segment_id,created_at) "
-        "SELECT id,?,? FROM events WHERE camera_id=? AND occurred_at>? AND occurred_at<?",
+        "SELECT id,?,? FROM events WHERE camera_id=? AND event_type!='analysis_completed' AND occurred_at>? AND occurred_at<?",
         (segment["id"], _now(), segment["camera_id"], lower, upper),
     )
     connection.execute(
         "UPDATE events SET recording_segment_id=? WHERE recording_segment_id IS NULL "
-        "AND camera_id=? AND occurred_at>? AND occurred_at<?",
+        "AND camera_id=? AND event_type!='analysis_completed' AND occurred_at>? AND occurred_at<?",
         (segment["id"], segment["camera_id"], lower, upper),
     )
 
@@ -167,6 +167,7 @@ class RecordingsRepositoryMixin:
             rows = connection.execute(
                 "SELECT e.id AS event_id,s.id AS segment_id FROM recording_segments s "
                 "JOIN events e ON e.camera_id=s.camera_id "
+                "AND e.event_type!='analysis_completed' "
                 "AND e.occurred_at>strftime('%Y-%m-%dT%H:%M:%fZ',s.start_time,?) "
                 "AND e.occurred_at<strftime('%Y-%m-%dT%H:%M:%fZ',s.end_time,?) "
                 "WHERE s.status='ready' AND NOT EXISTS(SELECT 1 FROM event_recording_segments l "

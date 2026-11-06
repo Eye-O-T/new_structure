@@ -32,6 +32,10 @@ class _Response:
 
 
 class DesktopEventDetailContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
     def setUp(self):
         self.api = DesktopApi("https://server.example", opener=lambda *_args, **_kwargs: _Response())
         self.api._access_token = "access"
@@ -210,6 +214,211 @@ class DesktopEventDetailContractTests(unittest.TestCase):
         finally:
             window._event_detail_tasks.clear()
             window.close_playback_bridges()
+            window.close()
+            window.deleteLater()
+
+    def _open_detail_and_collect_texts(self, window, detail_payload):
+        app = QApplication.instance() or QApplication([])
+        self.api.event = Mock(return_value=detail_payload)
+        self.api.event_image = Mock(return_value=(b"invalid-image", "image/jpeg"))
+        self.api.recording = Mock(
+            return_value={
+                "id": 10,
+                "status": "ready",
+                "start_time": "2026-11-06T06:00:00Z",
+                "end_time": "2026-11-06T06:00:10Z",
+            }
+        )
+        self.api.recording_playback = Mock(
+            return_value={"playback_url": "/playback/get?path=cam-1"}
+        )
+
+        def run_exec():
+            for task in list(window._event_detail_tasks):
+                task.wait(2000)
+            app.processEvents()
+            return 0
+
+        with patch("server.desktop.admin.application.QDialog.exec_", side_effect=run_exec):
+            window.open_event_detail({"id": detail_payload["id"]})
+        dialog = window._last_event_detail_dialog
+        from PyQt5.QtWidgets import QLabel, QPushButton
+
+        labels = [lbl.text() for lbl in dialog.findChildren(QLabel) if lbl.text()]
+        buttons = [btn.text() for btn in dialog.findChildren(QPushButton) if btn.text()]
+        dialog.close()
+        dialog.deleteLater()
+        return labels, buttons
+
+    def test_person_appeared_detail_hides_analysis_and_refresh_button_even_with_legacy_metadata(self):
+        QApplication.instance() or QApplication([])
+        with patch(
+            "server.desktop.admin.application.WindowsSessionStore", return_value=None
+        ):
+            window = CCTVMainWindow("https://server.example")
+        try:
+            window.api = self.api
+            labels, buttons = self._open_detail_and_collect_texts(
+                window,
+                {
+                    "id": 101,
+                    "camera_id": "cam-1",
+                    "event_type": "person_appeared",
+                    "occurred_at": "2026-11-06T06:00:00Z",
+                    "person_id": "7",
+                    "global_person_id": 42,
+                    "confidence": 0.95,
+                    "media": {"snapshot": True, "crop": False, "annotated_snapshot": False},
+                    "recording_segment_ids": [10],
+                    "metadata": {
+                        "analysis": {
+                            "status": "complete",
+                            "updated_at": "2026-11-06T06:00:03Z",
+                            "result": {
+                                "backend": "local_appearance",
+                                "clothing_colors": {
+                                    "upper": {
+                                        "dominant_color": {
+                                            "name": "blue",
+                                            "rgb": [10, 20, 200],
+                                            "confidence": 0.9,
+                                        }
+                                    }
+                                },
+                            },
+                        }
+                    },
+                },
+            )
+            joined = "\n".join(labels)
+            self.assertNotIn("분석 결과", labels)
+            self.assertNotIn("상의 후보", joined)
+            self.assertNotIn("분석 결과 새로고침", buttons)
+            self.assertIn("이벤트 유형: person_appeared", labels)
+            self.assertIn("pid: 7", labels)
+            self.assertIn("gpid: 42", labels)
+            self.assertIn("녹화 재생", buttons)
+        finally:
+            window.close()
+            window.deleteLater()
+
+    def test_analysis_completed_detail_renders_appearance_and_par_results_without_refresh_button(self):
+        QApplication.instance() or QApplication([])
+        with patch(
+            "server.desktop.admin.application.WindowsSessionStore", return_value=None
+        ):
+            window = CCTVMainWindow("https://server.example")
+        try:
+            window.api = self.api
+            # 1. LocalAppearanceAnalyzer result
+            labels_local, buttons_local = self._open_detail_and_collect_texts(
+                window,
+                {
+                    "id": 202,
+                    "camera_id": "cam-1",
+                    "event_type": "analysis_completed",
+                    "occurred_at": "2026-11-06T06:00:03Z",
+                    "person_id": "7",
+                    "global_person_id": 42,
+                    "media": {"snapshot": False, "crop": False, "annotated_snapshot": False},
+                    "recording_segment_ids": [],
+                    "metadata": {
+                        "appearance_event_id": 101,
+                        "appearance_occurred_at": "2026-11-06T06:00:00Z",
+                        "analysis_job_id": 55,
+                        "tracking_session_id": "a" * 32,
+                        "analysis": {
+                            "status": "complete",
+                            "updated_at": "2026-11-06T06:00:03Z",
+                            "result": {
+                                "backend": "local_appearance",
+                                "backend_version": "1.0.0",
+                                "image": {
+                                    "width": 120,
+                                    "height": 300,
+                                    "sample_width": 102,
+                                    "sample_height": 256,
+                                    "quality": {
+                                        "luminance_mean": 120.5,
+                                        "flags": ["low_contrast"],
+                                    },
+                                },
+                                "clothing_colors": {
+                                    "upper": {
+                                        "dominant_color": {
+                                            "name": "blue",
+                                            "rgb": [10, 20, 200],
+                                            "confidence": 0.8765,
+                                        }
+                                    },
+                                    "lower": {
+                                        "dominant_color": {
+                                            "name": "black",
+                                            "rgb": [15, 15, 15],
+                                            "confidence": 0.9123,
+                                        }
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            )
+            joined_local = "\n".join(labels_local)
+            self.assertIn("분석 결과", labels_local)
+            self.assertNotIn("분석 결과 새로고침", buttons_local)
+            self.assertIn("원본 등장 이벤트 ID: 101", labels_local)
+            self.assertIn("원본 등장 시각: 2026-11-06 15:00:00 KST", labels_local)
+            self.assertIn("완료 시각: 2026-11-06 15:00:03 KST", labels_local)
+            self.assertIn("pid: 7", labels_local)
+            self.assertIn("gpid: 42", labels_local)
+            self.assertIn("상의 후보: 파랑 · RGB 10, 20, 200 · 신뢰 지표 0.8765", labels_local)
+            self.assertIn("하의 후보: 검정 · RGB 15, 15, 15 · 신뢰 지표 0.9123", labels_local)
+            self.assertIn("밝기 평균: 120.5000", joined_local)
+            self.assertIn("품질 표시: 대비 낮음", joined_local)
+
+            # 2. PersonAttributeAnalyzer (PAR) result
+            labels_par, buttons_par = self._open_detail_and_collect_texts(
+                window,
+                {
+                    "id": 203,
+                    "camera_id": "cam-1",
+                    "event_type": "analysis_completed",
+                    "occurred_at": "2026-11-06T06:00:04Z",
+                    "person_id": "8",
+                    "global_person_id": None,
+                    "media": {"snapshot": False, "crop": False, "annotated_snapshot": False},
+                    "recording_segment_ids": [],
+                    "metadata": {
+                        "appearance_event_id": 102,
+                        "appearance_occurred_at": "2026-11-06T06:00:01Z",
+                        "analysis": {
+                            "status": "complete",
+                            "updated_at": "2026-11-06T06:00:04Z",
+                            "result": {
+                                "backend": "par_resnet34",
+                                "backend_version": "exp3",
+                                "image": {"width": 128, "height": 256},
+                                "attributes": {
+                                    "hat": {"value": "Hat", "score": 0.9123},
+                                    "upper_color": [
+                                        {"value": "Black", "score": 0.85},
+                                        {"value": "Blue", "score": 0.62},
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                },
+            )
+            joined_par = "\n".join(labels_par)
+            self.assertIn("분석 결과", labels_par)
+            self.assertNotIn("분석 결과 새로고침", buttons_par)
+            self.assertIn("모자(hat): Hat (0.9123)", labels_par)
+            self.assertIn("상의 색상(upper_color): Black (0.8500), Blue (0.6200)", labels_par)
+            self.assertIn("이미지 크기(원본 W×H): 128 × 256", labels_par)
+            self.assertNotIn("상의 후보", joined_par)
+        finally:
             window.close()
             window.deleteLater()
 

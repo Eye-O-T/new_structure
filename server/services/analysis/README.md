@@ -35,7 +35,7 @@ ANALYSIS_PLUGIN=server.services.analysis.processors.attributes:PersonAttributeAn
 
 이 결과는 의복 분할·의복 종류·행동 인식 결과가 아니다. 자세·가림·배경·조명에 따라 다른 픽셀이 섞일 수 있고, 배경과 옷이 같은 색이면 분리할 수 없다. `confidence`는 정답 확률이 아니며 `low_edge_energy`도 흐림을 확정하지 않는다. 근거와 한계는 `evidence`에 함께 기록한다. 나이·성별·인종이나 보이지 않는 속성은 추정하지 않는다.
 
-현재 결과·권한·작업 임대 동작은 [객체 스키마](../../../lib/ai_cctv_core/contracts/objects.py)와 [객체 작업 API](../data/app/api/objects.py)를 기준으로 유지한다.
+현재 결과·권한·작업 임대 동작은 [객체 스키마](../../../lib/ai_cctv_core/contracts/objects.py)와 [객체 작업 API](../data/app/api/objects.py)를 기준으로 유지한다. 분석 결과가 `outcome="complete"`로 수락되면 Data는 원본 등장 이벤트의 `metadata.analysis` 갱신과 함께 별도의 `analysis_completed` 이벤트를 원자적으로 생성한다(`failed`·`retry`·`unconfigured`는 생성하지 않음). 관제 화면에서는 `analysis_completed` 항목의 상세 창에서 분석 결과를 조회한다.
 
 `unconfigured`로 끝난 기존 작업은 모델 연결·컨테이너 재시작만으로 다시 처리하지 않는다. 모델을 연결하고 크롭 파일이 남아 있는지 확인한 뒤 내부 네트워크에서 `POST http://nginx:8080/internal/data/v1/object-jobs/analysis/requeue-unconfigured`를 호출한다. 본문은 없고 `X-Internal-Token`에는 `DATA_ANALYSIS_TOKEN`을 사용한다. 응답 `{"requeued": 수량}`만큼 최대 100건씩 다시 대기하므로 남은 작업이 있으면 반복한다. 완료·재시도·재등록의 저장 규칙은 [Data 작업 저장소](../data/app/database/repositories/objects.py)를 따른다.
 

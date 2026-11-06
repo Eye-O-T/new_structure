@@ -335,6 +335,114 @@ class EventPollingTests(unittest.TestCase):
             {"after_event_id": 40},
         )
 
+    def test_legacy_event_maps_analysis_completed_and_metadata_fields(self):
+        result = video.legacy_event(
+            {
+                "id": 55,
+                "camera_id": "cam-001",
+                "event_type": "analysis_completed",
+                "occurred_at": "2026-11-06T06:00:03Z",
+                "created_at": "2026-11-06T06:00:03Z",
+                "person_id": "7",
+                "global_person_id": 42,
+                "metadata": {
+                    "appearance_event_id": 40,
+                    "appearance_occurred_at": "2026-11-06T06:00:00Z",
+                    "analysis_job_id": 12,
+                    "tracking_session_id": "a" * 32,
+                    "analysis": {"status": "complete", "result": {"backend": "local_appearance"}},
+                },
+            }
+        )
+        self.assertEqual(result["type"], "analysis_completed")
+        self.assertEqual(result["event_type"], "analysis_completed")
+        self.assertEqual(result["person_id"], "7")
+        self.assertEqual(result["global_person_id"], 42)
+        self.assertEqual(result["appearance_event_id"], 40)
+        self.assertEqual(result["appearance_occurred_at"], "2026-11-06T06:00:00Z")
+        self.assertEqual(result["analysis_job_id"], 12)
+        self.assertEqual(result["tracking_session_id"], "a" * 32)
+
+    def test_null_gpid_completion_refreshes_every_5s_without_changing_watermark_and_stops_when_resolved(self):
+        api = Mock()
+        api.events.side_effect = [
+            # Initial recent 30 poll at t=0
+            {
+                "items": [
+                    {
+                        "id": 40,
+                        "event_type": "analysis_completed",
+                        "occurred_at": "2026-11-06T06:00:03Z",
+                        "person_id": "7",
+                        "global_person_id": None,
+                    }
+                ],
+                "snapshot_max_id": 40,
+            },
+            # Loop 1 (t=2.5s): incremental poll only
+            {"items": [], "has_more": False},
+            # Loop 2 (t=5.0s): incremental poll + 5s null-gpid refresh poll
+            {"items": [], "has_more": False},
+            {
+                "items": [
+                    {
+                        "id": 99,
+                        "event_type": "person_appeared",
+                        "occurred_at": "2026-11-06T06:00:10Z",
+                        "person_id": "9",
+                        "global_person_id": 99,
+                    },
+                    {
+                        "id": 40,
+                        "event_type": "analysis_completed",
+                        "occurred_at": "2026-11-06T06:00:03Z",
+                        "person_id": "7",
+                        "global_person_id": 42,
+                    },
+                ],
+                "snapshot_max_id": 99,
+            },
+            # Loop 3 (t=10.5s): gpid is already resolved, so only incremental poll runs
+            {"items": [], "has_more": False},
+        ]
+        worker = video.VideoWorker((api, "cam-001"))
+        clock = Clock()
+        worker._stop = clock
+        received = []
+        wait_count = 0
+
+        def on_wait():
+            nonlocal wait_count
+            wait_count += 1
+            if wait_count == 1:
+                clock.now = 2.5
+            elif wait_count == 2:
+                clock.now = 5.0
+            elif wait_count == 3:
+                clock.now = 10.5
+            else:
+                worker.stop()
+
+        clock.on_wait = on_wait
+        worker.event_ready.connect(received.append, Qt.DirectConnection)
+        with patch.object(video.time, "monotonic", side_effect=lambda: clock.now):
+            worker.poll_events()
+
+        self.assertEqual(
+            [(item["id"], item["global_person_id"]) for item in received],
+            [(40, None), (40, 42)],
+        )
+        self.assertEqual(
+            [call.kwargs for call in api.events.call_args_list],
+            [
+                {"limit": 30, "order": "desc"},
+                {"after_event_id": 40},
+                {"after_event_id": 40},
+                {"limit": 30, "order": "desc"},
+                {"after_event_id": 40},
+            ],
+        )
+
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is needed to generate HLS")
 class HlsTests(unittest.TestCase):

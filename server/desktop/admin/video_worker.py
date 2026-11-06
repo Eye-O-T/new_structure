@@ -42,6 +42,7 @@ LIVE_RTSP_OPTIONS = {
 }
 OBJECT_POLL_INTERVAL_SECONDS = 0.2
 EVENT_POLL_INTERVAL_SECONDS = 0.5
+NULL_GPID_REFRESH_INTERVAL_SECONDS = 5.0
 POLL_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
@@ -115,11 +116,17 @@ def _open_live_stream(api, camera_id, av, *, stop_event=None):
 
 
 def legacy_event(event):
+    metadata = event.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, dict) else {}
     return {
         "id": event.get("id"),
         "camera_id": event.get("camera_id"),
         "event_type": event.get("event_type"),
-        "type": {"person_appeared": "appear", "person_disappeared": "disappear"}.get(event["event_type"], event["event_type"]),
+        "type": {
+            "person_appeared": "appear",
+            "person_disappeared": "disappear",
+            "analysis_completed": "analysis_completed",
+        }.get(event["event_type"], event["event_type"]),
         "person_id": event.get("person_id"),
         "global_person_id": event.get("global_person_id"),
         "confidence": event.get("confidence"),
@@ -128,7 +135,83 @@ def legacy_event(event):
         "created_at": event.get("created_at"),
         "recording_segment_ids": event.get("recording_segment_ids", []),
         "media": event.get("media", {}),
+        "tracking_session_id": metadata.get("tracking_session_id"),
+        "appearance_event_id": metadata.get("appearance_event_id"),
+        "appearance_occurred_at": metadata.get("appearance_occurred_at"),
+        "analysis_job_id": metadata.get("analysis_job_id"),
+        "metadata": metadata,
     }
+
+
+def _event_sort_key(event):
+    value = event.get("occurred_at") or event.get("time")
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        ts = (
+            float("-inf")
+            if stamp.tzinfo is None or stamp.utcoffset() is None
+            else stamp.timestamp()
+        )
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        ts = float("-inf")
+    try:
+        event_id = int(event.get("id"))
+    except (TypeError, ValueError, OverflowError):
+        event_id = -1
+    return ts, event_id
+
+
+def _upsert_retained_event(retained, item):
+    event_id = item.get("id")
+    if event_id is not None:
+        for index, existing in enumerate(retained):
+            if str(existing.get("id")) == str(event_id):
+                updated = dict(existing)
+                for key in ("person_id", "global_person_id"):
+                    if item.get(key) is not None:
+                        updated[key] = item[key]
+                retained[index] = updated
+                retained.sort(key=_event_sort_key, reverse=True)
+                del retained[30:]
+                return updated
+    retained.append(dict(item))
+    retained.sort(key=_event_sort_key, reverse=True)
+    del retained[30:]
+    return item
+
+
+def _refresh_retained_event_ids(retained, item):
+    event_id = item.get("id")
+    if event_id is None:
+        return None, False
+    for existing in retained:
+        if str(existing.get("id")) == str(event_id):
+            changed = False
+            if (
+                item.get("person_id") is not None
+                and existing.get("person_id") != item.get("person_id")
+            ):
+                existing["person_id"] = item["person_id"]
+                changed = True
+            if (
+                item.get("global_person_id") is not None
+                and existing.get("global_person_id") != item.get("global_person_id")
+            ):
+                existing["global_person_id"] = item["global_person_id"]
+                changed = True
+            return existing, changed
+    return None, False
+
+
+def _has_unresolved_analysis_event(retained):
+    return any(
+        (
+            item.get("event_type") == "analysis_completed"
+            or item.get("type") == "analysis_completed"
+        )
+        and item.get("global_person_id") is None
+        for item in retained
+    )
 
 
 class ObservationAdapter:
@@ -235,6 +318,8 @@ class VideoWorker(QThread):
         after_event_id = 0
         initialized = False
         failed = False
+        retained = []
+        last_gpid_refresh = None
         while not self._stop.is_set():
             try:
                 if not initialized:
@@ -242,18 +327,50 @@ class VideoWorker(QThread):
                     current = page.get("items", [])
                     after_event_id = int(page.get("snapshot_max_id") or 0)
                     for event in reversed(current):
-                        self.event_ready.emit(legacy_event(event))
+                        item = _upsert_retained_event(retained, legacy_event(event))
+                        self.event_ready.emit(dict(item))
+                    if _has_unresolved_analysis_event(retained):
+                        last_gpid_refresh = time.monotonic()
                     initialized = True
                 else:
                     while not self._stop.is_set():
                         page = api.events(camera_id, after_event_id=after_event_id)
                         current = page.get("items", [])
                         for event in current:
-                            self.event_ready.emit(legacy_event(event))
+                            item = _upsert_retained_event(retained, legacy_event(event))
+                            self.event_ready.emit(dict(item))
                         if current:
                             after_event_id = max(after_event_id, max(int(event["id"]) for event in current))
                         if not page.get("has_more") or not current:
                             break
+                    if _has_unresolved_analysis_event(retained):
+                        now = time.monotonic()
+                        if last_gpid_refresh is None:
+                            last_gpid_refresh = now
+                        elif (
+                            not self._stop.is_set()
+                            and now - last_gpid_refresh >= NULL_GPID_REFRESH_INTERVAL_SECONDS
+                        ):
+                            last_gpid_refresh = now
+                            refresh_page = api.events(camera_id, limit=30, order="desc")
+                            retained_ids = {
+                                str(item.get("id"))
+                                for item in retained
+                                if item.get("id") is not None
+                            }
+                            for event in reversed(refresh_page.get("items", [])):
+                                event_id = event.get("id")
+                                if event_id is None or str(event_id) not in retained_ids:
+                                    continue
+                                updated, changed = _refresh_retained_event_ids(
+                                    retained, legacy_event(event)
+                                )
+                                if updated is not None and changed:
+                                    self.event_ready.emit(dict(updated))
+                            if not _has_unresolved_analysis_event(retained):
+                                last_gpid_refresh = None
+                    else:
+                        last_gpid_refresh = None
                 failed = False
             except Exception as exc:
                 if not failed:

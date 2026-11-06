@@ -17,6 +17,13 @@ def initialize_runtime(repository: DataRepository, settings: Settings) -> None:
     settings.prepare_directories()
 
     repository.initialize()
+    backfill = repository.backfill_analysis_completed_events()
+    if backfill.get("created") or backfill.get("skipped"):
+        LOGGER.info(
+            "analysis completion backfill finished: created=%d skipped=%d",
+            backfill.get("created", 0),
+            backfill.get("skipped", 0),
+        )
 
     requeued_jobs = repository.requeue_interrupted_recovery_jobs()
 

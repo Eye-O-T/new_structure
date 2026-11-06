@@ -55,7 +55,9 @@ info:
     global_person_id는 여러 카메라의 인물을 연결하는 별도 ID이며 미판정 시 null이다.
     confidence는 감지기의 확신 정도(0~1)이며 신원 일치 확률이 아니다.
     이벤트 metadata는 확장 가능한 객체다. identity와 analysis 결과는 이벤트 생성 후 갱신된다.
-    기본 Analysis는 단일 사람 크롭의 색·영상 품질을 측정한다. 분석 플러그인을 명시적으로
+    분석이 성공(complete)하면 원본 등장 이벤트의 metadata.analysis 갱신과 함께 별도의 analysis_completed 이벤트가 생성되며,
+    metadata에 appearance_event_id·appearance_occurred_at·analysis_job_id·tracking_session_id·analysis 사본을 담는다.
+    기본 Analysis는 단일 사람 크롭의 색·영상 품질을 측정하고, PAR 분석기는 외관 속성(attributes)을 반환한다. 분석 플러그인을 명시적으로
     블랙박스로 바꾼 경우에는 unconfigured를 반환한다. 알 수 없는 이벤트 유형·metadata 키도 허용한다.
     objects는 최신 좌표 조회 API이며 영상 프레임과 정확히 동기화된 추적 스트림이 아니다.
     관측 시각·원본 크기로 표시 여부와 좌표를 계산하고 stale=true이면 박스를 지운다.

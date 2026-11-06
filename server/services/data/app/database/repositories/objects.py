@@ -7,6 +7,7 @@ from datetime import timedelta
 from ai_cctv_core.contracts.objects import ObjectJobCompletion
 from ai_cctv_core.time import format_utc, utc_now
 
+from .events import _insert_analysis_completed_event
 from .identity import conflicting_global_ids, note_track_observation, resolve_identity
 from .job_state import update_event_job_state
 
@@ -167,7 +168,7 @@ class ObjectRepositoryMixin:
         stamp = format_utc(now)
         with self.database.transaction() as connection:
             row = connection.execute(
-                "SELECT j.*,e.camera_id,e.person_id,e.occurred_at,e.metadata_json FROM object_jobs j JOIN events e ON e.id=j.event_id WHERE j.id=? AND j.stage=? AND j.state='running' AND j.lease_id=? AND j.lease_until>?",
+                "SELECT j.*,e.camera_id,e.person_id,e.global_person_id,e.occurred_at,e.metadata_json FROM object_jobs j JOIN events e ON e.id=j.event_id WHERE j.id=? AND j.stage=? AND j.state='running' AND j.lease_id=? AND j.lease_until>?",
                 (job_id, stage, completion.lease_id, stamp),
             ).fetchone()
             if row is None:
@@ -250,4 +251,21 @@ class ObjectRepositoryMixin:
                     job_id,
                 ),
             )
+            if stage == "analysis" and state == "complete":
+                session = metadata.get("tracking_session_id")
+                if not session and isinstance(metadata.get("object"), dict):
+                    session = metadata["object"].get("tracking_session_id")
+                _insert_analysis_completed_event(
+                    connection,
+                    appearance_event_id=int(row["event_id"]),
+                    camera_id=row["camera_id"],
+                    person_id=row["person_id"],
+                    global_person_id=row["global_person_id"],
+                    appearance_occurred_at=row["occurred_at"],
+                    tracking_session_id=session,
+                    analysis_job_id=int(row["id"]),
+                    analysis_metadata=metadata["analysis"],
+                    occurred_at=stamp,
+                    created_at=stamp,
+                )
             return True

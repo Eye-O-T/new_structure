@@ -69,6 +69,7 @@ class EventType(str, Enum):
     person_detected = "person_detected"
     person_appeared = "person_appeared"
     person_disappeared = "person_disappeared"
+    analysis_completed = "analysis_completed"
     network_failure = "network_failure"
     network_recovery = "network_recovery"
     camera_input_lost = "camera_input_lost"

@@ -2,13 +2,89 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import logging
 import sqlite3
+import uuid
 from typing import Any
+
+from ai_cctv_core.time import format_utc, parse_utc
 
 from ..connection import Database
 from .base import _event, _now
 from .identity import note_track_observation
+
+LOGGER = logging.getLogger("ai_cctv.data")
+ANALYSIS_COMPLETED_EVENT_TYPE = "analysis_completed"
+_ANALYSIS_COMPLETED_NAMESPACE = uuid.UUID("a3b8c9d0-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
+
+
+def analysis_completed_source_event_id(appearance_event_id: int) -> str:
+    return uuid.uuid5(
+        _ANALYSIS_COMPLETED_NAMESPACE,
+        f"analysis_completed:{int(appearance_event_id)}",
+    ).hex
+
+
+def _insert_analysis_completed_event(
+    connection: sqlite3.Connection,
+    *,
+    appearance_event_id: int,
+    camera_id: str,
+    person_id: str | None,
+    global_person_id: int | None,
+    appearance_occurred_at: str,
+    tracking_session_id: str | None,
+    analysis_job_id: int | None,
+    analysis_metadata: dict[str, Any],
+    occurred_at: str,
+    created_at: str,
+) -> tuple[int, bool]:
+    source_event_id = analysis_completed_source_event_id(appearance_event_id)
+    existing = connection.execute(
+        "SELECT id FROM events WHERE camera_id = ? AND source_event_id = ?",
+        (camera_id, source_event_id),
+    ).fetchone()
+    if existing is not None:
+        return int(existing["id"]), False
+    resolved_gpid = global_person_id
+    if resolved_gpid is None and tracking_session_id and person_id:
+        identity = connection.execute(
+            "SELECT global_person_id FROM person_identity_links "
+            "WHERE camera_id = ? AND tracking_session_id = ? AND person_id = ?",
+            (camera_id, tracking_session_id, person_id),
+        ).fetchone()
+        if identity is not None:
+            resolved_gpid = identity["global_person_id"]
+    event_metadata: dict[str, Any] = {
+        "appearance_event_id": int(appearance_event_id),
+        "appearance_occurred_at": appearance_occurred_at,
+        "tracking_session_id": tracking_session_id,
+        "analysis": copy.deepcopy(analysis_metadata),
+    }
+    if analysis_job_id is not None:
+        event_metadata["analysis_job_id"] = int(analysis_job_id)
+    cursor = connection.execute(
+        """
+        INSERT INTO events(
+            camera_id, event_type, occurred_at, person_id, global_person_id,
+            confidence, recording_segment_id, snapshot_path,
+            metadata_json, edge_event_id, source_event_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, ?, ?)
+        """,
+        (
+            camera_id,
+            ANALYSIS_COMPLETED_EVENT_TYPE,
+            occurred_at,
+            person_id,
+            resolved_gpid,
+            json.dumps(event_metadata, ensure_ascii=False, allow_nan=False),
+            source_event_id,
+            created_at,
+        ),
+    )
+    return int(cursor.lastrowid), True
 
 
 def _event_details(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
@@ -81,21 +157,25 @@ class EventsRepositoryMixin:
                 values["metadata"]["recovery_edge_device_id"] = (
                     origin["edge_device_id"] if origin is not None else None
                 )
-            automatic = connection.execute(
-                """
-                SELECT id FROM recording_segments
-                WHERE camera_id = ?
-                  AND start_time < ?
-                  AND end_time > ?
-                  AND status = 'ready'
-                ORDER BY start_time, id
-                """,
-                (
-                    values["camera_id"],
-                    values.get("link_end_at", values["occurred_at"]),
-                    values.get("link_start_at", values["occurred_at"]),
-                ),
-            ).fetchall()
+            automatic = (
+                []
+                if values["event_type"] == ANALYSIS_COMPLETED_EVENT_TYPE
+                else connection.execute(
+                    """
+                    SELECT id FROM recording_segments
+                    WHERE camera_id = ?
+                      AND start_time < ?
+                      AND end_time > ?
+                      AND status = 'ready'
+                    ORDER BY start_time, id
+                    """,
+                    (
+                        values["camera_id"],
+                        values.get("link_end_at", values["occurred_at"]),
+                        values.get("link_start_at", values["occurred_at"]),
+                    ),
+                ).fetchall()
+            )
             segment_ids = explicit_ids | {int(row["id"]) for row in automatic}
             if segment_ids:
                 placeholders = ",".join("?" for _ in segment_ids)
@@ -153,8 +233,9 @@ class EventsRepositoryMixin:
                 )
             # 이벤트와 발송·분석 예약을 같은 트랜잭션에 넣는다.
             # 따라서 이벤트만 저장되고 후속 작업이 사라지는 중간 상태가 남지 않는다.
-            self._enqueue_push(connection, event_id)
-            self._enqueue_object_jobs(connection, event_id, values)
+            if values["event_type"] != ANALYSIS_COMPLETED_EVENT_TYPE:
+                self._enqueue_push(connection, event_id)
+                self._enqueue_object_jobs(connection, event_id, values)
             connection.executemany(
                 """
                 INSERT INTO event_recording_segments(
@@ -167,6 +248,120 @@ class EventsRepositoryMixin:
         if result is None:
             raise RuntimeError("event disappeared after creation")
         return result
+
+    # 과거 성공 분석 중 대응 완료 이벤트가 없는 자료를 최대 100건 단위로 보완 생성한다.
+    def backfill_analysis_completed_events(
+        self, *, batch_size: int = 100
+    ) -> dict[str, int]:
+        limit = min(100, max(1, int(batch_size)))
+        created = 0
+        skipped = 0
+        last_id = 0
+        while True:
+            with self.database.transaction() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT id, camera_id, person_id, global_person_id, occurred_at, metadata_json
+                    FROM events e
+                    WHERE e.id > ?
+                      AND e.event_type = 'person_appeared'
+                      AND json_extract(e.metadata_json, '$.analysis.status') = 'complete'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM events c
+                          WHERE c.camera_id = e.camera_id
+                            AND c.event_type = 'analysis_completed'
+                            AND json_extract(c.metadata_json, '$.appearance_event_id') = e.id
+                      )
+                    ORDER BY e.id ASC
+                    LIMIT ?
+                    """,
+                    (last_id, limit),
+                ).fetchall()
+                if not rows:
+                    break
+                now = _now()
+                for row in rows:
+                    appearance_id = int(row["id"])
+                    last_id = max(last_id, appearance_id)
+                    try:
+                        metadata = json.loads(row["metadata_json"])
+                    except (TypeError, ValueError):
+                        LOGGER.warning(
+                            "skipping analysis completion backfill for event %d: invalid metadata_json",
+                            appearance_id,
+                        )
+                        skipped += 1
+                        continue
+                    if not isinstance(metadata, dict):
+                        skipped += 1
+                        continue
+                    analysis = metadata.get("analysis")
+                    if not isinstance(analysis, dict) or analysis.get("status") != "complete":
+                        skipped += 1
+                        continue
+                    result = analysis.get("result")
+                    if not isinstance(result, dict):
+                        LOGGER.warning(
+                            "skipping analysis completion backfill for event %d: missing analysis result",
+                            appearance_id,
+                        )
+                        skipped += 1
+                        continue
+                    job = connection.execute(
+                        "SELECT id, state, updated_at FROM object_jobs WHERE event_id = ? AND stage = 'analysis'",
+                        (appearance_id,),
+                    ).fetchone()
+                    if job is not None and job["state"] != "complete":
+                        LOGGER.warning(
+                            "skipping analysis completion backfill for event %d: job state is %s",
+                            appearance_id,
+                            job["state"],
+                        )
+                        skipped += 1
+                        continue
+                    raw_updated_at = analysis.get("updated_at")
+                    if not isinstance(raw_updated_at, str) or not raw_updated_at.strip():
+                        LOGGER.warning(
+                            "skipping analysis completion backfill for event %d: missing analysis updated_at",
+                            appearance_id,
+                        )
+                        skipped += 1
+                        continue
+                    try:
+                        completed_at = format_utc(parse_utc(raw_updated_at))
+                    except (TypeError, ValueError):
+                        LOGGER.warning(
+                            "skipping analysis completion backfill for event %d: invalid analysis updated_at %r",
+                            appearance_id,
+                            raw_updated_at,
+                        )
+                        skipped += 1
+                        continue
+                    session = metadata.get("tracking_session_id")
+                    if not session and isinstance(metadata.get("object"), dict):
+                        session = metadata["object"].get("tracking_session_id")
+                    analysis_copy = {
+                        **analysis,
+                        "status": "complete",
+                        "updated_at": completed_at,
+                        "result": copy.deepcopy(result),
+                    }
+                    _, inserted = _insert_analysis_completed_event(
+                        connection,
+                        appearance_event_id=appearance_id,
+                        camera_id=row["camera_id"],
+                        person_id=row["person_id"],
+                        global_person_id=row["global_person_id"],
+                        appearance_occurred_at=row["occurred_at"],
+                        tracking_session_id=session,
+                        analysis_job_id=int(job["id"]) if job is not None else None,
+                        analysis_metadata=analysis_copy,
+                        occurred_at=completed_at,
+                        created_at=now,
+                    )
+                    if inserted:
+                        created += 1
+        return {"created": created, "skipped": skipped}
 
     # 단일 대표 녹화와 함께 다대다 연결의 전체 녹화 ID를 돌려준다.
     def get_event(self, event_id: int) -> dict[str, Any] | None:

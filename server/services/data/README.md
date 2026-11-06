@@ -43,6 +43,8 @@ Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/o
 
 이벤트 조회는 기존 offset과 함께 `snapshot_max_id`·`cursor`·`order`를 지원한다. 첫 응답의 경계와 다음 커서를 같은 필터·정렬로 전달하면 조회 중 새 이벤트가 생겨도 페이지가 밀리지 않는다. `after_event_id`는 실시간 증분 수신용으로 ID 오름차순 조회를 사용하며, 늦게 저장된 과거 발생 이벤트도 포함한다. 이 모드에서는 cursor·offset·desc를 함께 쓸 수 없다. 현재 결과의 스냅샷 격리를 뜻하지는 않으며 보관 만료로 삭제된 항목은 다음 페이지에서 빠질 수 있다.
 
+객체 분석(`stage="analysis"`)이 `outcome="complete"`로 완료되면 원본 `person_appeared` 이벤트의 `metadata.analysis` 갱신과 같은 트랜잭션에서 `event_type="analysis_completed"` 이벤트를 함께 저장한다. 결정적 `source_event_id`로 중복 생성을 막고, `metadata`에 `appearance_event_id`·`appearance_occurred_at`·`analysis_job_id`·`tracking_session_id`·`analysis` 사본을 기록한다. 완료 이벤트에는 객체 작업·FCM 발송·현장 녹화 자동 연결을 생성하지 않는다. 시작 시 `initialize_runtime()`(또는 `repository.backfill_analysis_completed_events()`)이 과거 완료 분석 중 대응 `analysis_completed` 이벤트가 없는 항목을 원래 `metadata.analysis.updated_at` 시각 기준으로 최대 100건 단위 트랜잭션으로 보완 생성한다.
+
 완료 녹화 등록과 관련 이벤트 연결은 같은 SQLite 트랜잭션에서 확정한다. 연결 중 실패하면 등록도 취소되며, 완료 통지 재전송은 기존 녹화에 연결을 멱등하게 보강한다. 파일 대조 작업은 구형 버전에서 남은 연결 누락도 실행당 최대 1,000개씩 회복한다.
 
 ## 검증

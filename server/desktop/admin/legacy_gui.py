@@ -527,7 +527,7 @@ class CCTVMainWindow(QMainWindow):
         self.metric_total["value"].setText(str(data.get("tracked_total", 0)))
 
     def add_event(self, event):
-        event_type = event.get("type", "unknown")
+        event_type = event.get("type") or event.get("event_type") or "unknown"
         has_person_id = (
             event.get("person_id") is not None
             or event.get("global_person_id") is not None
@@ -545,6 +545,15 @@ class CCTVMainWindow(QMainWindow):
             self.metric_disappear["value"].setText(str(self.disappear_count))
             desc = f"{identity} 사라짐"
             color = "#f97316"
+        elif event_type == "analysis_completed":
+            pid = event.get("person_id")
+            gpid = event.get("global_person_id")
+            analysis_identity = (
+                f"pid:{pid if pid is not None else '-'}/"
+                f"gpid:{gpid if gpid is not None else 'null'}"
+            )
+            desc = f"{analysis_identity} 분석 완료"
+            color = "#38bdf8"
         elif event_type == "error":
             desc = event.get("message", "오류 발생")
             color = "#ef4444"
