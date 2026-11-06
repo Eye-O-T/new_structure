@@ -3,6 +3,13 @@
 이 절차는 Windows Server와 Pi Edge가 신뢰 LAN에 있는 시연 환경을 기준으로 합니다.
 실제 사용자 자료를 다루기 전에 저장 위치와 남은 디스크 용량을 확인하십시오.
 
+**업데이트 전에는 전체 데이터 저장소를 별도 위치에 백업하십시오.** 저장소가 DB·배포·도메인
+계약 변경을 감지하면 설치 도우미, 서버 제어판 또는 CLI가 해당 데이터 저장소를 자동
+초기화할 수 있습니다. 이 경우 `models/`, `certs/`, `certificates/`만 보존되고 DB·녹화·복구
+파일·스냅샷·설정·비밀 파일과 저장소 안의 DB 백업도 삭제 대상입니다. CLI의 기본 설치
+검사 경로는 `status` 실행에서도 적용될 수 있습니다. DB 백업은 데이터 저장소 밖에 복사해
+보관하십시오.
+
 ## 상태 확인
 
 Windows에서 Server Manager의 상태·진단·로그 화면을 사용합니다. CLI에서는 저장소의
@@ -27,16 +34,18 @@ Pi 주소가 바뀌면 Server Manager에서 등록 주소를 갱신합니다. �
 ### 데이터베이스 백업
 
 SQLite 파일을 실행 중에 복사하지 말고 Data 서비스가 제공하는 백업 API를 사용합니다.
-저장소 소스에서는 다음과 같이 실행합니다.
+저장소 체크아웃과 호스트 개발 환경을 준비한 뒤 프로젝트 가상환경에서 실행합니다.
 
 ```powershell
-python server/services/data/tools/backup_database.py
+uv run --project server/setup/install_helper --locked python server/services/data/tools/backup_database.py
 ```
 
-설치 환경에서는 설치된 `server` 디렉터리와 ProgramData 환경 파일을 지정합니다.
+설치본만 있는 PC에는 이 소스 도구와 실행 환경이 자동 제공되지 않습니다. 저장소 체크아웃과
+호스트 개발 의존성을 준비한 운영자 PC에서 설치된 `server` 디렉터리와 ProgramData 환경
+파일을 지정해 백업 API를 호출합니다.
 
 ```powershell
-python server/services/data/tools/backup_database.py `
+uv run --project server/setup/install_helper --locked python server/services/data/tools/backup_database.py `
   --server-dir 'C:\Program Files\AI CCTV Server\server' `
   --env-file 'C:\ProgramData\AI_CCTV\config\compose.env'
 ```

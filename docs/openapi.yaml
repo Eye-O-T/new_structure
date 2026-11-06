@@ -456,6 +456,171 @@ paths:
         일치하는 Edge에 안전하게 전달한다.
       tags:
       - cameras
+  /api/v1/cameras/recording:
+    get:
+      summary: 전체 카메라 녹화 상태 조회
+      operationId: list_cameras_recording_api_v1_cameras_recording_get
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CameraRecordingListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/ApiError'
+      description: 현재 사용자가 볼 수 있는 카메라의 녹화 희망 설정과 실제 MediaMTX 녹화 상태를 조회한다.
+      tags:
+      - cameras
+  /api/v1/cameras/recording/start:
+    post:
+      summary: 전체 활성 카메라 녹화 시작
+      operationId: start_all_cameras_recording_api_v1_cameras_recording_start_post
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CameraRecordingBulkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/ApiError'
+      description: 관리자 전용. 현재 등록된 활성 카메라 전체에 대해 녹화를 시작하고 카메라별 성공·실패 결과를 반환한다.
+      tags:
+      - cameras
+  /api/v1/cameras/recording/stop:
+    post:
+      summary: 전체 활성 카메라 녹화 중지
+      operationId: stop_all_cameras_recording_api_v1_cameras_recording_stop_post
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CameraRecordingBulkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/ApiError'
+      description: 관리자 전용. 현재 등록된 활성 카메라 전체에 대해 녹화를 중지하고 카메라별 성공·실패 결과를 반환한다.
+      tags:
+      - cameras
+  /api/v1/cameras/{camera_id}/recording:
+    get:
+      summary: 개별 카메라 녹화 상태 조회
+      operationId: get_camera_recording_api_v1_cameras__camera_id__recording_get
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      parameters:
+      - name: camera_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Camera Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CameraRecordingResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/ApiError'
+      description: 해당 카메라의 녹화 희망 설정과 현재 녹화 상태를 반환한다.
+      tags:
+      - cameras
+  /api/v1/cameras/{camera_id}/recording/start:
+    post:
+      summary: 개별 카메라 녹화 시작
+      operationId: start_camera_recording_api_v1_cameras__camera_id__recording_start_post
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      parameters:
+      - name: camera_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Camera Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CameraRecordingResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/ApiError'
+      description: 관리자 전용. 카메라 녹화를 시작한다. 송출이 없으면 waiting, 송출 중이면 recording 상태다.
+      tags:
+      - cameras
+  /api/v1/cameras/{camera_id}/recording/stop:
+    post:
+      summary: 개별 카메라 녹화 중지
+      operationId: stop_camera_recording_api_v1_cameras__camera_id__recording_stop_post
+      security:
+      - HTTPBearer: []
+      - AccessCookie: []
+      parameters:
+      - name: camera_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Camera Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CameraRecordingResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/ApiError'
+      description: 관리자 전용. 녹화만 중지하며 실시간 영상 송출은 유지한다.
+      tags:
+      - cameras
   /api/v1/cameras/{camera_id}:
     patch:
       summary: 카메라 설정 변경
@@ -1641,6 +1806,10 @@ components:
           type: boolean
           title: Enabled
           default: true
+        stream_requested:
+          type: boolean
+          title: Stream Requested
+          default: false
       additionalProperties: false
       type: object
       required:
@@ -1787,6 +1956,146 @@ components:
       required:
       - camera_ids
       title: CameraPermissions
+    CameraRecordingBulkItemResponse:
+      properties:
+        camera_id:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9_-]{0,63}$
+          title: Camera Id
+        ok:
+          type: boolean
+          title: Ok
+        enabled:
+          type: boolean
+          title: Enabled
+        recording_enabled:
+          type: boolean
+          title: Recording Enabled
+        stream_requested:
+          type: boolean
+          title: Stream Requested
+          default: false
+        recording_state:
+          type: string
+          enum:
+          - recording
+          - waiting
+          - stopped
+          - error
+          title: Recording State
+        stream_ready:
+          type: boolean
+          title: Stream Ready
+          default: false
+        recording_file_active:
+          type: boolean
+          title: Recording File Active
+          default: false
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+      type: object
+      required:
+      - camera_id
+      - ok
+      - enabled
+      - recording_enabled
+      - recording_state
+      title: CameraRecordingBulkItemResponse
+    CameraRecordingBulkResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/CameraRecordingBulkItemResponse'
+          type: array
+          title: Items
+        total:
+          type: integer
+          minimum: 0.0
+          title: Total
+        succeeded:
+          type: integer
+          minimum: 0.0
+          title: Succeeded
+        failed:
+          type: integer
+          minimum: 0.0
+          title: Failed
+      type: object
+      required:
+      - items
+      - total
+      - succeeded
+      - failed
+      title: CameraRecordingBulkResponse
+    CameraRecordingListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/CameraRecordingResponse'
+          type: array
+          title: Items
+      type: object
+      required:
+      - items
+      title: CameraRecordingListResponse
+    CameraRecordingResponse:
+      properties:
+        camera_id:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9_-]{0,63}$
+          title: Camera Id
+        enabled:
+          type: boolean
+          title: Enabled
+        recording_enabled:
+          type: boolean
+          title: Recording Enabled
+        stream_requested:
+          type: boolean
+          title: Stream Requested
+          default: false
+        recording_state:
+          type: string
+          enum:
+          - recording
+          - waiting
+          - stopped
+          - error
+          title: Recording State
+        stream_ready:
+          type: boolean
+          title: Stream Ready
+          default: false
+        recording_file_active:
+          type: boolean
+          title: Recording File Active
+          default: false
+        last_error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Error Code
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - camera_id
+      - enabled
+      - recording_enabled
+      - recording_state
+      title: CameraRecordingResponse
     CameraResponse:
       properties:
         id:
@@ -1813,6 +2122,31 @@ components:
           - type: boolean
           - type: 'null'
           title: Enabled
+        stream_requested:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Stream Requested
+        recording_enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Recording Enabled
+        recording_state:
+          anyOf:
+          - type: string
+            enum:
+            - recording
+            - waiting
+            - stopped
+            - error
+          - type: 'null'
+          title: Recording State
+        recording_last_error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Recording Last Error Code
         created_at:
           anyOf:
           - type: string

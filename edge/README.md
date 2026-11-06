@@ -2,7 +2,7 @@
 
 카메라 영상을 H.264로 중앙 영상 서버(MediaMTX)에 보내며 Pi에도 기록한다. 중앙 연결 장애 중에도 로컬 백업을 유지한다. 대상은 Raspberry Pi OS Bookworm ARM64이며, AI 모델은 중앙에서 실행한다.
 
-중앙 서버는 [설치 안내](../README.md#설치하기)를 먼저 따른다. 아래 설치 명령은 Pi에서, 등록은 중앙 PC의 설치 도우미에서 실행한다.
+중앙 서버는 저장소 [설치 안내](../README.md)를 먼저 따른다. 아래 설치 명령은 Pi에서, 등록은 중앙 PC의 설치 도우미에서 실행한다.
 
 ## 설치와 연결
 
@@ -16,9 +16,9 @@ sudo apt install ./ai-cctv-edge_0.3.2_arm64.deb
 sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001
 ```
 
-`pair`는 첫 등록용이며, 장치마다 `edge-001`·`cam-001`을 고유한 ID로 바꾼다. 숨김 입력으로 32자 이상 연결 키를 설정한 뒤 등록이 끝날 때까지 Pi 터미널을 열어 둔다.
+`pair`는 최초 등록용 검색과 설정 수신을 시작한다. 장치마다 `edge-001`·`cam-001`을 고유한 ID로 바꾸고 등록이 끝날 때까지 Pi 터미널을 열어 둔다. 별도의 Pairing Key를 Pi 명령에 입력하지 않는다.
 
-같은 신뢰 IPv4 LAN의 설치 도우미에서 관리 화면의 **카메라 연결**을 연다. 관리자 계정·비밀번호와 Pi와 같은 장치 연결 키를 입력하고 **Edge 찾기** → Edge 선택 → **선택한 Edge 연결**을 실행한다. 필요하면 **연결 확인**으로 먼저 점검한다. 고급 설정에서 중앙 RTSP 주소·카메라 ID·화질(`hd`/`fhd`)을 확인·변경할 수 있다. 중앙 RTSP 주소는 Pi에서 접근할 중앙 PC의 LAN 주소다. 검색 실패 시 UDP 37020 방화벽·공유기의 장치 간 통신 차단(AP 격리)·연결 키를 확인한다.
+같은 신뢰 IPv4 LAN의 설치 도우미에서 관리 화면의 **카메라 연결**을 연다. 관리자 계정·비밀번호로 로그인한다. 등록 화면에서 이 Edge 전용의 무작위 32자 이상 운영 인증 토큰을 입력하고 **Edge 찾기** → Edge 선택 → **선택한 Edge 연결**을 실행한다. 이 값은 등록 과정에서 Pi 설정에 전달되어 Control·Recovery 요청을 인증한다. 필요하면 **연결 확인**으로 먼저 점검한다. 고급 설정에서 중앙 RTSP 주소·카메라 ID·화질(`hd`/`fhd`)을 확인·변경할 수 있다. 중앙 RTSP 주소는 Pi에서 접근할 중앙 PC의 LAN 주소다. 검색 실패 시 UDP 37020 방화벽과 공유기의 장치 간 통신 차단(AP 격리)을 확인한다.
 
 기본 포트의 통신 방향은 다음과 같다. 중앙의 `RTSP_BIND_ADDRESS`도 Pi가 접근할 LAN 주소에 바인딩되어 있어야 한다.
 
@@ -87,6 +87,6 @@ sh edge/packaging/build_deb.sh
 ```
 
 `dist/edge/`에 `.deb`와 `.deb.sha256`이 생성된다. Python 패키지 파일(wheel)은 `.deb` 안에 포함되며, OS 의존성은 별도로 `apt`가 설치한다. 빌드 끝에 `verify_deb.sh`가 패키지 구조·권한·ARM64 wheel·비밀 파일 혼입 여부를 검사한다. 배포 전 Pi에서 설치·업데이트·재부팅·제거를 확인한다.
-# Current discovery and registration contract
+# 최초 등록 보안
 
-`ai-cctv-edge pair --device-id <device-id> --camera-id <camera-id>` starts LAN discovery advertising. It does not accept or require a Pairing Key. In Server Desktop, first run **Edge 찾기**, then select the advertised device and supply the Edge operational authentication token only when registering it. Device ID plus MAC address identify the device; the operational token authenticates Control and Recovery after registration.
+Discovery 광고는 같은 LAN에서 미설정 Edge를 찾는 데 쓰며 운영 인증 토큰을 포함하지 않는다. Device ID와 MAC 주소는 장치를 식별할 뿐 인증하지 않는다. 운영자가 등록 화면에서 입력한 32자 이상의 Edge 운영 인증 토큰은 등록 과정에서 Edge에 전달되어 이후 Control·Recovery 요청을 인증한다. 이 토큰은 Pi의 `pair` 명령에 입력하는 Pairing Key가 아니다.

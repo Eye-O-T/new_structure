@@ -22,6 +22,9 @@ erDiagram
         TEXT edge_device_id
         TEXT source_url
         INTEGER enabled
+        INTEGER recording_enabled
+        TEXT recording_last_error_code
+        INTEGER stream_requested
         TEXT status
         TEXT created_at
         TEXT updated_at

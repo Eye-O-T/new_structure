@@ -1,8 +1,9 @@
 # 모델 준비와 배포 기록
 
 기본 재식별기는 OSNet x0.25의 **MSMT17 combineall 재식별 학습 가중치**를 사용한다.
-ImageNet 사전학습 가중치만 사용하는 구성이 아니다. 서비스는 OpenCV CPU로 ONNX를
-읽으며 인터넷에서 모델을 받지 않는다. 아래 준비 도구만 다운로드와 PyTorch를 사용한다.
+ImageNet 사전학습 가중치만 사용하는 구성이 아니다. 서비스는 ONNX Runtime으로 ONNX를
+실행하며 기본 CPU provider를 사용한다. GPU 설정에서는 CUDA provider를 사용할 수 있다.
+서비스는 인터넷에서 모델을 받지 않는다. 아래 준비 도구만 다운로드와 PyTorch를 사용한다.
 
 ## 준비 및 설치
 

@@ -13,6 +13,11 @@ Windows PC에 Docker Desktop의 Linux 컨테이너 엔진, Python 3.11, Git, `uv
 시작합니다. HTTPS를 선택하면 인증서와 키를 먼저 준비해야 합니다. 설치 후 Server Manager의
 상태 화면에서 Data, External, MediaMTX, Nginx가 준비 상태인지 확인합니다.
 
+기존 설치를 업데이트하기 전에 데이터 저장소 전체를 별도 위치에 복사합니다. DB·배포·도메인
+계약 변경 감지 시 설치 도우미·서버 제어판·CLI가 저장소를 자동 초기화할 수 있습니다. 이때
+모델·인증서 폴더만 보존되고 DB·녹화·복구 파일·스냅샷·설정·비밀 파일은 삭제될 수 있습니다.
+상세한 영향과 백업 절차는 [운영·복원 안내](operations.md)를 따릅니다.
+
 Raspberry Pi OS Bookworm ARM64 Pi에 Edge DEB를 설치한 뒤 `sudo ai-cctv-edge pair`를
 실행합니다. Server Desktop의 카메라 연결 화면에서 Edge를 검색하고 장치 정보를 확인한 뒤
 중앙 RTSP 주소와 카메라 연결을 등록합니다. 검색 광고는 신뢰 LAN에서 장치를 찾기 위한
