@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
 from .api import DesktopApi, safe_error
 from .camera_view import CameraView
+from .display_time import format_kst
 from .media import PlaybackBridge
 from .session_store import WindowsSessionStore
 from .video_worker import VideoWorker
@@ -106,6 +107,8 @@ class CCTVMainWindow(ReferenceWindow):
         self._camera_metrics = {}
         self._camera_events = {}
         self._rendered_event_signatures = {}
+        self._event_scroll_positions = {}
+        self._rendered_event_camera_id = None
         self._last_coordinate_diagnostics = {}
         self._view_mode = "single"
         self._selected_camera_id = None
@@ -644,10 +647,8 @@ class CCTVMainWindow(ReferenceWindow):
                 "event timeline delivery camera=%s event_id=%s created_age_seconds=%s",
                 camera_id, event_id, age,
             )
-        self._camera_events.setdefault(camera_id, []).insert(0, event)
-        self._camera_events[camera_id].sort(
-            key=lambda item: self._event_timestamp(item), reverse=True
-        )
+        self._camera_events.setdefault(camera_id, []).append(event)
+        self._camera_events[camera_id].sort(key=self._event_sort_key, reverse=True)
         del self._camera_events[camera_id][30:]
         if event.get("type") in {"error", "network_failure", "objects_error"}:
             view = self._views.get(camera_id)
@@ -660,9 +661,20 @@ class CCTVMainWindow(ReferenceWindow):
     def _event_timestamp(event):
         value = event.get("occurred_at") or event.get("time")
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if stamp.tzinfo is None or stamp.utcoffset() is None:
+                return float("-inf")
+            return stamp.timestamp()
         except (ValueError, TypeError, AttributeError, OverflowError):
             return float("-inf")
+
+    @classmethod
+    def _event_sort_key(cls, event):
+        try:
+            event_id = int(event.get("id"))
+        except (TypeError, ValueError, OverflowError):
+            event_id = -1
+        return cls._event_timestamp(event), event_id
 
     def _on_loading(self, camera_id, worker, message):
         if self._accept_worker_data(camera_id, worker):
@@ -702,12 +714,35 @@ class CCTVMainWindow(ReferenceWindow):
         self.metric_total["value"].setText(str(metrics.get("tracked_total", 0)))
         events = self._camera_events.get(camera_id, [])
         signature = tuple(
-            (str(event.get("id")), event.get("type"), event.get("time"), event.get("message"))
+            (
+                str(event.get("id")),
+                event.get("type"),
+                event.get("time"),
+                event.get("occurred_at"),
+                event.get("person_id"),
+                event.get("global_person_id"),
+                event.get("message"),
+            )
             for event in events
         )
-        if self._rendered_event_signatures.get(camera_id) == signature:
+        if (
+            self._rendered_event_camera_id == camera_id
+            and self._rendered_event_signatures.get(camera_id) == signature
+        ):
             return
         self._rendered_event_signatures[camera_id] = signature
+        previous_camera_id = self._rendered_event_camera_id
+        scroll_bar = self.event_scroll.verticalScrollBar()
+        if previous_camera_id is not None:
+            self._event_scroll_positions[previous_camera_id] = (
+                scroll_bar.value(),
+                scroll_bar.value() >= scroll_bar.maximum() - 1,
+            )
+        old_position, old_follow = self._event_scroll_positions.get(
+            camera_id, (scroll_bar.maximum(), True)
+        )
+        if previous_camera_id == camera_id:
+            old_follow = scroll_bar.value() >= scroll_bar.maximum() - 1
         self.appear_count = self.disappear_count = 0
         while self.event_list.count():
             item = self.event_list.takeAt(0)
@@ -715,6 +750,13 @@ class CCTVMainWindow(ReferenceWindow):
                 item.widget().deleteLater()
         for event in reversed(events):
             ReferenceWindow.add_event(self, event)
+        self._rendered_event_camera_id = camera_id
+        QTimer.singleShot(
+            0,
+            lambda bar=scroll_bar, position=old_position, follow=old_follow: bar.setValue(
+                bar.maximum() if follow else min(position, bar.maximum())
+            ),
+        )
         self.metric_appear["value"].setText(str(self.appear_count))
         self.metric_disappear["value"].setText(str(self.disappear_count))
 
@@ -1253,13 +1295,10 @@ class CCTVMainWindow(ReferenceWindow):
                 lines.append(f"상태: {_ANALYSIS_STATUS_LABELS.get(status, '알 수 없음')}")
                 updated_at = analysis.get("updated_at")
                 if updated_at:
-                    try:
-                        stamp = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
-                        if stamp.tzinfo is not None:
-                            stamp = stamp.astimezone()
-                        lines.append(f"{'분석 완료' if status == 'complete' else '상태 갱신'} 시각: {stamp.isoformat(sep=' ', timespec='seconds')}")
-                    except ValueError:
-                        lines.append(f"상태 갱신 시각: {updated_at}")
+                    lines.append(
+                        f"{'분석 완료' if status == 'complete' else '상태 갱신'} "
+                        f"시각: {format_kst(updated_at)}"
+                    )
                 result = analysis.get("result")
                 result = result if isinstance(result, dict) else {}
                 if status == "failed" and result.get("error_code"):
@@ -1380,9 +1419,14 @@ class CCTVMainWindow(ReferenceWindow):
                 ("Event ID", detail.get("id", event_id)),
                 ("이벤트 유형", detail.get("event_type", "-")),
                 ("카메라", detail.get("camera_id", "-")),
-                ("발생 시각", detail.get("occurred_at", "-")),
-                ("Person ID", detail.get("person_id") or "-"),
-                ("Global Person ID", detail.get("global_person_id") or "-"),
+                ("발생 시각", format_kst(detail.get("occurred_at"))),
+                ("pid", detail.get("person_id") or "-"),
+                (
+                    "gpid",
+                    detail.get("global_person_id")
+                    if detail.get("global_person_id") is not None
+                    else "null",
+                ),
                 ("감지 Confidence", detail.get("confidence", "-")),
             ):
                 _add_wrapped_label(f"{name}: {value}")
@@ -1405,8 +1449,8 @@ class CCTVMainWindow(ReferenceWindow):
                 status = recording.get("status", "unknown")
                 _add_wrapped_label(
                     f"관련 녹화 ID: {recording_id} | "
-                    f"시작: {recording.get('start_time', '-')} | "
-                    f"종료: {recording.get('end_time', '-')} | "
+                    f"시작: {format_kst(recording.get('start_time'))} | "
+                    f"종료: {format_kst(recording.get('end_time'))} | "
                     f"상태: {_RECORDING_STATUS_LABELS.get(status, status)}"
                 )
                 playback_url = (playback or {}).get("playback_url")

@@ -1,6 +1,16 @@
 """Pure geometry helpers for the live-object display overlay."""
 
 
+def format_person_label(item):
+    """Show the camera-local and cross-camera identity without conflating them."""
+    person_id = item.get("person_id")
+    global_person_id = item.get("global_person_id")
+    return (
+        f"pid:{person_id if person_id is not None else '-'} "
+        f"gpid:{global_person_id if global_person_id is not None else 'null'}"
+    )
+
+
 def scale_bbox_to_widget(bbox, frame_width, frame_height, widget_width, widget_height):
     if frame_width <= 0 or frame_height <= 0 or widget_width <= 0 or widget_height <= 0:
         return None

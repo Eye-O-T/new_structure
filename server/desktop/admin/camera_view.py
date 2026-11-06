@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from .overlay import overlay_items
+from .overlay import format_person_label, overlay_items
 
 _RECORDING_STATE_BADGES = {
     "recording": ("녹화 중", "#ef4444", "#450a0a"),
@@ -260,12 +260,31 @@ class CameraView(QFrame):
                 item = entry["item"]
                 painter.setPen(QPen(QColor("#22c55e"), 2))
                 painter.drawRect(round(x1), round(y1), round(x2 - x1), round(y2 - y1))
-                identity = (
-                    item.get("global_person_id") or item.get("person_id") or "person"
+                label = format_person_label(item)
+                font = QFont("Arial", 9, QFont.Bold)
+                painter.setFont(font)
+                metrics = painter.fontMetrics()
+                label_width = min(width, metrics.horizontalAdvance(label) + 10)
+                label_height = metrics.height() + 6
+                label_x = max(0, min(round(x1), width - label_width))
+                label_y = (
+                    round(y1) - label_height - 2
+                    if round(y1) >= label_height + 2
+                    else min(height - label_height, round(y1) + 2)
                 )
-                painter.setFont(QFont("Arial", 9, QFont.Bold))
+                painter.fillRect(
+                    label_x,
+                    label_y,
+                    label_width,
+                    label_height,
+                    QColor(15, 23, 42, 220),
+                )
                 painter.setPen(QColor("#ffffff"))
-                painter.drawText(round(x1) + 4, max(14, round(y1) - 4), str(identity))
+                painter.drawText(
+                    label_x + 5,
+                    label_y + 3 + metrics.ascent(),
+                    label,
+                )
         painter.end()
         self.surface.setText("")
         self.surface.setPixmap(canvas)

@@ -1,9 +1,25 @@
 import unittest
 
-from server.desktop.admin.overlay import overlay_items, scale_bbox_to_widget
+from server.desktop.admin.overlay import (
+    format_person_label,
+    overlay_items,
+    scale_bbox_to_widget,
+)
 
 
 class OverlayGeometryTests(unittest.TestCase):
+    def test_person_label_includes_both_ids(self):
+        self.assertEqual(
+            format_person_label({"person_id": "7", "global_person_id": 42}),
+            "pid:7 gpid:42",
+        )
+
+    def test_person_label_shows_null_until_global_identity_is_resolved(self):
+        self.assertEqual(
+            format_person_label({"person_id": "7", "global_person_id": None}),
+            "pid:7 gpid:null",
+        )
+
     def test_same_aspect_ratio_scales_coordinates(self):
         self.assertEqual(
             scale_bbox_to_widget((100, 100, 500, 700), 1920, 1080, 960, 540),

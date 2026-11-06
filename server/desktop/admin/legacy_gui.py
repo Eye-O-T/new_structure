@@ -1,6 +1,5 @@
 # Adapted from Eye-O-T/AI_CCTV, develop 09db3ed464772cd139e45168b91ad46e0f3f9901.
 # See README.md in this package for provenance and migration boundaries.
-from datetime import datetime
 import time
 from urllib.parse import urlparse
 
@@ -22,7 +21,8 @@ from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 from .settings_window import SettingsWindow
 from .resource_monitor_window import ResourceMonitorWindow
 from .video_worker import VideoWorker
-from .overlay import overlay_items
+from .display_time import format_kst
+from .overlay import format_person_label, overlay_items
 
 
 class CCTVMainWindow(QMainWindow):
@@ -52,7 +52,6 @@ class CCTVMainWindow(QMainWindow):
         self._overlay_enabled = self._overlay_settings.value(
             "display/bounding_boxes", True, type=bool
         )
-
         self.init_ui()
 
     def init_ui(self):
@@ -226,6 +225,7 @@ class CCTVMainWindow(QMainWindow):
         scroll_widget = QWidget()
         scroll_widget.setMinimumWidth(0)
         scroll_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.event_scroll = scroll
         self.event_list = QVBoxLayout(scroll_widget)
         self.event_list.setContentsMargins(0, 0, 4, 0)
         self.event_list.setAlignment(Qt.AlignTop)
@@ -443,12 +443,34 @@ class CCTVMainWindow(QMainWindow):
             item = entry["item"]
             painter.setPen(QPen(QColor("#22c55e"), 2))
             painter.drawRect(round(x1), round(y1), round(x2 - x1), round(y2 - y1))
-            identity = item.get("global_person_id") or item.get("person_id") or "person"
             confidence = item.get("confidence")
-            text = f"{identity} {float(confidence):.2f}" if isinstance(confidence, (int, float)) else str(identity)
-            painter.setFont(QFont("Arial", 10, QFont.Bold))
+            text = format_person_label(item)
+            if isinstance(confidence, (int, float)):
+                text += f" {float(confidence):.2f}"
+            font = QFont("Arial", 10, QFont.Bold)
+            painter.setFont(font)
+            metrics = painter.fontMetrics()
+            label_width = min(widget_width, metrics.horizontalAdvance(text) + 10)
+            label_height = metrics.height() + 6
+            label_x = max(0, min(round(x1), widget_width - label_width))
+            label_y = (
+                round(y1) - label_height - 2
+                if round(y1) >= label_height + 2
+                else min(widget_height - label_height, round(y1) + 2)
+            )
+            painter.fillRect(
+                label_x,
+                label_y,
+                label_width,
+                label_height,
+                QColor(15, 23, 42, 220),
+            )
             painter.setPen(QColor("#ffffff"))
-            painter.drawText(round(x1) + 4, max(14, round(y1) - 4), text)
+            painter.drawText(
+                label_x + 5,
+                label_y + 3 + metrics.ascent(),
+                text,
+            )
 
     def set_camera_status(self, text, border_color, text_color):
         self.cam_status.setText(text)
@@ -506,18 +528,22 @@ class CCTVMainWindow(QMainWindow):
 
     def add_event(self, event):
         event_type = event.get("type", "unknown")
-        person_id = event.get("person_id", "-")
-        time_text = event.get("time", datetime.now().strftime("%H:%M:%S"))
+        has_person_id = (
+            event.get("person_id") is not None
+            or event.get("global_person_id") is not None
+        )
+        identity = format_person_label(event)
+        time_text = format_kst(event.get("occurred_at") or event.get("time"))
 
         if event_type == "appear":
             self.appear_count += 1
             self.metric_appear["value"].setText(str(self.appear_count))
-            desc = f"ID {person_id} 출현"
+            desc = f"{identity} 출현"
             color = "#22c55e"
         elif event_type == "disappear":
             self.disappear_count += 1
             self.metric_disappear["value"].setText(str(self.disappear_count))
-            desc = f"ID {person_id} 사라짐"
+            desc = f"{identity} 사라짐"
             color = "#f97316"
         elif event_type == "error":
             desc = event.get("message", "오류 발생")
@@ -540,7 +566,7 @@ class CCTVMainWindow(QMainWindow):
             )
             self.show_network_failure_screen(desc)
         else:
-            desc = f"ID {person_id} {event_type}"
+            desc = f"{identity} {event_type}" if has_person_id else event_type
             color = "#38bdf8"
 
         event_box = QFrame()
@@ -566,9 +592,9 @@ class CCTVMainWindow(QMainWindow):
         layout.addWidget(time_label)
         layout.addWidget(desc_label)
 
-        self.event_list.insertWidget(0, event_box)
+        self.event_list.addWidget(event_box)
         if self.event_list.count() > 30:
-            old_item = self.event_list.takeAt(30)
+            old_item = self.event_list.takeAt(0)
 
             if old_item:
                 widget = old_item.widget()

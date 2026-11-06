@@ -286,6 +286,19 @@ class StreamDiagnosticsTests(unittest.TestCase):
 
 
 class EventPollingTests(unittest.TestCase):
+    def test_legacy_event_preserves_local_and_global_person_ids(self):
+        result = video.legacy_event(
+            {
+                "id": 40,
+                "event_type": "person_appeared",
+                "occurred_at": "2026-11-03T07:00:00Z",
+                "person_id": "7",
+                "global_person_id": 42,
+            }
+        )
+        self.assertEqual(result["person_id"], "7")
+        self.assertEqual(result["global_person_id"], 42)
+
     def test_late_stored_event_uses_id_watermark_after_initial_recent_events(self):
         api = Mock()
         api.events.side_effect = [

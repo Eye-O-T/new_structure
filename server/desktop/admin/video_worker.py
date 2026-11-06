@@ -120,7 +120,7 @@ def legacy_event(event):
         "camera_id": event.get("camera_id"),
         "event_type": event.get("event_type"),
         "type": {"person_appeared": "appear", "person_disappeared": "disappear"}.get(event["event_type"], event["event_type"]),
-        "person_id": event.get("global_person_id") or event.get("person_id"),
+        "person_id": event.get("person_id"),
         "global_person_id": event.get("global_person_id"),
         "confidence": event.get("confidence"),
         "time": event["occurred_at"],
