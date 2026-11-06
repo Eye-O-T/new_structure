@@ -44,6 +44,11 @@ class PreprocessingDiagnosticsTests(unittest.TestCase):
                             "private_token": {"last_seconds": 99},
                         },
                         "last_error": "secret-bearing error text",
+                        "last_error_code": "DETECTION_MODEL_FAILED",
+                        "last_error_type": "ValueError",
+                        "last_error_stage": "process",
+                        "last_error_elapsed_seconds": 0.125,
+                        "last_error_at": "2026-04-06T00:00:01Z",
                     }
                 },
             }
@@ -53,6 +58,11 @@ class PreprocessingDiagnosticsTests(unittest.TestCase):
         self.assertTrue(result["gpu_requested"])
         self.assertEqual(camera["execution_device"], "cuda:0")
         self.assertEqual(camera["timings"]["model_seconds"]["p95_seconds"], 0.5)
+        self.assertEqual(camera["last_error_code"], "DETECTION_MODEL_FAILED")
+        self.assertEqual(camera["last_error_type"], "ValueError")
+        self.assertEqual(camera["last_error_stage"], "process")
+        self.assertEqual(camera["last_error_elapsed_seconds"], 0.125)
+        self.assertEqual(camera["last_error_at"], "2026-04-06T00:00:01+00:00")
         self.assertNotIn("private_token", camera["timings"])
         self.assertNotIn("secret-bearing error text", repr(result))
 

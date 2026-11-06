@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from .config import CAMERA_ID_PATTERN, Settings
+
+_WORKER_ERROR_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
+_WORKER_ERROR_TYPE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -39,6 +43,21 @@ def _timestamp(value: Any) -> str | None:
 
 def _state(value: Any, allowed: set[str]) -> str:
     return value if isinstance(value, str) and value in allowed else "unknown"
+
+
+def _worker_error_code(worker: dict[str, Any]) -> str | None:
+    explicit = worker.get("last_error_code")
+    if isinstance(explicit, str) and _WORKER_ERROR_CODE_PATTERN.fullmatch(explicit):
+        return explicit
+    return "CAMERA_WORKER_ERROR" if worker.get("last_error") else None
+
+
+def _worker_error_type(value: Any) -> str | None:
+    return (
+        value
+        if isinstance(value, str) and _WORKER_ERROR_TYPE_PATTERN.fullmatch(value)
+        else None
+    )
 
 
 def _failure(code: str) -> dict[str, Any]:
@@ -210,9 +229,20 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
                 "observation_buffer_bytes": _number(
                     worker.get("observation_buffer_bytes")
                 ),
-                "last_error_code": "CAMERA_WORKER_ERROR"
-                if worker.get("last_error")
-                else None,
+                "last_error_code": _worker_error_code(worker),
+                "last_error_type": _worker_error_type(worker.get("last_error_type")),
+                "last_error_stage": (
+                    _state(
+                        worker.get("last_error_stage"),
+                        {"startup", "reset", "process"},
+                    )
+                    if worker.get("last_error_stage")
+                    else None
+                ),
+                "last_error_elapsed_seconds": _number(
+                    worker.get("last_error_elapsed_seconds")
+                ),
+                "last_error_at": _timestamp(worker.get("last_error_at")),
             }
         )
     return {

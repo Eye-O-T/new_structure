@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 import uuid
@@ -37,6 +38,11 @@ class WorkerStatus:
     state: str = "starting"
     model_ready: bool = False
     last_error: str | None = None
+    last_error_code: str | None = None
+    last_error_type: str | None = None
+    last_error_stage: str | None = None
+    last_error_elapsed_seconds: float | None = None
+    last_error_at: str | None = None
     last_frame_at: str | None = None
     event_delivery_error: str | None = None
     event_persistence_failures: int = 0
@@ -108,6 +114,80 @@ class CameraWorker(threading.Thread):
             tracker.close()
         self._tracker = None
 
+    def _record_model_failure(
+        self,
+        prefix: str,
+        exc: BaseException,
+        *,
+        default_stage: str,
+        log_message: str,
+        started_monotonic: float | None = None,
+    ) -> None:
+        error_code = getattr(exc, "error_code", None)
+        if not isinstance(error_code, str) or not error_code:
+            error_code = (
+                "DETECTION_MODEL_TIMEOUT"
+                if isinstance(exc, TimeoutError)
+                else type(exc).__name__
+            )
+        error_type = getattr(exc, "error_type", None)
+        if not isinstance(error_type, str) or not error_type:
+            error_type = type(exc).__name__
+        stage = getattr(exc, "stage", None)
+        if not isinstance(stage, str) or not stage:
+            stage = default_stage
+        elapsed = getattr(exc, "elapsed_seconds", None)
+        if (
+            isinstance(elapsed, bool)
+            or not isinstance(elapsed, (int, float))
+            or not math.isfinite(elapsed)
+            or elapsed < 0
+        ):
+            elapsed = (
+                max(0.0, time.monotonic() - started_monotonic)
+                if started_monotonic is not None
+                else None
+            )
+        else:
+            elapsed = float(elapsed)
+
+        self.status.last_error_code = error_code
+        self.status.last_error_type = error_type
+        self.status.last_error_stage = stage
+        self.status.last_error_elapsed_seconds = (
+            round(elapsed, 6) if elapsed is not None else None
+        )
+        self.status.last_error_at = format_utc(utc_now())
+        elapsed_text = f"{elapsed:.3f}" if elapsed is not None else "unknown"
+        self.status.last_error = (
+            f"{prefix}: {error_code} (code={error_code}, type={error_type}, "
+            f"stage={stage}, elapsed={elapsed_text}s)"
+        )
+        LOGGER.warning(
+            "%s camera_id=%s error_code=%s error_type=%s stage=%s elapsed_seconds=%s",
+            log_message,
+            self.camera_id,
+            error_code,
+            error_type,
+            stage,
+            elapsed_text,
+            extra={
+                "camera_id": self.camera_id,
+                "error_code": error_code,
+                "error_type": error_type,
+                "stage": stage,
+                "elapsed_seconds": self.status.last_error_elapsed_seconds,
+            },
+        )
+
+    def _clear_model_failure(self) -> None:
+        self.status.last_error = None
+        self.status.last_error_code = None
+        self.status.last_error_type = None
+        self.status.last_error_stage = None
+        self.status.last_error_elapsed_seconds = None
+        self.status.last_error_at = None
+
     def status_snapshot(self) -> dict[str, Any]:
         # 처리 스레드가 모델이나 저장소에서 멈춰도 API 스레드가 프레임 노후화를 계산한다.
         result = dict(vars(self.status))
@@ -126,7 +206,10 @@ class CameraWorker(threading.Thread):
         )
         result["observation_candidates"] = len(self._observations.pending)
         result["observation_buffer_bytes"] = self._observations.bytes_used
-        result["timings"] = {**self._timings.snapshot(), **(capture.timings if capture else {})}
+        result["timings"] = {
+            **self._timings.snapshot(),
+            **(capture.timings if capture else {}),
+        }
         if capture is not None:
             result["last_frame_at"] = capture.last_frame_at
             result["capture_connected"] = capture.connected
@@ -137,7 +220,10 @@ class CameraWorker(threading.Thread):
             publisher_status = self._publisher.status()
             result["live_delivery_timings"] = publisher_status.pop("timings", {})
             result.update(
-                {f"live_objects_{key}": value for key, value in publisher_status.items()}
+                {
+                    f"live_objects_{key}": value
+                    for key, value in publisher_status.items()
+                }
             )
         return result
 
@@ -328,6 +414,8 @@ class CameraWorker(threading.Thread):
         if not self.settings.inference_enabled or now < self._next_model_attempt:
             return None
         self._next_model_attempt = now + self.settings.model_retry_seconds
+        prepare_started = time.monotonic()
+        stage = "startup"
         try:
             if self.tracker_factory is not None:
                 tracker = self.tracker_factory(
@@ -347,7 +435,9 @@ class CameraWorker(threading.Thread):
                 )
             self._tracker = tracker
             runtime = getattr(tracker, "runtime", None)
-            if runtime is None and callable(getattr(tracker, "runtime_metadata", None)):
+            if runtime is None and callable(
+                getattr(tracker, "runtime_metadata", None)
+            ):
                 runtime = tracker.runtime_metadata()
             if isinstance(runtime, dict):
                 self.status.requested_device = runtime.get("requested_device")
@@ -359,6 +449,7 @@ class CameraWorker(threading.Thread):
                 raise ValueError(
                     "Detection processor requires process(frame) and reset()"
                 )
+            stage = "reset"
             tracker.reset()
         except Exception as exc:
             self._release_tracker()
@@ -368,11 +459,16 @@ class CameraWorker(threading.Thread):
                 time.monotonic() + self.settings.model_retry_seconds
             )
             self.status.model_ready = False
-            self.status.last_error = f"model unavailable: {type(exc).__name__}"
-            LOGGER.warning("model preparation failed; a later retry is scheduled")
+            self._record_model_failure(
+                "model unavailable",
+                exc,
+                default_stage=stage,
+                log_message="model preparation failed; a later retry is scheduled",
+                started_monotonic=prepare_started,
+            )
             return None
         self.status.model_ready = True
-        self.status.last_error = None
+        self._clear_model_failure()
         return tracker
 
     # 영상 연결과 읽기에 같은 유한 제한 시간을 적용하고 모든 경로에서 캡처를 해제한다.
@@ -419,15 +515,25 @@ class CameraWorker(threading.Thread):
                 if active_generation != item.generation:
                     self._flush_observations()
                     if active_generation is not None and tracker is not None:
+                        reset_started = time.monotonic()
                         try:
                             tracker.reset()
                         except Exception as exc:
                             self._release_tracker()
+                            if isinstance(exc, TimeoutError):
+                                self.status.model_timeouts += 1
                             tracker = None
                             self.status.model_ready = False
-                            self.status.last_error = f"model reset failed: {type(exc).__name__}"
-                            self._next_model_attempt = time.monotonic() + self.settings.model_retry_seconds
-                            LOGGER.warning("model reset failed; a later retry is scheduled")
+                            self._next_model_attempt = (
+                                time.monotonic() + self.settings.model_retry_seconds
+                            )
+                            self._record_model_failure(
+                                "model reset failed",
+                                exc,
+                                default_stage="reset",
+                                log_message="model reset failed; a later retry is scheduled",
+                                started_monotonic=reset_started,
+                            )
                     active_generation = item.generation
                     self.tracking_session_id = uuid.uuid4().hex
                     state = TrackState(self.settings.disappear_seconds)
@@ -453,6 +559,7 @@ class CameraWorker(threading.Thread):
                     "capture_to_inference_seconds", time.monotonic() - now
                 )
                 last_analysis = now
+                process_started = time.monotonic()
                 try:
                     last_publish = self._process_frame(
                         item.image,
@@ -468,15 +575,21 @@ class CameraWorker(threading.Thread):
                         self.status.model_timeouts += 1
                     tracker = None
                     self.status.model_ready = False
-                    error_code = getattr(exc, "error_code", type(exc).__name__)
-                    self.status.last_error = f"inference unavailable: {error_code}"
-                    self._next_model_attempt = time.monotonic() + self.settings.model_retry_seconds
-                    LOGGER.warning(
-                        "inference failed; video monitoring and model retry continue",
-                        extra={"camera_id": self.camera_id, "error_code": error_code},
+                    self._next_model_attempt = (
+                        time.monotonic() + self.settings.model_retry_seconds
+                    )
+                    self._record_model_failure(
+                        "inference unavailable",
+                        exc,
+                        default_stage="process",
+                        log_message="inference failed; video monitoring and model retry continue",
+                        started_monotonic=process_started,
                     )
                 if self._pending_status and not self.stop_event.is_set():
-                    if time.monotonic() - self._last_status_attempt >= self.settings.refresh_seconds:
+                    if (
+                        time.monotonic() - self._last_status_attempt
+                        >= self.settings.refresh_seconds
+                    ):
                         self._flush_status()
         finally:
             self.stop_event.set()
@@ -506,7 +619,9 @@ class CameraWorker(threading.Thread):
         self.status.last_processor_seconds = self.status.last_inference_seconds
         self.status.last_model_seconds = getattr(tracker, "last_model_seconds", None)
         self.status.last_ipc_seconds = getattr(tracker, "last_ipc_seconds", None)
-        self._timings.record("inference_total_seconds", self.status.last_inference_seconds)
+        self._timings.record(
+            "inference_total_seconds", self.status.last_inference_seconds
+        )
         if self.status.last_model_seconds is not None:
             self._timings.record("model_seconds", self.status.last_model_seconds)
         if self.status.last_ipc_seconds is not None:
@@ -516,8 +631,12 @@ class CameraWorker(threading.Thread):
         detections = clip_detections(
             [item.model_dump() for item in result.objects], width, height
         )
-        self.status.last_postprocess_seconds = max(0, time.monotonic() - postprocess_started)
-        self._timings.record("result_postprocess_seconds", self.status.last_postprocess_seconds)
+        self.status.last_postprocess_seconds = max(
+            0, time.monotonic() - postprocess_started
+        )
+        self._timings.record(
+            "result_postprocess_seconds", self.status.last_postprocess_seconds
+        )
         self.status.detection_object_count = len(detections)
         if self._publisher is not None and now - last_publish >= 0.2:
             # 모바일 박스용 최신 좌표는 최대 초당 2번 보낸다. 영상 전송과

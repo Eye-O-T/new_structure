@@ -21,6 +21,7 @@ class DetectionSupervisor:
         self.settings = settings
         self.data_client = data_client
         self._workers: dict[str, CameraWorker] = {}
+        self._stopped_workers: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -95,6 +96,10 @@ class DetectionSupervisor:
                 if camera is None or changed:
                     worker.stop()
                 if not worker.is_alive():
+                    self._stopped_workers[camera_id] = worker.status_snapshot()
+                    while len(self._stopped_workers) > 16:
+                        oldest_key = next(iter(self._stopped_workers))
+                        del self._stopped_workers[oldest_key]
                     del self._workers[camera_id]
 
             for camera_id, camera in desired.items():
@@ -105,6 +110,17 @@ class DetectionSupervisor:
                 worker = CameraWorker(
                     camera, self.settings, self.data_client, event_publisher=self.events
                 )
+                previous = self._stopped_workers.pop(camera_id, None)
+                if isinstance(previous, dict) and previous.get("last_error"):
+                    for field in (
+                        "last_error",
+                        "last_error_code",
+                        "last_error_type",
+                        "last_error_stage",
+                        "last_error_elapsed_seconds",
+                        "last_error_at",
+                    ):
+                        setattr(worker.status, field, previous.get(field))
                 self._workers[camera_id] = worker
                 worker.start()
 
@@ -119,9 +135,11 @@ class DetectionSupervisor:
                 camera_id: worker.status_snapshot()
                 for camera_id, worker in sorted(self._workers.items())
             }
+            stopped_workers = dict(sorted(self._stopped_workers.items()))
         return {
             "data_ready": self.data_ready,
             "last_error": self.last_error,
             "workers": workers,
+            "stopped_workers": stopped_workers,
             "event_delivery": self.events.status(),
         }

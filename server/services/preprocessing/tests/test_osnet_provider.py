@@ -1,13 +1,35 @@
 import sys
+import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 
-try:
-    from server.services.preprocessing.processors.identity.osnet import _load_runtime_session
-except ImportError:
-    _load_runtime_session = None
+def _import_load_runtime_session():
+    try:
+        from server.services.preprocessing.processors.identity.osnet import (
+            _load_runtime_session,
+        )
+
+        return _load_runtime_session
+    except ImportError:
+        fake_np = types.ModuleType("numpy")
+        fake_np.ndarray = object
+        with patch.dict(
+            sys.modules,
+            {
+                "cv2": sys.modules.get("cv2") or types.ModuleType("cv2"),
+                "numpy": sys.modules.get("numpy") or fake_np,
+            },
+        ):
+            from server.services.preprocessing.processors.identity.osnet import (
+                _load_runtime_session,
+            )
+
+            return _load_runtime_session
+
+
+_load_runtime_session = _import_load_runtime_session()
 
 
 class OsNetProviderTests(unittest.TestCase):
@@ -40,7 +62,10 @@ class OsNetProviderTests(unittest.TestCase):
             return session
 
         ort = SimpleNamespace(
-            get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            get_available_providers=lambda: [
+                "CUDAExecutionProvider",
+                "CPUExecutionProvider",
+            ],
             InferenceSession=create_session,
         )
         with patch.dict(sys.modules, {"onnxruntime": ort}):

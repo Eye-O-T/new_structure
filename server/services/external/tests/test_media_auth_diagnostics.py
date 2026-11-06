@@ -87,9 +87,36 @@ class MediaAuthDiagnosticsTests(unittest.IsolatedAsyncioTestCase):
 
         output = "\n".join(logs.output)
         self.assertIn("reason=credential_mismatch", output)
-        self.assertIn("MEDIA_AUTH_ABORTED", output)
+        self.assertIn("MEDIA_AUTH_REJECTED", output)
+        self.assertNotIn("MEDIA_AUTH_ABORTED", output)
         self.assertNotIn("reader-user", output)
         self.assertNotIn("wrong-secret", output)
+        self.assertFalse(self.lock.locked())
+
+    async def test_camera_lookup_failure_logs_abort_and_releases_lock(self):
+        self.data.get_camera.side_effect = RuntimeError("internal lookup failure")
+        payload = MediaAuthRequest(
+            action="read",
+            protocol="rtsp",
+            path="cam-001",
+            user="reader-user",
+            password="reader-secret",
+        )
+
+        with self.assertLogs("ai_cctv.external.media_auth", level="INFO") as logs:
+            with self.assertRaises(RuntimeError):
+                await internal_media_auth(
+                    self.request,
+                    payload,
+                    self.settings,
+                    self.data,
+                )
+
+        output = "\n".join(logs.output)
+        self.assertIn("MEDIA_AUTH_ABORTED", output)
+        self.assertIn("error_type=RuntimeError", output)
+        self.assertNotIn("reader-user", output)
+        self.assertNotIn("reader-secret", output)
         self.assertFalse(self.lock.locked())
 
 

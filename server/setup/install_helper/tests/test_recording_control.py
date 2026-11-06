@@ -314,10 +314,16 @@ class _SimulatedMediaMtxRuntime:
                         "source": (
                             {"type": "rtspSession", "id": f"sess-{camera_id}"}
                             if ready
-                            else {"type": "publisher", "id": None}
+                            else None
                         ),
                     },
                 )
+
+            if path.startswith("v3/rtspsessions/kick/") and method == "POST":
+                session_id = path.removeprefix("v3/rtspsessions/kick/")
+                if session_id.startswith("sess-"):
+                    self.set_stream_active(session_id.removeprefix("sess-"), False)
+                return httpx.Response(200)
 
             if path.startswith("v3/config/paths/get/") and method == "GET":
                 camera_id = path.removeprefix("v3/config/paths/get/")
@@ -458,7 +464,7 @@ class RecordingControlBackendTests(unittest.TestCase):
             / "migrations"
         )
         pre_011 = sorted(migrations_dir.glob("*.sql"))
-        pre_011 = [p for p in pre_011 if not p.name.startswith("011_")]
+        pre_011 = [p for p in pre_011 if int(p.name.split("_", 1)[0]) < 11]
 
         conn = sqlite3.connect(self.db_path)
         try:
@@ -592,11 +598,13 @@ class RecordingControlBackendTests(unittest.TestCase):
         )
         self.assertEqual(stop_local["recording_state"], "stopped")
         self.assertFalse(has_active_recording_file("local-camera", self.data_settings))
-        self.assertTrue(self.mediamtx.active_streams["local-camera"])
+        self.assertFalse(self.mediamtx.active_streams["local-camera"])
+        self.assertTrue(self.mediamtx.active_streams["cam-1"])
         self.assertTrue(has_active_recording_file("cam-1", self.data_settings))
         self.assertEqual(self.mediamtx.path_configs["cam-1"]["record"], True)
 
         # 5. Partial failure during bulk start when MediaMTX rejects cam-1
+        self.mediamtx.set_stream_active("local-camera", True)
         self.mediamtx.fail_cameras.add("cam-1")
         bulk_partial = _run_async(
             _apply_bulk_camera_recording(
@@ -796,6 +804,21 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
             "server.desktop.admin.application.BackgroundTask", side_effect=_SyncTask
         ), patch(
             "server.desktop.admin.application.WindowsSessionStore", return_value=None
+        ), patch(
+            "server.desktop.admin.application.load_local_camera_enabled",
+            return_value=True,
+        ), patch(
+            "server.desktop.admin.application.load_device_setting",
+            return_value="Integrated Camera",
+        ), patch(
+            "server.desktop.admin.application.publisher_status",
+            return_value={
+                "status": "running",
+                "camera_id": "local-camera",
+                "device_name": "Integrated Camera",
+            },
+        ), patch.object(
+            CCTVMainWindow, "_wait_for_local_camera", return_value=None
         ):
             gui1 = CCTVMainWindow(allow_insecure_http=True)
             gui2 = CCTVMainWindow(allow_insecure_http=True)
@@ -824,15 +847,9 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                 self._wait_tasks(gui1)
                 self._wait_tasks(gui2)
 
-                self.assertIn("local-camera", gui1._workers)
+                self.assertNotIn("local-camera", gui1._workers)
                 self.assertIn("cam-1", gui1._workers)
-                local_worker = gui1._workers["local-camera"]
                 cam1_worker = gui1._workers["cam-1"]
-
-                frame = QImage(320, 180, QImage.Format_RGB888)
-                frame.fill(0x22C55E)
-                gui1._on_frame("local-camera", local_worker, frame)
-                self.assertEqual(gui1._views["local-camera"].status.text(), "LIVE")
 
                 self.assertEqual(
                     gui1._views["local-camera"].recording_status.text(), "녹화 중지"
@@ -852,6 +869,13 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                 self.assertEqual(
                     gui1._views["local-camera"].recording_status.text(), "녹화 중"
                 )
+                self.assertIn("local-camera", gui1._workers)
+                local_worker = gui1._workers["local-camera"]
+
+                frame = QImage(320, 180, QImage.Format_RGB888)
+                frame.fill(0x22C55E)
+                gui1._on_frame("local-camera", local_worker, frame)
+                self.assertEqual(gui1._views["local-camera"].status.text(), "LIVE")
 
                 gui2.refresh_recording_states()
                 self._wait_tasks(gui2)
@@ -880,8 +904,13 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                 self.assertEqual(
                     gui1._views["cam-1"].recording_status.text(), "녹화 중"
                 )
-                self.assertFalse(local_worker.stopped)
-                self.assertEqual(gui1._views["local-camera"].status.text(), "LIVE")
+                self.assertTrue(local_worker.stopped)
+                self.assertFalse(cam1_worker.stopped)
+                self.assertEqual(gui1._views["local-camera"].status.text(), "중지됨")
+
+                gui1._views["local-camera"].btn_record_start.click()
+                self._wait_tasks(gui1)
+                local_worker = gui1._workers["local-camera"]
 
                 with patch.object(gui1.local_publisher, "stop") as stop_local:
                     gui1.btn_stop.click()
@@ -889,6 +918,7 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                 stop_local.assert_called_once_with()
                 self.assertFalse(gui1._local_camera_preview_requested)
                 self.assertTrue(local_worker.stopped)
+                self.assertTrue(cam1_worker.stopped)
                 self.assertEqual(
                     gui1._views["local-camera"].recording_status.text(), "녹화 중지"
                 )
@@ -904,6 +934,7 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                 self.assertIsNone(gui1._views["local-camera"]._frame)
                 worker_count = worker_factory.call_count
                 gui1._on_worker_finished("local-camera", local_worker)
+                gui1._on_worker_finished("cam-1", cam1_worker)
                 self.assertNotIn("local-camera", gui1._workers)
                 self.assertEqual(worker_factory.call_count, worker_count)
                 self.assertEqual(gui1._views["local-camera"].status.text(), "중지됨")
@@ -938,7 +969,8 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
                     "MEDIA_CONTROL_UNAVAILABLE · MediaMTX 제어 API에 연결할 수 없습니다.",
                 )
                 self.assertTrue(local_worker.stopped)
-                self.assertFalse(cam1_worker.stopped)
+                self.assertIn("cam-1", gui1._workers)
+                self.assertFalse(gui1._workers["cam-1"].stopped)
                 self.assertEqual(gui1._views["local-camera"].status.text(), "중지됨")
 
                 gui1._views["cam-1"].set_recording_state(
@@ -956,7 +988,7 @@ class DesktopMonitoringRecordingGuiTests(unittest.TestCase):
     def test_desktop_api_recording_endpoints(self):
         calls = []
         api = DesktopApi("https://server.example", opener=lambda *_a, **_kw: None)
-        api._request = lambda method, path, payload=None: (
+        api._request = lambda method, path, payload=None, **_kwargs: (
             calls.append((method, path, payload)) or {}
         )
 

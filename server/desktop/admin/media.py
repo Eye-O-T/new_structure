@@ -1,4 +1,4 @@
-"""Private loopback HLS bridge: PyAV never receives server credentials or remote URLs."""
+"""Private loopback HLS and playback bridges: external clients never receive server credentials."""
 
 import re
 import secrets
@@ -116,3 +116,127 @@ class MediaBridge:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join()
+
+
+class PlaybackBridge:
+    """Loopback authenticated proxy so an external browser can play recordings without cookies."""
+
+    _FORWARDED_HEADERS = (
+        "Content-Type",
+        "Content-Length",
+        "Content-Range",
+        "Accept-Ranges",
+        "Cache-Control",
+        "ETag",
+        "Last-Modified",
+    )
+
+    def __init__(self, api, reference):
+        self.api = api
+        self.upstream_path = api.playback_path(reference)
+        self.local_path = "/" + secrets.token_urlsafe(32)
+        bridge = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def _handle_playback(self, method):
+                req_path = urlsplit(self.path).path
+                if req_path != bridge.local_path:
+                    self.send_error(404)
+                    return
+                try:
+                    with bridge.api.open_playback(
+                        bridge.upstream_path,
+                        method=method,
+                        range_header=self.headers.get("Range"),
+                        if_range_header=self.headers.get("If-Range"),
+                    ) as upstream:
+                        status = getattr(upstream, "status", None) or getattr(
+                            upstream, "code", 200
+                        )
+                        self.send_response(status)
+                        headers = getattr(upstream, "headers", None) or {}
+                        sent_content_type = False
+                        for name in bridge._FORWARDED_HEADERS:
+                            value = headers.get(name)
+                            if value:
+                                self.send_header(name, value)
+                                if name.lower() == "content-type":
+                                    sent_content_type = True
+                        if not sent_content_type:
+                            self.send_header("Content-Type", "video/mp4")
+                        self.end_headers()
+                        if method != "HEAD":
+                            while True:
+                                chunk = upstream.read(64 * 1024)
+                                if not chunk:
+                                    break
+                                self.wfile.write(chunk)
+                except CLIENT_DISCONNECT_ERRORS:
+                    LOGGER.debug(
+                        "Playback client disconnected path=%s", bridge.upstream_path
+                    )
+                except HTTPError as exc:
+                    try:
+                        self.send_response(exc.code)
+                        headers = getattr(exc, "headers", None) or {}
+                        for name in ("Content-Range", "Content-Type"):
+                            value = headers.get(name)
+                            if value:
+                                self.send_header(name, value)
+                        self.end_headers()
+                    except CLIENT_DISCONNECT_ERRORS:
+                        LOGGER.debug(
+                            "Playback client disconnected while sending HTTP error path=%s",
+                            bridge.upstream_path,
+                        )
+                except Exception as exc:
+                    LOGGER.warning(
+                        "Playback media request failed path=%s error_type=%s error=%s",
+                        bridge.upstream_path,
+                        type(exc).__name__,
+                        str(exc) or exc.__class__.__name__,
+                    )
+                    try:
+                        self.send_error(502, "Media unavailable")
+                    except CLIENT_DISCONNECT_ERRORS:
+                        LOGGER.debug(
+                            "Playback client disconnected while sending error path=%s",
+                            bridge.upstream_path,
+                        )
+
+            def do_GET(self):
+                self._handle_playback("GET")
+
+            def do_HEAD(self):
+                self._handle_playback("HEAD")
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(
+            target=self.server.serve_forever,
+            kwargs={"poll_interval": 0.1},
+            daemon=True,
+        )
+        self.url = f"http://127.0.0.1:{self.server.server_port}{self.local_path}"
+        self._closed = False
+
+    def start(self):
+        self.thread.start()
+        return self
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        if self.thread.is_alive():
+            self.server.shutdown()
+            self.thread.join(timeout=2)
+        self.server.server_close()
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *_args):
+        self.close()

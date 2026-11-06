@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
 from .legacy_gui import CCTVMainWindow as ReferenceWindow
 from .api import DesktopApi, safe_error
 from .camera_view import CameraView
+from .media import PlaybackBridge
 from .session_store import WindowsSessionStore
 from .video_worker import VideoWorker
 from server.desktop.common.tasks import BackgroundTask
@@ -87,6 +88,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._closing = False
         self._restore_task = None
         self._event_detail_tasks = set()
+        self._playback_bridges = set()
         self._recording_tasks = set()
         self._recording_poll_task = None
         self._busy_recording_cameras = set()
@@ -193,7 +195,7 @@ class CCTVMainWindow(ReferenceWindow):
             self.btn_setting.setEnabled(True)
             self._update_recording_controls()
             task.deleteLater()
-            if self._closing:
+            if self._closing and not self._has_pending_background_tasks() and not self._workers:
                 self.close()
 
         task.result.connect(restored)
@@ -780,7 +782,7 @@ class CCTVMainWindow(ReferenceWindow):
         def handle_finished():
             self._recording_poll_task = None
             task.deleteLater()
-            if self._closing and not self._recording_tasks and not self._workers:
+            if self._closing and not self._has_pending_background_tasks() and not self._workers:
                 QTimer.singleShot(0, self.close)
 
         task.result.connect(handle_result)
@@ -1029,7 +1031,7 @@ class CCTVMainWindow(ReferenceWindow):
                 self._sync_view_recording_state(camera_id)
             self._update_recording_controls()
             task.deleteLater()
-            if self._closing and not self._recording_tasks and not self._workers:
+            if self._closing and not self._has_pending_background_tasks() and not self._workers:
                 QTimer.singleShot(0, self.close)
 
         task.result.connect(handle_result)
@@ -1114,16 +1116,18 @@ class CCTVMainWindow(ReferenceWindow):
             self._sync_view_recording_state(camera_id)
             self._update_recording_controls()
             task.deleteLater()
-            if self._closing and not self._recording_tasks and not self._workers:
+            if self._closing and not self._has_pending_background_tasks() and not self._workers:
                 QTimer.singleShot(0, self.close)
 
         task.result.connect(handle_result)
         task.failed.connect(handle_failed)
         task.finished.connect(handle_finished)
         task.start()
+
     def stop_display_workers(self):
         """창 종료나 로그아웃 시 실시간 영상 화면 연결만 정리한다."""
         self._recording_poll_timer.stop()
+        self.close_playback_bridges()
         if not self._workers:
             self._finish_stopping()
             return
@@ -1136,7 +1140,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._monitoring = False
         self._stopping = False
         self._update_recording_controls()
-        if self._closing and not self._recording_tasks and self._recording_poll_task is None:
+        if self._closing and not self._has_pending_background_tasks():
             QTimer.singleShot(0, self.close)
 
     def set_bounding_boxes_enabled(self, enabled):
@@ -1301,7 +1305,7 @@ class CCTVMainWindow(ReferenceWindow):
                 analysis_layout.addWidget(label)
 
         def refresh_analysis():
-            if state["busy"] or not state["open"]:
+            if state["busy"] or not state["open"] or self._closing:
                 return
             state["busy"] = True
             refresh_button.setEnabled(False)
@@ -1431,15 +1435,51 @@ class CCTVMainWindow(ReferenceWindow):
         task.start()
         dialog.exec_()
 
+    def _has_pending_background_tasks(self):
+        return bool(
+            self._restore_task is not None
+            or self._recording_tasks
+            or self._recording_poll_task is not None
+            or getattr(self, "_event_detail_tasks", None)
+        )
+
     def _finish_event_detail_task(self, task):
         self._event_detail_tasks.discard(task)
         task.deleteLater()
+        if self._closing and not self._has_pending_background_tasks() and not self._workers:
+            self.close()
+
+    def close_playback_bridges(self):
+        bridges = getattr(self, "_playback_bridges", None)
+        if not bridges:
+            return
+        for bridge in list(bridges):
+            bridges.discard(bridge)
+            try:
+                bridge.close()
+            except Exception:
+                LOGGER.debug("Failed to close playback bridge", exc_info=True)
 
     def _open_playback_url(self, playback_url):
+        bridge = None
         try:
-            if not QDesktopServices.openUrl(QUrl(self.api.playback_url(playback_url))):
+            if not self.api:
+                raise ValueError("다시 로그인하세요.")
+            bridge = PlaybackBridge(self.api, playback_url)
+            bridge.start()
+            bridges = getattr(self, "_playback_bridges", None)
+            if bridges is None:
+                bridges = set()
+                self._playback_bridges = bridges
+            bridges.add(bridge)
+            if not QDesktopServices.openUrl(QUrl(bridge.url)):
+                bridges.discard(bridge)
+                bridge.close()
                 raise ValueError("재생 프로그램을 열 수 없습니다.")
         except Exception as exc:
+            if bridge is not None:
+                getattr(self, "_playback_bridges", set()).discard(bridge)
+                bridge.close()
             QMessageBox.warning(
                 self, "녹화 재생", f"재생 주소를 열 수 없습니다: {safe_error(exc)}"
             )
@@ -1452,15 +1492,12 @@ class CCTVMainWindow(ReferenceWindow):
                 return
         self._closing = True
         self._recording_poll_timer.stop()
+        self.close_playback_bridges()
         if self._workers:
             self.stop_display_workers()
             event.ignore()
             return
-        if (
-            self._restore_task is not None
-            or self._recording_tasks
-            or self._recording_poll_task is not None
-        ):
+        if self._has_pending_background_tasks():
             event.ignore()
             return
         event.accept()

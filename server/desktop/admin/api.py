@@ -249,6 +249,51 @@ class DesktopApi(ServerApiClient):
             raise ValueError("재생 주소가 로그인한 서버와 다릅니다.")
         return resolved
 
+    def playback_path(self, reference):
+        """Resolve a server-provided playback URL to a validated same-origin path."""
+        resolved = self.playback_url(reference)
+        parsed = urlsplit(resolved)
+        if (
+            "\\" in parsed.path
+            or any(part in {".", ".."} for part in parsed.path.split("/"))
+        ):
+            raise ValueError("Invalid playback URL")
+        valid_playback = parsed.path == "/playback/get"
+        valid_content = (
+            parsed.path.startswith("/api/v1/recordings/")
+            and parsed.path.endswith("/content")
+            and len(parsed.path.split("/")) == 6
+            and bool(parsed.path.split("/")[4])
+        )
+        if not (valid_playback or valid_content):
+            raise ValueError("Invalid playback URL")
+        return parsed.path + ("?" + parsed.query if parsed.query else "")
+
+    def open_playback(
+        self, reference, *, method="GET", range_header=None, if_range_header=None
+    ):
+        path = self.playback_path(reference)
+        with self._lock:
+            if not self._access_token:
+                raise ServerApiError(401, "AUTH_REQUIRED", "다시 로그인하세요.")
+            token = self._access_token
+        for attempt in range(2):
+            headers = {"Authorization": "Bearer " + token}
+            if range_header:
+                headers["Range"] = range_header
+            if if_range_header:
+                headers["If-Range"] = if_range_header
+            request = Request(self.base_url + path, headers=headers, method=method)
+            try:
+                return self._opener(request, timeout=MEDIA_REQUEST_TIMEOUT_SECONDS)
+            except HTTPError as exc:
+                if exc.code != 401 or attempt:
+                    raise
+                with self._lock:
+                    if self._access_token == token:
+                        self._refresh()
+                    token = self._access_token
+
     def media_path(self, camera_id, reference, base=None):
         camera_path(camera_id)
         url = urljoin(base or self.base_url + "/", reference)
