@@ -262,6 +262,7 @@ class CCTVMainWindow(ReferenceWindow):
         self._views = {}
         self._camera_metrics = {}
         self._camera_events = {}
+        self._cleared_event_ids = {}
         self._rendered_event_signatures = {}
         self._event_scroll_positions = {}
         self._rendered_event_camera_id = None
@@ -304,7 +305,7 @@ class CCTVMainWindow(ReferenceWindow):
         QTimer.singleShot(0, self._restore_session)
 
     def _restore_session(self):
-        if self.session_store is None:
+        if self._closing or self.session_store is None:
             return
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(False)
@@ -701,6 +702,9 @@ class CCTVMainWindow(ReferenceWindow):
         if not self._camera_recording_requested(camera_id):
             return
         worker = VideoWorker(source=(self.api, camera_id))
+        cleared_id = self._cleared_event_ids.get(camera_id, 0)
+        if cleared_id and hasattr(worker, "clear_retained_events"):
+            worker.clear_retained_events(cleared_id)
         self._workers[camera_id] = worker
         worker.frame_ready.connect(
             lambda frame, cid=camera_id, current=worker: self._on_frame(
@@ -789,6 +793,14 @@ class CCTVMainWindow(ReferenceWindow):
         event = {**event, "camera_id": camera_id}
         event_id = event.get("id")
         if event_id is not None:
+            worker_min_id = getattr(worker, "_min_after_event_id", None)
+            if worker_min_id == 0 and self._cleared_event_ids.get(camera_id, 0) > 0:
+                self._cleared_event_ids[camera_id] = 0
+            try:
+                if int(event_id) <= self._cleared_event_ids.get(camera_id, 0):
+                    return
+            except (TypeError, ValueError):
+                pass
             for existing in self._camera_events.get(camera_id, []):
                 if str(existing.get("id")) == str(event_id):
                     for key in ("person_id", "global_person_id", "gender", "age"):
@@ -938,6 +950,26 @@ class CCTVMainWindow(ReferenceWindow):
         )
         self.metric_appear["value"].setText(str(self.appear_count))
         self.metric_disappear["value"].setText(str(self.disappear_count))
+
+    def clear_event_timeline(self):
+        camera_id = self._selected_camera_id
+        if camera_id:
+            max_id = self._cleared_event_ids.get(camera_id, 0)
+            for event in self._camera_events.get(camera_id, []):
+                try:
+                    max_id = max(max_id, int(event.get("id") or 0))
+                except (TypeError, ValueError):
+                    pass
+            worker = self._workers.get(camera_id)
+            if worker is not None and hasattr(worker, "clear_retained_events"):
+                max_id = max(max_id, int(worker.clear_retained_events(max_id) or 0))
+            self._cleared_event_ids[camera_id] = max_id
+            self._camera_events[camera_id] = []
+            self._rendered_event_signatures.pop(camera_id, None)
+            self._event_scroll_positions.pop(camera_id, None)
+        super().clear_event_timeline()
+        if camera_id:
+            self._render_selected_summary()
 
     def select_camera_from_picker(self, _index):
         if not self._updating_camera_picker:

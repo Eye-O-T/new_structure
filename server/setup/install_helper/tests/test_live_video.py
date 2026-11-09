@@ -454,6 +454,90 @@ class EventPollingTests(unittest.TestCase):
             ],
         )
 
+    def test_clear_retained_events_drops_unresolved_gpid_and_resets_on_server_db_wipe(self):
+        api = Mock()
+        api.events.side_effect = [
+            # Initial poll returns event 40 with unresolved gpid
+            {
+                "items": [
+                    {
+                        "id": 40,
+                        "event_type": "analysis_completed",
+                        "occurred_at": "2026-11-06T06:00:03Z",
+                        "person_id": "7",
+                        "global_person_id": None,
+                    }
+                ],
+                "snapshot_max_id": 40,
+            },
+            # Loop 1 (t=6.0s after clear_retained_events): incremental poll returns new event 41
+            {
+                "items": [
+                    {
+                        "id": 41,
+                        "event_type": "person_appeared",
+                        "occurred_at": "2026-11-06T06:00:06Z",
+                        "person_id": "8",
+                        "global_person_id": 88,
+                    }
+                ],
+                "has_more": False,
+            },
+            # Loop 2 (t=12.0s): server DB was wiped, snapshot_max_id=1 < after_event_id=41
+            {
+                "items": [],
+                "snapshot_max_id": 1,
+                "has_more": False,
+            },
+            # Re-poll from after_event_id=0 picks up new event ID 1
+            {
+                "items": [
+                    {
+                        "id": 1,
+                        "event_type": "person_appeared",
+                        "occurred_at": "2026-11-06T06:01:00Z",
+                        "person_id": "1",
+                        "global_person_id": 1,
+                    }
+                ],
+                "snapshot_max_id": 1,
+                "has_more": False,
+            },
+        ]
+        worker = video.VideoWorker((api, "cam-001"))
+        clock = Clock()
+        worker._stop = clock
+        received = []
+        wait_count = 0
+
+        def on_wait():
+            nonlocal wait_count
+            wait_count += 1
+            if wait_count == 1:
+                worker.clear_retained_events(40)
+                clock.now = 6.0
+            elif wait_count == 2:
+                clock.now = 12.0
+            else:
+                worker.stop()
+
+        clock.on_wait = on_wait
+        worker.event_ready.connect(received.append, Qt.DirectConnection)
+        with patch.object(video.time, "monotonic", side_effect=lambda: clock.now):
+            worker.poll_events()
+
+        self.assertEqual([item["id"] for item in received], [40, 41, 1])
+        self.assertEqual(worker._min_after_event_id, 0)
+        self.assertEqual(
+            [call.kwargs for call in api.events.call_args_list],
+            [
+                {"limit": 30, "order": "desc"},
+                {"after_event_id": 40},
+                {"after_event_id": 41},
+                {"after_event_id": 0},
+            ],
+        )
+
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg is needed to generate HLS")
 class HlsTests(unittest.TestCase):

@@ -20,6 +20,7 @@ from server.operations.services import (
     _deployment_state,
     _run,
     get_optional_service_states,
+    run_service_action,
 )
 from server.operations.doctor import _compose_rows
 
@@ -255,6 +256,175 @@ class ComposeAdapterCommandTests(unittest.TestCase):
             empty_states = get_optional_service_states(self.server, installed)
         self.assertEqual(empty_states, {"preprocessing": False, "analysis": False})
 
+    def test_clear_logs_wipes_media_snapshots_and_db_history_while_preserving_users_and_cameras(
+        self,
+    ):
+        import contextlib
+        import sqlite3
+
+        config_file = self.root / "config" / "config.yaml"
+        config_file.write_text("schema_version: 1\n", encoding="utf-8")
+        db_dir = self.root / "database"
+        recordings_dir = self.root / "recordings"
+        recovered_dir = self.root / "recovered"
+        snapshots_dir = self.root / "snapshots"
+        logs_dir = self.root / "logs"
+        for directory in (
+            db_dir,
+            recordings_dir / "cam-1",
+            recovered_dir / "cam-1",
+            snapshots_dir / "cam-1",
+            logs_dir,
+        ):
+            directory.mkdir(parents=True, exist_ok=True)
+        (recordings_dir / "cam-1" / "segment1.mp4").write_bytes(b"video-data")
+        (recovered_dir / "cam-1" / "recovered1.mp4").write_bytes(b"recovered-data")
+        (snapshots_dir / "cam-1" / "snap1.jpg").write_bytes(b"jpg-data")
+        (snapshots_dir / ".event-outbox.sqlite3").write_bytes(b"outbox-data")
+        (logs_dir / "server.log").write_text("log-entry\n", encoding="utf-8")
+
+        self.env.write_text(
+            f"CONFIG_FILE={config_file}\n"
+            f"DATABASE_DIR={db_dir}\n"
+            f"RECORDINGS_DIR={recordings_dir}\n"
+            f"RECOVERED_DIR={recovered_dir}\n"
+            f"SNAPSHOTS_DIR={snapshots_dir}\n"
+            f"LOGS_DIR={logs_dir}\n",
+            encoding="utf-8",
+        )
+        installed = DeploymentContext(
+            data_root=self.root,
+            env_file=self.env,
+            config_file=config_file,
+            public_url="http://127.0.0.1",
+            rtsp_host="127.0.0.1",
+            rtsp_port=8554,
+            admin_username="admin",
+            allow_insecure_http=True,
+        )
+
+        db_path = db_dir / "ai_cctv.db"
+        migrations_dir = (
+            Path(__file__).resolve().parents[1]
+            / "services"
+            / "data"
+            / "app"
+            / "database"
+            / "migrations"
+        )
+        with contextlib.closing(sqlite3.connect(db_path)) as conn:
+            for migration in sorted(migrations_dir.glob("*.sql")):
+                conn.executescript(migration.read_text(encoding="utf-8"))
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role, is_active, created_at, updated_at) "
+                "VALUES ('admin', 'hash', 'admin', 1, '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')"
+            )
+            conn.execute(
+                "INSERT INTO cameras (camera_id, name, stream_path, enabled, recording_enabled, "
+                "recording_last_error_code, created_at, updated_at) "
+                "VALUES ('cam-1', 'Cam 1', 'cam-1', 1, 1, 'ERR_OLD', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')"
+            )
+            conn.execute(
+                "INSERT INTO camera_runtime_status (camera_id, event_cursor, last_error_code, updated_at) "
+                "VALUES ('cam-1', '55', 'ERR_OLD', '2026-11-01T00:00:00Z')"
+            )
+            conn.execute(
+                "INSERT INTO recording_segments (id, camera_id, start_time, end_time, relative_path, "
+                "format, codec, duration_ms, file_size, source, status, created_at, updated_at) "
+                "VALUES (10, 'cam-1', '2026-11-01T00:00:00Z', '2026-11-01T00:01:00Z', 'cam-1/segment1.mp4', "
+                "'mp4', 'h264', 60000, 100, 'central', 'ready', '2026-11-01T00:01:00Z', '2026-11-01T00:01:00Z')"
+            )
+            conn.execute(
+                "INSERT INTO events (id, camera_id, event_type, person_id, global_person_id, confidence, "
+                "occurred_at, metadata_json, created_at) "
+                "VALUES (25, 'cam-1', 'person_appeared', '7', 1, 0.9, '2026-11-01T00:00:10Z', '{}', '2026-11-01T00:00:10Z')"
+            )
+            conn.execute(
+                "INSERT INTO event_recording_segments (event_id, recording_segment_id, created_at) "
+                "VALUES (25, 10, '2026-11-01T00:00:10Z')"
+            )
+            conn.execute(
+                "INSERT INTO global_persons (id, created_at) VALUES (1, '2026-11-01T00:00:10Z')"
+            )
+            conn.execute(
+                "INSERT INTO live_objects (camera_id, payload_json, observed_at, received_at) "
+                "VALUES ('cam-1', '[]', '2026-11-01T00:00:10Z', '2026-11-01T00:00:10Z')"
+            )
+            conn.commit()
+
+        executed_commands = []
+
+        def fake_run(command, **_kwargs):
+            executed_commands.append(command)
+            return ""
+
+        rows = [
+            {"Service": "data", "State": "running"},
+            {"Service": "preprocessing", "State": "running"},
+            {"Service": "analysis", "State": "exited"},
+        ]
+        with patch(
+            "server.operations.services._deployment_state", return_value="matching"
+        ), patch(
+            "server.operations.services._compose_ps_rows", return_value=rows
+        ), patch(
+            "server.operations.services._run", side_effect=fake_run
+        ), patch(
+            "server.operations.services.stop_publisher", return_value=False
+        ):
+            result = run_service_action(
+                self.server, installed, "clear-logs", lambda _msg: None
+            )
+
+        self.assertIn("삭제된 이벤트 이력: 1건", result)
+        self.assertIn("삭제된 녹화 세그먼트 이력: 1건", result)
+        self.assertIn("삭제된 미디어·스냅샷·로그 파일: 5개", result)
+        for directory in (recordings_dir, recovered_dir, snapshots_dir, logs_dir):
+            self.assertTrue(directory.is_dir())
+            self.assertEqual(list(directory.iterdir()), [])
+
+        self.assertGreaterEqual(len(executed_commands), 3)
+        self.assertEqual(executed_commands[0][-3:], ["--profile", "ai", "stop"])
+        self.assertEqual(executed_commands[1][-3:], ["up", "-d", "--wait"])
+        self.assertEqual(
+            executed_commands[2][-5:],
+            ["up", "-d", "--wait", "--no-deps", "preprocessing"],
+        )
+
+        with contextlib.closing(sqlite3.connect(db_path)) as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM cameras").fetchone()[0], 1)
+            self.assertIsNone(
+                conn.execute(
+                    "SELECT recording_last_error_code FROM cameras WHERE camera_id = 'cam-1'"
+                ).fetchone()[0]
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT event_cursor, last_error_code FROM camera_runtime_status WHERE camera_id = 'cam-1'"
+                ).fetchall(),
+                [(None, None)],
+            )
+            for table in (
+                "events",
+                "recording_segments",
+                "event_recording_segments",
+                "global_persons",
+                "live_objects",
+            ):
+                self.assertEqual(
+                    conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
+                    0,
+                    table,
+                )
+            conn.execute(
+                "INSERT INTO events (camera_id, event_type, occurred_at, metadata_json, created_at) "
+                "VALUES ('cam-1', 'person_appeared', '2026-11-02T00:00:00Z', '{}', '2026-11-02T00:00:00Z')"
+            )
+            new_id = conn.execute("SELECT id FROM events").fetchone()[0]
+            self.assertEqual(new_id, 1)
+
 
 class ServerManagerToggleButtonTests(unittest.TestCase):
     def setUp(self):
@@ -305,6 +475,7 @@ class ServerManagerToggleButtonTests(unittest.TestCase):
 
     def test_buttons_show_turn_on_when_off_and_turn_off_when_on(self):
         from server.desktop.server_manager.application import ServerManagerWindow
+        from PyQt5.QtWidgets import QMessageBox
 
         current_states = {"preprocessing": False, "analysis": True}
         actions = []
@@ -361,6 +532,26 @@ class ServerManagerToggleButtonTests(unittest.TestCase):
             self.assertEqual(actions[-1], "analysis-on")
             self.assertEqual(window.preprocessing_button.text(), "감지·식별 끄기")
             self.assertEqual(window.analysis_button.text(), "이벤트 분석 끄기")
+
+            self.assertEqual(window.clear_logs_button.text(), "영상·이벤트 로그 비우기")
+            with patch(
+                "server.desktop.server_manager.application.QMessageBox.question",
+                return_value=QMessageBox.No,
+            ):
+                window.clear_logs_button.click()
+                self._wait_task(window)
+            self.assertNotEqual(actions[-1], "clear-logs")
+
+            with patch(
+                "server.desktop.server_manager.application.QMessageBox.question",
+                return_value=QMessageBox.Yes,
+            ):
+                window.clear_logs_button.click()
+                self._wait_task(window)
+            self.assertEqual(actions[-1], "clear-logs")
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
 
 
 if __name__ == "__main__":

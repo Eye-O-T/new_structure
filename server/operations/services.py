@@ -6,7 +6,9 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -23,6 +25,7 @@ from .compose import (
     ComposeAdapter,
     migrate_detection_model,
 )
+from .local_camera import stop_publisher
 
 
 _WINDOWS = os.name == "nt"
@@ -422,7 +425,9 @@ def get_optional_service_states(
         }:
             states[service] = True
         if service == "analysis" and raw_state in {"exited", "restarting", "dead"}:
-            states["analysis_message"] = _analysis_stopped_status(adapter, deadline)
+            message = _analysis_stopped_status(adapter, deadline)
+            if message:
+                states["analysis_message"] = message
     return states
 
 
@@ -469,6 +474,244 @@ def _analysis_startup_failure_message(output: str) -> str | None:
     return None
 
 
+_CLEARABLE_DB_TABLES = (
+    "event_recording_segments",
+    "object_jobs",
+    "push_deliveries",
+    "events",
+    "recording_segments",
+    "recovery_jobs",
+    "person_identity_links",
+    "person_track_presence",
+    "identity_gallery",
+    "global_persons",
+    "live_objects",
+    "maintenance_cursors",
+)
+_CLEARABLE_DB_SEQUENCES = (
+    "events",
+    "recording_segments",
+    "object_jobs",
+    "push_deliveries",
+    "recovery_jobs",
+    "identity_gallery",
+    "global_persons",
+)
+
+
+def _format_bytes(size_bytes: int) -> str:
+    size = float(max(0, size_bytes))
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024.0 or unit == "GB":
+            return f"{int(size)} B" if unit == "B" else f"{size:.2f} {unit}"
+        size /= 1024.0
+    return f"{size:.2f} GB"
+
+
+def _empty_directory_contents(directory: Path) -> tuple[int, int]:
+    """루트 디렉터리 자체는 유지하고 내부 파일·하위 폴더만 모두 삭제한다."""
+
+    if not directory.is_dir():
+        return 0, 0
+    deleted_files = 0
+    freed_bytes = 0
+    for child in list(directory.iterdir()):
+        if child.is_symlink() or child.is_file():
+            try:
+                freed_bytes += child.stat().st_size
+            except OSError:
+                pass
+            child.unlink(missing_ok=True)
+            deleted_files += 1
+        elif child.is_dir():
+            for nested in child.rglob("*"):
+                if nested.is_symlink() or nested.is_file():
+                    try:
+                        freed_bytes += nested.stat().st_size
+                    except OSError:
+                        pass
+                    deleted_files += 1
+            shutil.rmtree(child)
+    return deleted_files, freed_bytes
+
+
+def _clear_database_logs(db_path: Path) -> tuple[int, int]:
+    """사용자·카메라 설정은 보존하고 이벤트·녹화·인물식별 이력 테이블과 시퀀스를 초기화한다."""
+
+    if not db_path.is_file():
+        return 0, 0
+    deleted_events = 0
+    deleted_segments = 0
+    connection = sqlite3.connect(db_path, timeout=10.0, isolation_level=None)
+    try:
+        connection.execute("PRAGMA busy_timeout = 5000;")
+        connection.execute("PRAGMA foreign_keys = ON;")
+        existing_tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if "events" in existing_tables:
+            row = connection.execute("SELECT COUNT(*) FROM events").fetchone()
+            deleted_events = int(row[0] or 0) if row else 0
+        if "recording_segments" in existing_tables:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM recording_segments"
+            ).fetchone()
+            deleted_segments = int(row[0] or 0) if row else 0
+        connection.execute("BEGIN IMMEDIATE;")
+        try:
+            for table in _CLEARABLE_DB_TABLES:
+                if table in existing_tables:
+                    connection.execute(f"DELETE FROM {table}")
+            if "camera_runtime_status" in existing_tables:
+                columns = {
+                    str(row[1])
+                    for row in connection.execute(
+                        "PRAGMA table_info(camera_runtime_status)"
+                    ).fetchall()
+                }
+                assignments = [
+                    f"{col} = NULL"
+                    for col in ("event_cursor", "last_error_code")
+                    if col in columns
+                ]
+                if assignments:
+                    connection.execute(
+                        f"UPDATE camera_runtime_status SET {', '.join(assignments)}"
+                    )
+            if "cameras" in existing_tables:
+                columns = {
+                    str(row[1])
+                    for row in connection.execute(
+                        "PRAGMA table_info(cameras)"
+                    ).fetchall()
+                }
+                if "recording_last_error_code" in columns:
+                    connection.execute(
+                        "UPDATE cameras SET recording_last_error_code = NULL"
+                    )
+            if "sqlite_sequence" in existing_tables:
+                placeholders = ", ".join("?" for _ in _CLEARABLE_DB_SEQUENCES)
+                connection.execute(
+                    f"DELETE FROM sqlite_sequence WHERE name IN ({placeholders})",
+                    _CLEARABLE_DB_SEQUENCES,
+                )
+            connection.execute("COMMIT;")
+        except Exception:
+            connection.execute("ROLLBACK;")
+            raise
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        connection.execute("VACUUM;")
+    finally:
+        connection.close()
+    return deleted_events, deleted_segments
+
+
+def _clear_media_and_event_logs(
+    adapter: ComposeAdapter,
+    installed: DeploymentContext,
+    *,
+    state: str,
+    deadline: float,
+    progress: Callable[[str], None],
+) -> str:
+    running_core = False
+    running_optional: list[str] = []
+    if state == "matching":
+        rows = _compose_ps_rows(adapter, deadline)
+        active_services = {
+            str(row.get("Service", ""))
+            for row in rows
+            if str(row.get("State", "")).lower() in {"running", "restarting"}
+        }
+        running_core = bool(active_services)
+        running_optional = [
+            service
+            for service in ("preprocessing", "analysis")
+            if service in active_services
+        ]
+    try:
+        stop_publisher(installed.data_root)
+    except OSError:
+        pass
+    if state == "matching":
+        progress("로그 및 영상 정리를 위해 실행 중인 서버 컨테이너를 일시 중지하고 있습니다…")
+        _run(
+            _command(adapter, *STOP_ARGUMENTS),
+            directory=adapter.server_dir,
+            deadline=deadline,
+            capture=False,
+        )
+    try:
+        values = read_deployment_env(installed.env_file)
+    except (OSError, UnicodeError, ValueError):
+        values = {}
+
+    def _storage_dir(env_key: str, default_subdir: str) -> Path:
+        raw = values.get(env_key)
+        if raw:
+            return deployment_path(adapter.server_dir, raw)
+        return (installed.data_root / default_subdir).resolve()
+
+    recordings_dir = _storage_dir("RECORDINGS_DIR", "recordings")
+    recovered_dir = _storage_dir("RECOVERED_DIR", "recovered")
+    snapshots_dir = _storage_dir("SNAPSHOTS_DIR", "snapshots")
+    logs_dir = _storage_dir("LOGS_DIR", "logs")
+    database_dir = _storage_dir("DATABASE_DIR", "database")
+
+    progress("저장된 녹화 영상, 복구 영상, 스냅샷 및 로그 파일을 삭제하고 있습니다…")
+    deleted_files = 0
+    freed_bytes = 0
+    for target_dir in (recordings_dir, recovered_dir, snapshots_dir, logs_dir):
+        files_count, bytes_count = _empty_directory_contents(target_dir)
+        deleted_files += files_count
+        freed_bytes += bytes_count
+
+    progress("데이터베이스의 이벤트·녹화·인물식별 이력을 초기화하고 있습니다…")
+    deleted_events, deleted_segments = _clear_database_logs(
+        database_dir / "ai_cctv.db"
+    )
+
+    if running_core:
+        progress("서버 컨테이너를 다시 시작하고 있습니다…")
+        _run(
+            _command(adapter, "up", "-d", "--wait"),
+            directory=adapter.server_dir,
+            deadline=deadline,
+            capture=False,
+        )
+        for service in running_optional:
+            progress(f"{service} 컨테이너를 다시 시작하고 있습니다…")
+            _run(
+                _command(adapter, "up", "-d", "--wait", "--no-deps", service),
+                directory=adapter.server_dir,
+                deadline=deadline,
+                capture=False,
+            )
+
+    summary = (
+        "영상 및 이벤트 로그 비우기를 완료했습니다.\n"
+        f"• 삭제된 이벤트 이력: {deleted_events}건\n"
+        f"• 삭제된 녹화 세그먼트 이력: {deleted_segments}건\n"
+        f"• 삭제된 미디어·스냅샷·로그 파일: {deleted_files}개 ({_format_bytes(freed_bytes)})"
+    )
+    if running_core:
+        return f"{summary}\n\n{_status(adapter, deadline)}"
+    return f"{summary}\n• 서버 상태: 중지됨 (관리자 계정·카메라 등록 정보·설정은 유지됨)"
+
+
+def clear_media_and_event_logs(
+    server_dir: Path,
+    installed: DeploymentContext,
+    progress: Callable[[str], None],
+) -> str:
+    """저장된 녹화·복구·스냅샷 파일과 DB 이벤트·녹화·인물식별 이력을 비운다."""
+
+    return run_service_action(server_dir, installed, "clear-logs", progress)
+
+
 def run_service_action(
     server_dir: Path,
     installed: DeploymentContext,
@@ -480,10 +723,12 @@ def run_service_action(
     optional = action in {
         "preprocessing-on", "preprocessing-off", "analysis-on", "analysis-off"
     }
-    if action not in {"start", "restart", "stop", "status"} and not optional:
+    if action not in {"start", "restart", "stop", "status", "clear-logs"} and not optional:
         raise ValueError("지원하지 않는 서버 작업입니다.")
     deadline = time.monotonic() + (
-        START_TIMEOUT_SECONDS if action == "start" or action.endswith("-on") else ACTION_TIMEOUT_SECONDS
+        START_TIMEOUT_SECONDS
+        if action in {"start", "clear-logs"} or action.endswith("-on")
+        else ACTION_TIMEOUT_SECONDS
     )
     adapter = ComposeAdapter(server_dir, installed.env_file)
     migrated_model = False
@@ -499,6 +744,14 @@ def run_service_action(
         if action == "status":
             return message
         raise RuntimeError(message)
+    if action == "clear-logs":
+        return _clear_media_and_event_logs(
+            adapter,
+            installed,
+            state=state,
+            deadline=deadline,
+            progress=progress,
+        )
     if state == "empty" and action != "start":
         return "선택한 설정의 서버 컨테이너가 없습니다. ‘서버 시작’을 눌러 시작하세요."
     if action == "status":

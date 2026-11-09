@@ -24,6 +24,7 @@ class MultiCameraViewTests(unittest.TestCase):
     def tearDown(self):
         self.window.close()
         self.window.deleteLater()
+        self.app.processEvents()
 
     def test_grid_starts_at_selected_camera_and_limits_to_four(self):
         self.window._view_mode = "grid"
@@ -219,3 +220,103 @@ class MultiCameraViewTests(unittest.TestCase):
             self.window.event_list.itemAt(0).widget().layout().itemAt(1).widget().text(),
             "pid:7/gpid:42 분석 완료",
         )
+
+    def test_clear_event_timeline_button_resets_cards_counts_and_blocks_cleared_events(self):
+        cleared_watermarks = []
+
+        class _Worker:
+            running = True
+
+            def stop(self):
+                pass
+
+            def clear_retained_events(self, min_after_event_id=0):
+                cleared_watermarks.append(min_after_event_id)
+                return min_after_event_id
+
+        worker = _Worker()
+        self.window._selected_camera_id = "cam-1"
+        self.window._workers["cam-1"] = worker
+        self.window._camera_recordings["cam-1"] = {
+            "camera_id": "cam-1",
+            "enabled": True,
+            "recording_enabled": True,
+            "recording_state": "recording",
+        }
+        self.assertEqual(self.window.btn_clear_events.text(), "타임라인 비우기")
+
+        for item in (
+            {
+                "id": 10,
+                "type": "appear",
+                "person_id": "7",
+                "global_person_id": None,
+                "occurred_at": "2026-11-06T06:00:00Z",
+                "time": "2026-11-06T06:00:00Z",
+            },
+            {
+                "id": 11,
+                "type": "analysis_completed",
+                "event_type": "analysis_completed",
+                "person_id": "7",
+                "global_person_id": None,
+                "occurred_at": "2026-11-06T06:00:02Z",
+                "time": "2026-11-06T06:00:02Z",
+            },
+            {
+                "id": 12,
+                "type": "disappear",
+                "person_id": "7",
+                "global_person_id": 42,
+                "occurred_at": "2026-11-06T06:00:05Z",
+                "time": "2026-11-06T06:00:05Z",
+            },
+        ):
+            self.window._on_event("cam-1", worker, item)
+
+        self.assertEqual(self.window.event_list.count(), 3)
+        self.assertEqual(self.window.metric_appear["value"].text(), "1")
+        self.assertEqual(self.window.metric_disappear["value"].text(), "1")
+
+        self.window.btn_clear_events.click()
+        self.app.processEvents()
+
+        self.assertEqual(self.window.event_list.count(), 0)
+        self.assertEqual(self.window.appear_count, 0)
+        self.assertEqual(self.window.disappear_count, 0)
+        self.assertEqual(self.window.metric_appear["value"].text(), "0")
+        self.assertEqual(self.window.metric_disappear["value"].text(), "0")
+        self.assertEqual(self.window._cleared_event_ids.get("cam-1"), 12)
+        self.assertEqual(cleared_watermarks, [12])
+
+        # Late gpid update for already-cleared event ID 11 must not re-appear
+        self.window._on_event(
+            "cam-1",
+            worker,
+            {
+                "id": 11,
+                "type": "analysis_completed",
+                "event_type": "analysis_completed",
+                "person_id": "7",
+                "global_person_id": 42,
+                "occurred_at": "2026-11-06T06:00:02Z",
+                "time": "2026-11-06T06:00:02Z",
+            },
+        )
+        self.assertEqual(self.window.event_list.count(), 0)
+
+        # Subsequent new event ID 13 must appear normally
+        self.window._on_event(
+            "cam-1",
+            worker,
+            {
+                "id": 13,
+                "type": "appear",
+                "person_id": "8",
+                "global_person_id": 43,
+                "occurred_at": "2026-11-06T06:00:10Z",
+                "time": "2026-11-06T06:00:10Z",
+            },
+        )
+        self.assertEqual(self.window.event_list.count(), 1)
+        self.assertEqual(self.window.metric_appear["value"].text(), "1")

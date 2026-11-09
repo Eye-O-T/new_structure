@@ -642,7 +642,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor")
     doctor.add_argument("config", type=Path)
     doctor.add_argument("--env-file", type=Path, default=argparse.SUPPRESS)
-    for command in ("start", "stop", "restart", "status", "logs"):
+    for command in ("start", "stop", "restart", "status", "logs", "clear-logs"):
         service = sub.add_parser(command)
         service.add_argument("--env-file", type=Path, default=argparse.SUPPRESS)
         service.add_argument("--data-root", type=Path, default=default_data_root())
@@ -732,6 +732,8 @@ def main(argv: list[str] | None = None) -> int:
         return _launch_admin(args)
     if args.command in {"preprocessing", "analysis"}:
         return _managed_service_command(args, f"{args.command}-{args.state}")
+    if args.command == "clear-logs":
+        return _managed_service_command(args, "clear-logs")
     if args.command == "local-camera":
         return _local_camera_command(args)
     if args.command == "edge":

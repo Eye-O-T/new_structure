@@ -293,6 +293,20 @@ class VideoWorker(QThread):
         self._displayed_frames = 0
         self._dropped_frames = 0
         self._last_stats_log = 0.0
+        self._event_lock = threading.Lock()
+        self._min_after_event_id = 0
+        self._last_seen_event_id = 0
+        self._clear_events_requested = threading.Event()
+
+    def clear_retained_events(self, min_after_event_id=0):
+        with self._event_lock:
+            self._min_after_event_id = max(
+                self._min_after_event_id,
+                int(min_after_event_id or 0),
+                self._last_seen_event_id,
+            )
+            self._clear_events_requested.set()
+            return self._min_after_event_id
 
     def acknowledge_frame(self):
         self._frame_pending.clear()
@@ -352,18 +366,42 @@ class VideoWorker(QThread):
 
     def poll_events(self):
         api, camera_id = self.source
-        after_event_id = 0
+        with self._event_lock:
+            after_event_id = self._min_after_event_id
         initialized = False
         failed = False
         retained = []
         last_gpid_refresh = None
         while not self._stop.is_set():
             try:
+                with self._event_lock:
+                    if self._clear_events_requested.is_set():
+                        retained.clear()
+                        last_gpid_refresh = None
+                        after_event_id = max(after_event_id, self._min_after_event_id)
+                        self._clear_events_requested.clear()
+                    min_after_id = self._min_after_event_id
                 if not initialized:
                     page = api.events(camera_id, limit=30, order="desc")
                     current = page.get("items", [])
-                    after_event_id = int(page.get("snapshot_max_id") or 0)
+                    snapshot_max_id = int(page.get("snapshot_max_id") or 0)
+                    with self._event_lock:
+                        if self._clear_events_requested.is_set():
+                            retained.clear()
+                            last_gpid_refresh = None
+                            self._clear_events_requested.clear()
+                        elif snapshot_max_id < self._min_after_event_id:
+                            self._min_after_event_id = 0
+                        min_after_id = self._min_after_event_id
+                        after_event_id = max(snapshot_max_id, min_after_id)
+                        self._last_seen_event_id = after_event_id
                     for event in reversed(current):
+                        try:
+                            event_id = int(event.get("id") or 0)
+                        except (TypeError, ValueError):
+                            event_id = 0
+                        if min_after_id and event_id <= min_after_id:
+                            continue
                         item = _upsert_retained_event(retained, legacy_event(event))
                         self.event_ready.emit(dict(item))
                     if _has_unresolved_analysis_event(retained):
@@ -372,12 +410,43 @@ class VideoWorker(QThread):
                 else:
                     while not self._stop.is_set():
                         page = api.events(camera_id, after_event_id=after_event_id)
+                        if (
+                            "snapshot_max_id" in page
+                            and int(page.get("snapshot_max_id") or 0) < after_event_id
+                        ):
+                            with self._event_lock:
+                                self._min_after_event_id = 0
+                                self._last_seen_event_id = int(page.get("snapshot_max_id") or 0)
+                                self._clear_events_requested.clear()
+                            retained.clear()
+                            last_gpid_refresh = None
+                            after_event_id = 0
+                            page = api.events(camera_id, after_event_id=0)
                         current = page.get("items", [])
+                        with self._event_lock:
+                            if self._clear_events_requested.is_set():
+                                retained.clear()
+                                last_gpid_refresh = None
+                                after_event_id = max(after_event_id, self._min_after_event_id)
+                                self._clear_events_requested.clear()
+                            min_after_id = self._min_after_event_id
                         for event in current:
+                            try:
+                                event_id = int(event.get("id") or 0)
+                            except (TypeError, ValueError):
+                                event_id = 0
+                            with self._event_lock:
+                                if event_id > self._last_seen_event_id:
+                                    self._last_seen_event_id = event_id
+                            if min_after_id and event_id <= min_after_id:
+                                continue
                             item = _upsert_retained_event(retained, legacy_event(event))
                             self.event_ready.emit(dict(item))
                         if current:
                             after_event_id = max(after_event_id, max(int(event["id"]) for event in current))
+                            with self._event_lock:
+                                if after_event_id > self._last_seen_event_id:
+                                    self._last_seen_event_id = after_event_id
                         if not page.get("has_more") or not current:
                             break
                     if _has_unresolved_analysis_event(retained):
@@ -390,6 +459,13 @@ class VideoWorker(QThread):
                         ):
                             last_gpid_refresh = now
                             refresh_page = api.events(camera_id, limit=30, order="desc")
+                            with self._event_lock:
+                                if self._clear_events_requested.is_set():
+                                    retained.clear()
+                                    last_gpid_refresh = None
+                                    after_event_id = max(after_event_id, self._min_after_event_id)
+                                    self._clear_events_requested.clear()
+                                min_after_id = self._min_after_event_id
                             retained_ids = {
                                 str(item.get("id"))
                                 for item in retained
@@ -399,6 +475,11 @@ class VideoWorker(QThread):
                                 event_id = event.get("id")
                                 if event_id is None or str(event_id) not in retained_ids:
                                     continue
+                                try:
+                                    if min_after_id and int(event_id) <= min_after_id:
+                                        continue
+                                except (TypeError, ValueError):
+                                    pass
                                 updated, changed = _refresh_retained_event_ids(
                                     retained, legacy_event(event)
                                 )

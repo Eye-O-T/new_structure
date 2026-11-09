@@ -243,10 +243,21 @@ class CCTVMainWindow(QMainWindow):
 
         right_layout = QVBoxLayout(right_panel)
 
+        event_header = QHBoxLayout()
         event_label = QLabel("이벤트 타임라인\n출현 · 이동 · 사라짐 중심")
         event_label.setWordWrap(True)
         event_label.setStyleSheet("color: #94a3b8; font-size: 15px;")
-        right_layout.addWidget(event_label)
+        event_header.addWidget(event_label, 1)
+
+        self.btn_clear_events = QPushButton("타임라인 비우기")
+        self.btn_clear_events.setStyleSheet(
+            "background-color: #334155; color: #f8fafc; padding: 6px 10px; "
+            "border-radius: 5px; font-size: 13px; font-weight: bold;"
+        )
+        self.btn_clear_events.clicked.connect(self.clear_event_timeline)
+        event_header.addWidget(self.btn_clear_events, 0, Qt.AlignTop)
+
+        right_layout.addLayout(event_header)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -635,6 +646,16 @@ class CCTVMainWindow(QMainWindow):
 
                 if widget:
                     widget.deleteLater()
+
+    def clear_event_timeline(self):
+        self.appear_count = 0
+        self.disappear_count = 0
+        self.metric_appear["value"].setText("0")
+        self.metric_disappear["value"].setText("0")
+        while self.event_list.count():
+            item = self.event_list.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
 
     def closeEvent(self, event):
         self.stop_video()

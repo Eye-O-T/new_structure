@@ -17,6 +17,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
@@ -116,8 +117,12 @@ class ServerManagerWindow(QWidget):
         self.action_buttons.append(self.analysis_button)
         doctor = QPushButton("통합 진단")
         doctor.clicked.connect(self._doctor)
-        grid.addWidget(doctor, 3, 0, 1, 2)
+        grid.addWidget(doctor, 3, 0)
         self.action_buttons.append(doctor)
+        self.clear_logs_button = QPushButton("영상·이벤트 로그 비우기")
+        self.clear_logs_button.clicked.connect(self._clear_logs)
+        grid.addWidget(self.clear_logs_button, 3, 1)
+        self.action_buttons.append(self.clear_logs_button)
         self._update_optional_buttons(self._optional_states)
         return group
 
@@ -341,6 +346,21 @@ class ServerManagerWindow(QWidget):
             self.output.setPlainText,
             "서버 작업을 실행하고 있습니다…",
         )
+
+    def _clear_logs(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "영상·이벤트 로그 비우기",
+            (
+                "저장된 녹화 영상, 복구 영상, 스냅샷 이미지와 데이터베이스의 모든 "
+                "이벤트·녹화·인물식별 이력을 삭제하시겠습니까?\n\n"
+                "관리자 계정, 카메라 등록 정보, AI 모델, TLS 인증서는 그대로 유지됩니다."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self._service_action("clear-logs")
 
     def _doctor(self) -> None:
         deployment = self.deployment
