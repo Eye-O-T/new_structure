@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -120,7 +121,7 @@ class ServerManagerWindow(QWidget):
         self._update_optional_buttons(self._optional_states)
         return group
 
-    def _update_optional_buttons(self, states: dict[str, bool]) -> None:
+    def _update_optional_buttons(self, states: dict[str, Any]) -> None:
         self._optional_states = {
             "preprocessing": bool(states.get("preprocessing")),
             "analysis": bool(states.get("analysis")),
@@ -130,11 +131,14 @@ class ServerManagerWindow(QWidget):
             if self._optional_states["preprocessing"]
             else "감지·식별 켜기"
         )
-        self.analysis_button.setText(
-            "이벤트 분석 끄기"
-            if self._optional_states["analysis"]
-            else "이벤트 분석 켜기"
-        )
+        analysis_message = str(states.get("analysis_message") or "")
+        if self._optional_states["analysis"]:
+            self.analysis_button.setText("이벤트 분석 끄기")
+        elif analysis_message:
+            self.analysis_button.setText(f"이벤트 분석 켜기 · {analysis_message}")
+        else:
+            self.analysis_button.setText("이벤트 분석 켜기")
+        self.analysis_button.setToolTip(analysis_message)
 
     def _toggle_optional_service(self, service: str) -> None:
         state = "off" if self._optional_states.get(service) else "on"

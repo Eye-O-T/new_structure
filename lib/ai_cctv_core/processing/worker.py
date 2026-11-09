@@ -6,6 +6,7 @@ import time
 from pathlib import Path, PureWindowsPath
 
 from ai_cctv_core.contracts.objects import ObjectJobCompletion, ObjectObservation
+from .isolation import ProcessorStartupError
 from .plugins import ObjectProcessor
 
 
@@ -51,6 +52,7 @@ class ObjectWorker:
         self.last_outcome = None
         self._pending = None
         self._pending_until = 0.0
+        self._fatal_startup_error = None
 
     async def _report(self):
         # 응답 유실 시 같은 임대와 본문을 다시 보낸다. 새 작업을 미리 가져오지 않는다.
@@ -94,7 +96,12 @@ class ObjectWorker:
 
     async def once(self):
         if self._pending is not None:
-            return await self._report()
+            reported = await self._report()
+            if self._fatal_startup_error is not None:
+                self.ready = False
+                self.last_error = self._fatal_startup_error.code
+                raise self._fatal_startup_error
+            return reported
         if self.stalled:
             self.ready = False
             return False
@@ -129,6 +136,19 @@ class ObjectWorker:
             ):
                 # 인물 식별과 속성 분석의 책임을 분리해 분석 모델이 ID를 덮어쓰지 못하게 한다.
                 raise ValueError("An analyzer cannot assign identity")
+        except ProcessorStartupError as exc:
+            if self.stage == "analysis":
+                self.stalled = True
+                self._fatal_startup_error = exc
+            completion = ObjectJobCompletion(
+                lease_id=job["lease_id"],
+                outcome="retry",
+                metadata={
+                    "error_code": exc.code
+                    if self.stage == "analysis"
+                    else "ANALYZER_UNAVAILABLE"
+                },
+            )
         except TimeoutError:
             # 격리 자식을 종료한 실행기만 다시 사용한다. 직접 주입한 스레드 모델은 멈춘다.
             self.stalled = not getattr(self.plugin, "restartable", False)
@@ -154,7 +174,12 @@ class ObjectWorker:
             )
         self._pending = (job["id"], completion)
         self._pending_until = claimed_at + 290
-        return await self._report()
+        reported = await self._report()
+        if self._fatal_startup_error is not None:
+            self.ready = False
+            self.last_error = self._fatal_startup_error.code
+            raise self._fatal_startup_error
+        return reported
 
     # 대기열이 비었거나 통신이 실패하면 쉬었다가 재조회하며 준비 상태도 함께 갱신한다.
     async def run(self):
@@ -165,6 +190,8 @@ class ObjectWorker:
                 continue
             try:
                 worked = await self.once()
+            except ProcessorStartupError:
+                raise
             except Exception:
                 self.ready = False
                 self.last_error = "DATA_UNAVAILABLE"

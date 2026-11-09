@@ -15,10 +15,23 @@ MAX_MODEL_BYTES = 2 * 1024**3
 MAX_IDENTITY_MODEL_BYTES = 256 * 1024**2
 IDENTITY_MODEL_NAME = "osnet_x0_25_msmt17.onnx"
 DEFAULT_DETECTION_MODEL_NAME = "yolo11n.pt"
+ANALYSIS_MODEL_NAME = "par_serving_exp3.pt"
 IDENTITY_MODEL_CONTAINER_PATH = f"/models/{IDENTITY_MODEL_NAME}"
+ANALYSIS_MODEL_CONTAINER_PATH = f"/models/{ANALYSIS_MODEL_NAME}"
 IDENTITY_PLUGIN = "server.services.preprocessing.processors.identity:OsNetIdentity"
 GENERIC_IDENTITY_PLUGIN = (
     "server.services.preprocessing.processors.identity:LocalAppearanceIdentity"
+)
+ANALYSIS_PLUGIN = (
+    "server.services.analysis.processors.attributes:PersonAttributeAnalyzer"
+)
+ANALYSIS_PLUGIN_ALIASES = frozenset(
+    {
+        ANALYSIS_PLUGIN,
+        "server.services.analysis.processors:PersonAttributeAnalyzer",
+        "server.services.analysis.processors:LocalAppearanceAnalyzer",
+        "server.services.analysis.processors.appearance:LocalAppearanceAnalyzer",
+    }
 )
 
 
@@ -97,6 +110,44 @@ def deployed_identity_model(
     from pathlib import PurePosixPath
 
     selected = values.get("IDENTITY_MODEL_PATH") or IDENTITY_MODEL_CONTAINER_PATH
+    relative = PurePosixPath(selected)
+    if (
+        models_root is None
+        or not relative.is_absolute()
+        or relative.parts[:2] != ("/", "models")
+        or any(part in {".", ".."} for part in relative.parts)
+        or "\\" in selected
+        or len(relative.parts) < 3
+    ):
+        return None
+    target = (models_root / Path(*relative.parts[2:])).resolve()
+    return target if target.is_relative_to(models_root.resolve()) else None
+
+
+def validate_analysis_model(source_path: Path) -> Path:
+    """PAR 속성 분석 모델 번들(par_serving_exp3.pt)의 존재·크기·포맷을 검증한다."""
+    source = source_path.expanduser()
+    if not source.is_file():
+        raise ValueError(f"analysis model file does not exist or is not a file: {source}")
+    if source.suffix.lower() != ".pt":
+        raise ValueError("analysis model must be a PAR .pt bundle")
+    size = source.stat().st_size
+    if size == 0:
+        raise ValueError("analysis model file is empty")
+    if size > MAX_MODEL_BYTES:
+        raise ValueError("analysis model file exceeds the 2 GiB size limit")
+    if not is_par_bundle(source):
+        raise ValueError("analysis model must be a valid PAR attribute bundle")
+    return source.resolve()
+
+
+def deployed_analysis_model(
+    values: dict[str, str], models_root: Path | None
+) -> Path | None:
+    """PAR 속성 분석 모델의 컨테이너 경로를 호스트 models 안으로만 대응시킨다."""
+    from pathlib import PurePosixPath
+
+    selected = values.get("PAR_MODEL_PATH") or ANALYSIS_MODEL_CONTAINER_PATH
     relative = PurePosixPath(selected)
     if (
         models_root is None

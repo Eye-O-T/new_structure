@@ -17,6 +17,11 @@ Windows에서 Server Manager의 상태·진단·로그 화면을 사용합니다
 이벤트 발생, DB·저장소 경로를 각각 확인해야 합니다. HTTP health 응답 하나만으로 영상
 처리나 푸시 성공을 판단하지 않습니다.
 
+Preprocessing의 Docker `healthy`는 HTTP health 응답을 받았다는 뜻입니다. 관리 화면의
+시스템 진단에서 `preprocessing.status`와 카메라별
+`live_objects_stale`·`live_objects_observed_age_seconds`를 확인해 좌표가 영상에 표시될
+만큼 최신인지 함께 확인하십시오. 만료된 좌표는 재생 영상 위에 표시되지 않습니다.
+
 Pi에서는 다음을 사용합니다.
 
 ```bash

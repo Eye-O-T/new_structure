@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from server.setup.tools.generate_secrets import atomic_write, single_quote  # noqa: E402
 from server.deployment.validation import deployment_path, read_deployment_env  # noqa: E402
 from server.installer.models import (  # noqa: E402
+    ANALYSIS_PLUGIN,
     GENERIC_IDENTITY_PLUGIN,
     IDENTITY_PLUGIN,
     IDENTITY_MODEL_CONTAINER_PATH,
@@ -23,7 +24,7 @@ from server.installer.models import (  # noqa: E402
 PLUGIN_DEFAULTS = {
     "DETECTION_PLUGIN": "server.services.preprocessing.processors.detection.yolo:YoloTracker",
     "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
-    "ANALYSIS_PLUGIN": "server.services.analysis.processors:LocalAppearanceAnalyzer",
+    "ANALYSIS_PLUGIN": ANALYSIS_PLUGIN,
 }
 OLD_PLUGIN_DEFAULTS = {
     "DETECTION_PLUGIN": {
@@ -37,6 +38,8 @@ OLD_PLUGIN_DEFAULTS = {
         "server.services.object_processing.app.plugins:IdentityBlackBox",
     },
     "ANALYSIS_PLUGIN": {
+        "server.services.analysis.processors:LocalAppearanceAnalyzer",
+        "server.services.analysis.processors.appearance:LocalAppearanceAnalyzer",
         "server.services.analysis.processors:MetadataBlackBox",
         "app.plugins:MetadataBlackBox",
         "server.services.object_processing.app.plugins:MetadataBlackBox",

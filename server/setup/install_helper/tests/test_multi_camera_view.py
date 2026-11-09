@@ -124,6 +124,18 @@ class MultiCameraViewTests(unittest.TestCase):
                 "global_person_id": 42,
                 "occurred_at": "2026-11-06T06:00:03Z",
                 "time": "2026-11-06T06:00:03Z",
+                "metadata": {
+                    "analysis": {
+                        "status": "complete",
+                        "result": {
+                            "backend": "par_resnet34",
+                            "attributes": {
+                                "gender": {"value": "Male", "score": 0.71},
+                                "age": {"value": "16-30", "score": 0.52},
+                            },
+                        },
+                    }
+                },
             }
         )
         self.window.add_event(
@@ -154,7 +166,7 @@ class MultiCameraViewTests(unittest.TestCase):
             [
                 "pid:7 gpid:null 출현",
                 "pid:7/gpid:null 분석 완료",
-                "pid:7/gpid:42 분석 완료",
+                "pid:7/gpid:42 분석 완료 (성별: Male, 연령: 16-30)",
                 "pid:7 gpid:42 사라짐",
             ],
         )

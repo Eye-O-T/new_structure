@@ -213,6 +213,10 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
                 "live_objects_last_success_at": _timestamp(
                     worker.get("live_objects_last_success_at")
                 ),
+                "live_objects_observed_age_seconds": _number(
+                    worker.get("live_objects_observed_age_seconds")
+                ),
+                "live_objects_stale": worker.get("live_objects_stale") is True,
                 "live_objects_last_error_code": (
                     _state(
                         worker.get("live_objects_last_error_code"),

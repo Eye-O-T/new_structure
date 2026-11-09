@@ -3,20 +3,16 @@ import unittest
 from pathlib import Path
 
 
-try:
-    import numpy as np
-    import torch
+import numpy as np
+import torch
 
-    from server.services.analysis.processors.attributes import (
-        BUNDLE_FORMAT,
-        _load_bundle,
-        _select_multi_label,
-    )
-except ImportError:
-    np = None
-    torch = None
-    _load_bundle = None
-    _select_multi_label = None
+from ai_cctv_core.processing.plugins import load_factory
+from server.services.analysis.processors.attributes import (
+    BUNDLE_FORMAT,
+    PersonAttributeAnalyzer,
+    _load_bundle,
+    _select_multi_label,
+)
 
 
 def valid_bundle():
@@ -38,10 +34,6 @@ def valid_bundle():
 
 
 class AttributeBundleTests(unittest.TestCase):
-    def setUp(self):
-        if _load_bundle is None:
-            self.skipTest("analysis model dependencies are not installed")
-
     def save(self, bundle, directory):
         path = Path(directory) / "model.pt"
         torch.save(bundle, path)
@@ -82,6 +74,36 @@ class AttributeBundleTests(unittest.TestCase):
         )
 
         self.assertEqual(selected.tolist(), [False, True, False])
+
+    def test_processors_package_aliases_local_appearance_to_par_analyzer(self):
+        from server.services.analysis.processors import (
+            LocalAppearanceAnalyzer,
+            PersonAttributeAnalyzer,
+        )
+        from server.services.analysis.processors.appearance import (
+            LocalAppearanceAnalyzer as LegacyAppearanceAlias,
+        )
+
+        self.assertIs(LocalAppearanceAnalyzer, PersonAttributeAnalyzer)
+        self.assertIs(LegacyAppearanceAlias, PersonAttributeAnalyzer)
+
+    def test_all_configured_plugin_references_resolve_to_par_analyzer(self):
+        references = (
+            "server.services.analysis.processors.attributes:PersonAttributeAnalyzer",
+            "server.services.analysis.processors:PersonAttributeAnalyzer",
+            "server.services.analysis.processors:LocalAppearanceAnalyzer",
+            "server.services.analysis.processors.appearance:LocalAppearanceAnalyzer",
+        )
+
+        for reference in references:
+            with self.subTest(reference=reference):
+                self.assertIs(load_factory(reference), PersonAttributeAnalyzer)
+
+    def test_missing_model_file_raises_file_not_found_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing_par.pt"
+            with self.assertRaises(FileNotFoundError):
+                _load_bundle(missing)
 
 
 if __name__ == "__main__":

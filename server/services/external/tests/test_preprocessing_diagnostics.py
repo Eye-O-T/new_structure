@@ -49,6 +49,8 @@ class PreprocessingDiagnosticsTests(unittest.TestCase):
                         "last_error_stage": "process",
                         "last_error_elapsed_seconds": 0.125,
                         "last_error_at": "2026-04-06T00:00:01Z",
+                        "live_objects_observed_age_seconds": 4.2,
+                        "live_objects_stale": True,
                     }
                 },
             }
@@ -63,6 +65,8 @@ class PreprocessingDiagnosticsTests(unittest.TestCase):
         self.assertEqual(camera["last_error_stage"], "process")
         self.assertEqual(camera["last_error_elapsed_seconds"], 0.125)
         self.assertEqual(camera["last_error_at"], "2026-04-06T00:00:01+00:00")
+        self.assertEqual(camera["live_objects_observed_age_seconds"], 4.2)
+        self.assertTrue(camera["live_objects_stale"])
         self.assertNotIn("private_token", camera["timings"])
         self.assertNotIn("secret-bearing error text", repr(result))
 

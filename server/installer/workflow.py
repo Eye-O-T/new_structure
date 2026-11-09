@@ -19,6 +19,7 @@ from server.deployment.signature import (
     ContractSignatureMismatchError,
     check_existing_signature,
     ensure_signature_file,
+    migrate_analysis_runtime_signature,
 )
 from server.deployment.validation import deployment_path, read_deployment_env
 from server.installer.configuration import (
@@ -94,7 +95,12 @@ def inspect_installation(data_root: Path, server_dir: Path) -> Installation | No
                 check_existing_signature(root, server)
                 raise ValueError(_RECOVERY_MESSAGE)
             return None
-        current_signature = check_existing_signature(root, server)
+        try:
+            current_signature = check_existing_signature(root, server)
+        except ContractSignatureMismatchError:
+            if not migrate_analysis_runtime_signature(root, server):
+                raise
+            current_signature = check_existing_signature(root, server)
         values = read_deployment_env(env_file)
         required = ("CONFIG_FILE", "DATABASE_DIR", *_SECRET_KEYS)
         if not all(values.get(key) for key in required):

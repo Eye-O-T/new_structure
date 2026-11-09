@@ -34,6 +34,16 @@ SUPPORTED_BACKBONE = "resnet34"
 ATTRIBUTE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
+class AnalysisModelStartupError(RuntimeError):
+    """로그와 서비스 상태에 쓸 수 있는 제한된 모델 준비 오류다."""
+
+    def __init__(self, code: str):
+        if code not in {"ANALYSIS_MODEL_MISSING", "ANALYSIS_MODEL_INVALID"}:
+            raise ValueError("Unsupported analysis model startup error")
+        self.startup_error_code = code
+        super().__init__(code)
+
+
 class _MultiHeadNetwork(nn.Module):
     """공유 backbone + 속성별 선형 헤드. 번들의 라벨 구성대로 헤드를 만든다."""
 
@@ -175,20 +185,28 @@ class PersonAttributeAnalyzer:
     restartable = True
 
     def __init__(self):
-        bundle = _load_bundle(Path(os.environ.get("PAR_MODEL_PATH", DEFAULT_MODEL_PATH)))
-        self._attributes = bundle["attributes"]
-        self._multi_label = set(bundle["multi_label"])
-        self._display_rules = bundle["display_rules"]
-        self._version = bundle.get("model_version", "unknown")
-        self._network = _MultiHeadNetwork(self._attributes)
-        self._network.load_state_dict(bundle["state_dict"])
-        self._network.eval()
-        height, width = bundle["input_size"]
-        self._transform = transforms.Compose([
-            transforms.Resize((height, width)),
-            transforms.ToTensor(),
-            transforms.Normalize(bundle["normalize"]["mean"], bundle["normalize"]["std"]),
-        ])
+        model_path = Path(os.environ.get("PAR_MODEL_PATH", DEFAULT_MODEL_PATH))
+        if not model_path.is_file():
+            raise AnalysisModelStartupError("ANALYSIS_MODEL_MISSING")
+        try:
+            bundle = _load_bundle(model_path)
+            self._attributes = bundle["attributes"]
+            self._multi_label = set(bundle["multi_label"])
+            self._display_rules = bundle["display_rules"]
+            self._version = bundle.get("model_version", "unknown")
+            self._network = _MultiHeadNetwork(self._attributes)
+            self._network.load_state_dict(bundle["state_dict"])
+            self._network.eval()
+            height, width = bundle["input_size"]
+            self._transform = transforms.Compose([
+                transforms.Resize((height, width)),
+                transforms.ToTensor(),
+                transforms.Normalize(bundle["normalize"]["mean"], bundle["normalize"]["std"]),
+            ])
+        except FileNotFoundError as exc:
+            raise AnalysisModelStartupError("ANALYSIS_MODEL_MISSING") from exc
+        except Exception as exc:
+            raise AnalysisModelStartupError("ANALYSIS_MODEL_INVALID") from exc
 
     @torch.inference_mode()
     def process(self, job: dict, crop_path: Path) -> dict:

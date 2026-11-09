@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir '/opt/ai-cctv-core[processing]'
 COPY server/services/analysis/app /app/server/services/analysis/app
 COPY server/services/analysis/processors /app/server/services/analysis/processors
 USER 65532:65532
+RUN python -c "from ai_cctv_core.processing.plugins import load_factory; from server.services.analysis.processors.attributes import PersonAttributeAnalyzer; refs = ('server.services.analysis.processors.attributes:PersonAttributeAnalyzer', 'server.services.analysis.processors:PersonAttributeAnalyzer', 'server.services.analysis.processors:LocalAppearanceAnalyzer', 'server.services.analysis.processors.appearance:LocalAppearanceAnalyzer'); assert all(load_factory(ref) is PersonAttributeAnalyzer for ref in refs)"
 CMD ["uvicorn", "server.services.analysis.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # 개발 단계에만 테스트·검사 도구를 추가한다.

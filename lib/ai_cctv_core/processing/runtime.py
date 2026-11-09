@@ -2,16 +2,20 @@
 # identity와 analysis는 각자 권한이 제한된 토큰으로 자신의 작업만 요청한다.
 
 import asyncio
+import logging
 import math
 import os
+import signal
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 
-from .isolation import IsolatedProcessor
+from .isolation import IsolatedProcessor, ProcessorStartupError
 from .worker import ObjectWorker
+
+LOGGER = logging.getLogger("ai_cctv.processing")
 
 
 # 플러그인과 내부 HTTP 클라이언트를 준비하고 서비스 수명 동안 작업자를 실행한다.
@@ -60,6 +64,16 @@ async def running_worker(
             # 자식 종료에 필요한 짧은 여유를 바깥 watchdog에 포함한다.
             worker = ObjectWorker(stage, client, snapshots_root, plugin, timeout + 5)
             task = asyncio.create_task(worker.run(), name=f"{stage}-jobs")
+            if stage == "analysis":
+                def stop_after_model_reload_failure(failed_task):
+                    if failed_task.cancelled():
+                        return
+                    error = failed_task.exception()
+                    if isinstance(error, ProcessorStartupError):
+                        LOGGER.error("analysis worker stopped code=%s", error.code)
+                        os.kill(os.getpid(), signal.SIGTERM)
+
+                task.add_done_callback(stop_after_model_reload_failure)
             try:
                 yield worker
             finally:
@@ -69,6 +83,9 @@ async def running_worker(
                     await task
                 except asyncio.CancelledError:
                     pass
+                except ProcessorStartupError:
+                    if stage != "analysis":
+                        raise
     finally:
         await asyncio.to_thread(plugin.close)
 

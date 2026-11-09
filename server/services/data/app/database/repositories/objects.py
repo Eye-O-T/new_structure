@@ -4,13 +4,15 @@ import json
 import uuid
 from datetime import timedelta
 
-from ai_cctv_core.contracts.objects import ObjectJobCompletion
+from ai_cctv_core.contracts.objects import (
+    LIVE_OBJECTS_MAX_AGE_SECONDS,
+    ObjectJobCompletion,
+)
 from ai_cctv_core.time import format_utc, utc_now
 
 from .events import _insert_analysis_completed_event
 from .identity import conflicting_global_ids, note_track_observation, resolve_identity
 from .job_state import update_event_job_state
-
 
 class ObjectRepositoryMixin:
     def requeue_unconfigured_objects(self, stage):
@@ -62,7 +64,7 @@ class ObjectRepositoryMixin:
                 "SELECT l.* FROM live_objects l JOIN cameras c ON c.camera_id=l.camera_id WHERE l.camera_id=? AND c.enabled=1",
                 (camera_id,),
             ).fetchone()
-            # 3초보다 오래된 좌표는 화면에 남기지 않는다. 미래 시각도 비정상으로 보고 제외한다.
+            # 실시간 좌표의 보관 기한을 넘었거나 미래 시각인 값은 화면에 남기지 않는다.
             if row is None:
                 return {
                     "camera_id": camera_id,
@@ -74,7 +76,7 @@ class ObjectRepositoryMixin:
                 }
             observed_age = (now - parse_utc(row["observed_at"])).total_seconds()
             received_age = (now - parse_utc(row["received_at"])).total_seconds()
-            if not 0 <= observed_age <= 3:
+            if not 0 <= observed_age <= LIVE_OBJECTS_MAX_AGE_SECONDS:
                 return {
                     "camera_id": camera_id,
                     "objects": [],

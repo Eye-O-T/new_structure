@@ -162,7 +162,7 @@ class DetectionIsolationDiagnosticsTests(unittest.TestCase):
             self.assertIn("camera_id=timeout-camera", message)
             self.assertIn("error_code=DETECTION_MODEL_TIMEOUT", message)
             self.assertIn("error_type=TimeoutError", message)
-            self.assertIn("stage=load", message)
+            self.assertIn("stage=startup", message)
             self.assertRegex(message, r"elapsed_seconds=\d+\.\d{3}")
             self.assertNotIn("/secret/path", message)
 

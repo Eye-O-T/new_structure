@@ -117,6 +117,10 @@ def create_app(settings: Settings | None = None):
             or (worker.get("live_objects_consecutive_failures", 0) >= 3
                 and worker.get("detection_object_count") is not None)
             or worker.get("frame_stale")
+            or (
+                worker.get("live_objects_observed_age_seconds") is not None
+                and worker.get("live_objects_stale")
+            )
             for worker in state["workers"].values()
         )
         model_degraded = model_degraded or (

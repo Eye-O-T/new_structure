@@ -21,6 +21,7 @@ from ai_cctv_core.config import AppConfig, CameraBootstrap, write_config_atomic
 from server.password_policy import validate_admin_password
 
 from .models import (
+    ANALYSIS_PLUGIN,
     IDENTITY_PLUGIN,
     MAX_IDENTITY_MODEL_BYTES,
     install_local_model,
@@ -32,6 +33,7 @@ from .models import (
 from server.deployment.private_files import restrict_private_file
 from server.deployment.signature import write_contract_signature
 from server.deployment.validation import read_deployment_env
+
 
 SAFE_ENV = re.compile(r"^[A-Za-z0-9_./:@+-]+$")
 AI_CCTV_VERSION = "0.3.0"
@@ -608,6 +610,7 @@ def initialize(request: InstallRequest) -> InstallResult:
         "IDENTITY_MATCH_MARGIN": previous_environment.get(
             "IDENTITY_MATCH_MARGIN", "0.05"
         ),
+        "ANALYSIS_PLUGIN": ANALYSIS_PLUGIN,
         "LOGS_DIR": directories["logs"],
         "CERTS_DIR": directories["certs"],
         "PUBLIC_HTTP_PORT": request.public_http_port,

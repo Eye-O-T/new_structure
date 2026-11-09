@@ -115,6 +115,45 @@ def _open_live_stream(api, camera_id, av, *, stop_event=None):
                 yield stream
 
 
+def _extract_attribute_value(entry):
+    if isinstance(entry, dict):
+        value = entry.get("value")
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            text = str(value).strip()
+            return text or None
+        return None
+    if isinstance(entry, list):
+        parts = [
+            text
+            for item in entry
+            if (text := _extract_attribute_value(item))
+        ]
+        return ", ".join(parts) if parts else None
+    if isinstance(entry, (str, int, float)) and not isinstance(entry, bool):
+        text = str(entry).strip()
+        return text or None
+    return None
+
+
+def _extract_analysis_attribute(metadata, key):
+    if not isinstance(metadata, dict):
+        return None
+    analysis = metadata.get("analysis")
+    if not isinstance(analysis, dict):
+        return None
+    result = analysis.get("result")
+    if not isinstance(result, dict):
+        return None
+    attributes = result.get("attributes")
+    if isinstance(attributes, dict) and key in attributes:
+        value = _extract_attribute_value(attributes.get(key))
+        if value:
+            return value
+    if key == "age" and "age_group" in result:
+        return _extract_attribute_value(result.get("age_group"))
+    return _extract_attribute_value(result.get(key))
+
+
 def legacy_event(event):
     metadata = event.get("metadata")
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
@@ -129,6 +168,10 @@ def legacy_event(event):
         }.get(event["event_type"], event["event_type"]),
         "person_id": event.get("person_id"),
         "global_person_id": event.get("global_person_id"),
+        "gender": _extract_attribute_value(event.get("gender"))
+        or _extract_analysis_attribute(metadata, "gender"),
+        "age": _extract_attribute_value(event.get("age"))
+        or _extract_analysis_attribute(metadata, "age"),
         "confidence": event.get("confidence"),
         "time": event["occurred_at"],
         "occurred_at": event.get("occurred_at"),
@@ -167,9 +210,11 @@ def _upsert_retained_event(retained, item):
         for index, existing in enumerate(retained):
             if str(existing.get("id")) == str(event_id):
                 updated = dict(existing)
-                for key in ("person_id", "global_person_id"):
+                for key in ("person_id", "global_person_id", "gender", "age"):
                     if item.get(key) is not None:
                         updated[key] = item[key]
+                if isinstance(item.get("metadata"), dict) and item["metadata"]:
+                    updated["metadata"] = dict(item["metadata"])
                 retained[index] = updated
                 retained.sort(key=_event_sort_key, reverse=True)
                 del retained[30:]
@@ -187,18 +232,10 @@ def _refresh_retained_event_ids(retained, item):
     for existing in retained:
         if str(existing.get("id")) == str(event_id):
             changed = False
-            if (
-                item.get("person_id") is not None
-                and existing.get("person_id") != item.get("person_id")
-            ):
-                existing["person_id"] = item["person_id"]
-                changed = True
-            if (
-                item.get("global_person_id") is not None
-                and existing.get("global_person_id") != item.get("global_person_id")
-            ):
-                existing["global_person_id"] = item["global_person_id"]
-                changed = True
+            for key in ("person_id", "global_person_id", "gender", "age"):
+                if item.get(key) is not None and existing.get(key) != item.get(key):
+                    existing[key] = item[key]
+                    changed = True
             return existing, changed
     return None, False
 

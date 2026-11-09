@@ -27,6 +27,16 @@ from .validation import ALLOWED_SECRET_KEYS
 SIGNATURE_SCHEMA_VERSION = 1
 SIGNATURE_FILENAME = "contract-signature.json"
 PROJECT_SIGNATURE_FILENAME = ".contract-signature.json"
+# 이 변경은 PAR 기본값과 analysis 재시작 정책만 바꾸며 DB·도메인 계약은 바꾸지 않는다.
+_ANALYSIS_RUNTIME_UPGRADE_OLD_COMPOSE_SHA256 = (
+    "33a9c7a0c362d8e3ab4440a5b025021cabefe260600b25666369218757069b60"
+)
+_ANALYSIS_RUNTIME_UPGRADE_OLD_DEPLOYMENT_SHA256 = (
+    "925906fe4a887ccf3fa232f247edcfad5622fba0d291631ab8c2c290014db709"
+)
+_ANALYSIS_RUNTIME_UPGRADE_NEW_COMPOSE_SHA256 = (
+    "7efaa4a5f317fd85a29550a397971ea047371775efd0787523ea6953a12d0e45"
+)
 
 _COMPONENT_LABELS = {
     "db_schema": "데이터베이스 마이그레이션 스키마 (migrations/*.sql)",
@@ -362,6 +372,79 @@ def ensure_signature_file(
             except OSError:
                 pass
     return target
+
+
+def migrate_analysis_runtime_signature(
+    data_root: Path, server_dir: Path
+) -> bool:
+    """기존 DB 계약이 같은, 알려진 analysis Compose 변경만 서명 갱신한다."""
+
+    resolved_root = data_root.expanduser().resolve()
+    resolved_server = server_dir.expanduser().resolve()
+    compose_path = resolved_server / "compose.yml"
+    if not compose_path.is_file():
+        return False
+    compose_normalized = _normalize_text(compose_path.read_text(encoding="utf-8"))
+    if _sha256_bytes(compose_normalized.encode("utf-8")) != (
+        _ANALYSIS_RUNTIME_UPGRADE_NEW_COMPOSE_SHA256
+    ):
+        return False
+
+    stored = _read_signature_file(deployment_signature_path(resolved_root))
+    if stored is None:
+        candidate = _read_signature_file(project_signature_path(resolved_server))
+        if candidate is not None:
+            recorded_root = candidate.get("data_root")
+            if recorded_root is None or (
+                isinstance(recorded_root, str)
+                and Path(recorded_root).expanduser().resolve() == resolved_root
+            ):
+                stored = candidate
+    if not isinstance(stored, dict) or stored.get("schema_version") != SIGNATURE_SCHEMA_VERSION:
+        return False
+    recorded_root = stored.get("data_root")
+    if isinstance(recorded_root, str) and Path(recorded_root).expanduser().resolve() != resolved_root:
+        return False
+    components = stored.get("components")
+    if not isinstance(components, dict) or set(components) != {
+        "db_schema",
+        "deployment_contract",
+        "domain_contract",
+    }:
+        return False
+
+    current = compute_contract_signature(resolved_server)
+    if (
+        components.get("db_schema") != current.components["db_schema"]
+        or components.get("domain_contract") != current.components["domain_contract"]
+        or components.get("deployment_contract")
+        != _ANALYSIS_RUNTIME_UPGRADE_OLD_DEPLOYMENT_SHA256
+    ):
+        return False
+    old_compose_payload = {
+        "app_config_schema": AppConfig.model_json_schema(),
+        "allowed_secret_keys": _ALLOWED_SECRET_KEYS,
+        "required_deployment_env_keys": _REQUIRED_DEPLOYMENT_ENV_KEYS,
+        "compose_sha256": _ANALYSIS_RUNTIME_UPGRADE_OLD_COMPOSE_SHA256,
+    }
+    if _sha256_bytes(_canonical_json_bytes(old_compose_payload)) != (
+        _ANALYSIS_RUNTIME_UPGRADE_OLD_DEPLOYMENT_SHA256
+    ):
+        return False
+
+    old_combined = _sha256_bytes(
+        _canonical_json_bytes(
+            {
+                "schema_version": SIGNATURE_SCHEMA_VERSION,
+                "components": components,
+            }
+        )
+    )
+    if stored.get("combined_sha256") != old_combined:
+        return False
+
+    write_contract_signature(resolved_root, resolved_server, current)
+    return True
 
 
 def reset_incompatible_deployment(

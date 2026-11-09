@@ -104,8 +104,12 @@ def _configuration_checks(
             )
         )
         from server.installer.models import (
+            ANALYSIS_PLUGIN,
+            ANALYSIS_PLUGIN_ALIASES,
             IDENTITY_PLUGIN,
+            deployed_analysis_model,
             deployed_identity_model,
+            validate_analysis_model,
             validate_identity_model,
         )
 
@@ -126,6 +130,34 @@ def _configuration_checks(
                     str(identity)
                     if ready
                     else "OSNet requires a non-empty ONNX up to 256 MiB inside /models; run server/tools/prepare_osnet.py --output <MODELS_DIR>/osnet_x0_25_msmt17.onnx",
+                )
+            )
+        analysis_plugin = environment.get("ANALYSIS_PLUGIN") or ANALYSIS_PLUGIN
+        if analysis_plugin not in ANALYSIS_PLUGIN_ALIASES:
+            results.append(
+                Check(
+                    "ERROR",
+                    "Analysis plugin",
+                    "ANALYSIS_PLUGIN must select the PAR person attribute analyzer",
+                )
+            )
+        else:
+            analysis_model = deployed_analysis_model(environment, models_root)
+            analysis_ready = False
+            if analysis_model is not None:
+                try:
+                    validate_analysis_model(analysis_model)
+                except (OSError, ValueError):
+                    pass
+                else:
+                    analysis_ready = True
+            results.append(
+                Check(
+                    "OK" if analysis_ready else "WARN",
+                    "PAR attribute model",
+                    str(analysis_model)
+                    if analysis_ready
+                    else "PAR attribute bundle (par_serving_exp3.pt) is missing or invalid inside /models; configured analysis worker cannot load it",
                 )
             )
     except Exception as exc:

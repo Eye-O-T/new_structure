@@ -7,6 +7,23 @@ import time
 
 from .plugins import load_factory
 
+_STARTUP_ERROR_CODES = {
+    "ANALYSIS_MODEL_MISSING",
+    "ANALYSIS_MODEL_INVALID",
+    "ANALYSIS_MODEL_STARTUP_TIMEOUT",
+    "ANALYSIS_STARTUP_FAILED",
+}
+
+
+class ProcessorStartupError(RuntimeError):
+    """격리 자식에서 안전한 준비 오류 코드만 부모로 전달한다."""
+
+    def __init__(self, code: str):
+        if code not in _STARTUP_ERROR_CODES:
+            code = "ANALYSIS_STARTUP_FAILED"
+        self.code = code
+        super().__init__(code)
+
 
 def _model_process(connection, reference):
     """자식은 이미지 읽기·모델 실행만 맡고 작업 임대와 완료 보고는 부모가 담당한다."""
@@ -35,9 +52,12 @@ def _model_process(connection, reference):
             connection.send(response)
     except (EOFError, BrokenPipeError):
         pass
-    except Exception:
+    except Exception as exc:
+        code = getattr(exc, "startup_error_code", "ANALYSIS_STARTUP_FAILED")
+        if code not in _STARTUP_ERROR_CODES:
+            code = "ANALYSIS_STARTUP_FAILED"
         try:
-            connection.send({"kind": "startup_error"})
+            connection.send({"kind": "startup_error", "code": code})
         except (EOFError, BrokenPipeError, OSError):
             pass
     finally:
@@ -123,7 +143,7 @@ class IsolatedProcessor:
                     break
             ready = parent.recv()
             if ready.get("kind") != "ready":
-                raise RuntimeError("MODEL_STARTUP_FAILED")
+                raise ProcessorStartupError(ready.get("code", "ANALYSIS_STARTUP_FAILED"))
             self.runtime = ready.get("runtime")
             if self._closed.is_set():
                 raise RuntimeError("MODEL_PROCESS_CLOSED")
@@ -139,7 +159,20 @@ class IsolatedProcessor:
                 raise RuntimeError("MODEL_PROCESS_CLOSED")
             try:
                 if self._process is None:
-                    self._start(min(self.startup_timeout_seconds, self.timeout_seconds))
+                    try:
+                        self._start(
+                            min(self.startup_timeout_seconds, self.timeout_seconds)
+                        )
+                    except ProcessorStartupError:
+                        raise
+                    except TimeoutError as exc:
+                        raise ProcessorStartupError(
+                            "ANALYSIS_MODEL_STARTUP_TIMEOUT"
+                        ) from exc
+                    except Exception as exc:
+                        raise ProcessorStartupError(
+                            "ANALYSIS_STARTUP_FAILED"
+                        ) from exc
                 connection = self._connection
                 connection.send((job, crop_path))
                 if not connection.poll(max(0, deadline - time.monotonic())):

@@ -80,7 +80,7 @@ python server/tools/prepare_osnet.py
 
 identity 초기화·호출은 별도 `spawn` 프로세스에서 실행한다. `OBJECT_MODEL_TIMEOUT_SECONDS` 기본 120초(`0 < 값 ≤ 240`), `OBJECT_STARTUP_TIMEOUT_SECONDS` 기본 30초(`0 < 값 ≤ 120`)다. 제한을 넘은 자식은 종료·재생성하고 초기화 실패는 30초 후 재시도한다. 완료 전송 실패 시 같은 lease·결과를 보관해 재추론 없이 다시 전송한다. 감지 카메라와 identity 실행은 독립적으로 복구한다.
 
-RTSP 열기·읽기에는 각각 `RTSP_TIMEOUT_SECONDS` 기본 5초, 최대 30초를 적용하고 실패 시 캡처를 해제해 1~15초 간격으로 재연결한다. 감지 모델은 카메라별 별도 `spawn` 자식에서 실행한다. `DETECTION_STARTUP_TIMEOUT_SECONDS=30`(최대 120초), `DETECTION_MODEL_TIMEOUT_SECONDS=10`(최대 60초)을 넘기면 자식을 종료하고 `MODEL_RETRY_SECONDS` 기본 30초 후 새 추적 세션으로 재준비한다. 모델 오류에도 영상 연결 감시는 계속한다. `model_timeouts`·`last_inference_seconds`로 시간 초과와 처리시간을 확인한다. 감독자의 종료 대기는 `DETECTION_SHUTDOWN_SECONDS` 기본 15초·최대 60초이며 Compose 종료 유예는 identity 정리 여유를 포함한 75초다. `PREPROCESSING_MEMORY_LIMIT` 기본 4g는 선택한 모델·카메라 수에 맞게 조정한다.
+RTSP 열기·읽기에는 각각 `RTSP_TIMEOUT_SECONDS` 기본 5초, 최대 30초를 적용하고 실패 시 캡처를 해제해 1~15초 간격으로 재연결한다. 감지 모델은 카메라별 별도 `spawn` 자식에서 실행한다. 모델 로드에는 `DETECTION_STARTUP_TIMEOUT_SECONDS=30`(최대 120초)을 적용한다. CUDA·추적기의 지연 초기화가 포함되는 최초 추론에는 startup과 model 제한 중 큰 값을 적용하고, 성공 이후 추론에는 `DETECTION_MODEL_TIMEOUT_SECONDS=10`(최대 60초)을 적용한다. 제한을 넘기면 자식을 종료하고 `MODEL_RETRY_SECONDS` 기본 30초 후 새 추적 세션으로 재준비한다. 모델 오류에도 영상 연결 감시는 계속한다. `model_timeouts`·`last_inference_seconds`로 시간 초과와 처리시간을 확인한다. 감독자의 종료 대기는 `DETECTION_SHUTDOWN_SECONDS` 기본 15초·최대 60초이며 Compose 종료 유예는 identity 정리 여유를 포함한 75초다. `PREPROCESSING_MEMORY_LIMIT` 기본 4g는 선택한 모델·카메라 수에 맞게 조정한다.
 
 등장 이미지 저장을 끝낸 후 이벤트를 `SNAPSHOTS_ROOT/.event-outbox.sqlite3`에 먼저 기록한다. `source_event_id`를 재전송에도 유지하고 Data가 `(camera_id, source_event_id)`로 이벤트·작업·푸시 중복을 막는다. 큐 한도는 `EVENT_OUTBOX_MAX_PENDING=10000`건과 `EVENT_OUTBOX_MAX_BYTES=67108864` JSON 바이트다. 실제 SQLite 파일은 페이지·WAL 때문에 더 클 수 있다. 400·404·413·422 응답은 거부 항목으로 보관하고 다음 항목을 진행하며, 그 밖의 전송 실패는 0.5~30초 간격으로 재시도한다. 큐 한도와 디스크 장애까지 포함한 무제한 무손실 보장은 제공하지 않는다.
 
@@ -105,3 +105,5 @@ docker compose --env-file server/.env -f server/compose.yml exec preprocessing p
 
 
 `/internal/v1/status` reports the recent 100-sample p50/p95 and last timings per camera: capture read, capture-to-inference wait, model, IPC, postprocessing, image/event persistence, Data PUT, and SQLite lock/transaction. `capture_frames_replaced` counts frames skipped while inference was busy.
+
+`live_objects_observed_age_seconds` is the age of the observation in the last successful coordinate update, advanced with a monotonic clock. `live_objects_stale` becomes true after 3 seconds or for a future observation. A fresh empty result is a successful update. `/health/ready` returns HTTP 200 when Data is ready, but its JSON status becomes `degraded` when active detection is not delivering fresh coordinates. The External system status exposes the age and stale flag per camera.

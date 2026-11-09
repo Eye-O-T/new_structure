@@ -20,9 +20,40 @@ from PyQt5.QtCore import QSettings, Qt
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont
 from .settings_window import SettingsWindow
 from .resource_monitor_window import ResourceMonitorWindow
-from .video_worker import VideoWorker
+from .video_worker import (
+    VideoWorker,
+    _extract_analysis_attribute,
+    _extract_attribute_value,
+)
 from .display_time import format_kst
 from .overlay import format_person_label, overlay_items
+
+
+def _extract_event_attribute(event, key):
+    if not isinstance(event, dict):
+        return None
+    direct = _extract_attribute_value(event.get(key))
+    if direct:
+        return direct
+    return _extract_analysis_attribute(event.get("metadata"), key)
+
+
+def format_analysis_completed_description(event):
+    pid = event.get("person_id")
+    gpid = event.get("global_person_id")
+    analysis_identity = (
+        f"pid:{pid if pid is not None else '-'}/"
+        f"gpid:{gpid if gpid is not None else 'null'}"
+    )
+    summary_parts = []
+    gender = _extract_event_attribute(event, "gender")
+    age = _extract_event_attribute(event, "age")
+    if gender:
+        summary_parts.append(f"성별: {gender}")
+    if age:
+        summary_parts.append(f"연령: {age}")
+    suffix = f" ({', '.join(summary_parts)})" if summary_parts else ""
+    return f"{analysis_identity} 분석 완료{suffix}"
 
 
 class CCTVMainWindow(QMainWindow):
@@ -546,13 +577,7 @@ class CCTVMainWindow(QMainWindow):
             desc = f"{identity} 사라짐"
             color = "#f97316"
         elif event_type == "analysis_completed":
-            pid = event.get("person_id")
-            gpid = event.get("global_person_id")
-            analysis_identity = (
-                f"pid:{pid if pid is not None else '-'}/"
-                f"gpid:{gpid if gpid is not None else 'null'}"
-            )
-            desc = f"{analysis_identity} 분석 완료"
+            desc = format_analysis_completed_description(event)
             color = "#38bdf8"
         elif event_type == "error":
             desc = event.get("message", "오류 발생")

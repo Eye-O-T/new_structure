@@ -350,7 +350,16 @@ class EventPollingTests(unittest.TestCase):
                     "appearance_occurred_at": "2026-11-06T06:00:00Z",
                     "analysis_job_id": 12,
                     "tracking_session_id": "a" * 32,
-                    "analysis": {"status": "complete", "result": {"backend": "local_appearance"}},
+                    "analysis": {
+                        "status": "complete",
+                        "result": {
+                            "backend": "par_resnet34",
+                            "attributes": {
+                                "gender": {"value": "Male", "score": 0.71},
+                                "age": {"value": "16-30", "score": 0.52},
+                            },
+                        },
+                    },
                 },
             }
         )
@@ -358,6 +367,8 @@ class EventPollingTests(unittest.TestCase):
         self.assertEqual(result["event_type"], "analysis_completed")
         self.assertEqual(result["person_id"], "7")
         self.assertEqual(result["global_person_id"], 42)
+        self.assertEqual(result["gender"], "Male")
+        self.assertEqual(result["age"], "16-30")
         self.assertEqual(result["appearance_event_id"], 40)
         self.assertEqual(result["appearance_occurred_at"], "2026-11-06T06:00:00Z")
         self.assertEqual(result["analysis_job_id"], 12)

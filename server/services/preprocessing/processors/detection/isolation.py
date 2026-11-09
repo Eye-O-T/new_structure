@@ -198,6 +198,9 @@ class IsolatedDetector:
         stop_event=None,
     ):
         self.timeout_seconds = timeout_seconds
+        # YOLO initializes CUDA and tracking lazily on the first real frame.
+        self._first_inference_timeout = max(timeout_seconds, startup_timeout_seconds)
+        self._first_inference = True
         self._stop = stop_event if stop_event is not None else threading.Event()
         self._lifecycle = threading.RLock()
         self._call_lock = threading.Lock()
@@ -327,8 +330,13 @@ class IsolatedDetector:
                     self._record_error(err)
                     raise err
                 started = time.monotonic()
+                timeout = (
+                    self._first_inference_timeout
+                    if operation == "process" and self._first_inference
+                    else self.timeout_seconds
+                )
                 result = self._exchange(
-                    self.timeout_seconds, (operation, frame), stage=operation
+                    timeout, (operation, frame), stage=operation
                 )
                 if result.get("kind") != "result":
                     default_code = (
@@ -350,6 +358,7 @@ class IsolatedDetector:
                     self._record_error(err)
                     raise err
                 if operation == "process":
+                    self._first_inference = False
                     self.last_model_seconds = result.get("model_seconds")
                     self.last_ipc_seconds = max(
                         0, time.monotonic() - started - (self.last_model_seconds or 0)

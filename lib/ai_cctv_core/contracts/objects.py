@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+LIVE_OBJECTS_MAX_AGE_SECONDS = 3
+
 
 class ObjectObservation(BaseModel):
     # 한 번 관측한 사람의 분석 입력이다. 재접속마다 세션 ID를 바꾸므로,

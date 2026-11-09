@@ -22,7 +22,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from .legacy_gui import CCTVMainWindow as ReferenceWindow
+from .legacy_gui import (
+    CCTVMainWindow as ReferenceWindow,
+    format_analysis_completed_description,
+)
 from .api import DesktopApi, safe_error
 from .camera_view import CameraView
 from .display_time import format_kst
@@ -788,10 +791,11 @@ class CCTVMainWindow(ReferenceWindow):
         if event_id is not None:
             for existing in self._camera_events.get(camera_id, []):
                 if str(existing.get("id")) == str(event_id):
-                    if event.get("person_id") is not None:
-                        existing["person_id"] = event["person_id"]
-                    if event.get("global_person_id") is not None:
-                        existing["global_person_id"] = event["global_person_id"]
+                    for key in ("person_id", "global_person_id", "gender", "age"):
+                        if event.get(key) is not None:
+                            existing[key] = event[key]
+                    if isinstance(event.get("metadata"), dict) and event["metadata"]:
+                        existing["metadata"] = dict(event["metadata"])
                     if camera_id == self._selected_camera_id:
                         self._render_selected_summary()
                     return
@@ -892,6 +896,10 @@ class CCTVMainWindow(ReferenceWindow):
                 event.get("occurred_at"),
                 event.get("person_id"),
                 event.get("global_person_id"),
+                format_analysis_completed_description(event)
+                if (event.get("type") or event.get("event_type"))
+                == "analysis_completed"
+                else None,
                 event.get("message"),
             )
             for event in events

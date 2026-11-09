@@ -212,7 +212,12 @@ class ComposeAdapter:
         return [*command, *arguments]
 
     # 서비스를 띄우기 전에 설정·모델·인증서가 실제 파일인지 확인한다. 실행 성공까지 보장하는 검사는 아니다.
-    def deployment_prerequisites(self, *, require_ai_models: bool = False) -> list[Prerequisite]:
+    def deployment_prerequisites(
+        self,
+        *,
+        require_ai_models: bool = False,
+        require_analysis_model: bool = False,
+    ) -> list[Prerequisite]:
         results = installation_prerequisites(self.server_dir)
         if not self.env_file.is_file():
             results.append(
@@ -277,8 +282,12 @@ class ComposeAdapter:
                 except (OSError, ValueError):
                     required_files["Inference model"] = None
             from server.installer.models import (
+                ANALYSIS_PLUGIN,
+                ANALYSIS_PLUGIN_ALIASES,
                 IDENTITY_PLUGIN,
+                deployed_analysis_model,
                 deployed_identity_model,
+                validate_analysis_model,
                 validate_identity_model,
             )
 
@@ -286,8 +295,23 @@ class ComposeAdapter:
                 required_files["OSNet identity model"] = deployed_identity_model(
                     values, models_root
                 )
+            if require_analysis_model:
+                plugin = values.get("ANALYSIS_PLUGIN") or ANALYSIS_PLUGIN
+                if plugin in ANALYSIS_PLUGIN_ALIASES:
+                    required_files["PAR attribute model"] = deployed_analysis_model(
+                        values, models_root
+                    )
+                else:
+                    results.append(
+                        Prerequisite(
+                            False,
+                            "Analysis plugin",
+                            "ANALYSIS_PLUGIN must select the PAR person attribute analyzer",
+                        )
+                    )
         else:
             validate_identity_model = None
+            validate_analysis_model = None
         certificate_root = deployment_path("CERTS_DIR")
         if values.get("PUBLIC_SCHEME", "https").lower() == "https":
             required_files["TLS certificate"] = (
@@ -301,6 +325,11 @@ class ComposeAdapter:
             if present and name == "OSNet identity model" and validate_identity_model:
                 try:
                     validate_identity_model(path)
+                except (OSError, ValueError):
+                    present = False
+            if present and name == "PAR attribute model" and validate_analysis_model:
+                try:
+                    validate_analysis_model(path)
                 except (OSError, ValueError):
                     present = False
             results.append(

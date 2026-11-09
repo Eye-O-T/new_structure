@@ -7,6 +7,9 @@ import logging
 import time
 from datetime import datetime, timezone
 
+from ai_cctv_core.contracts.objects import LIVE_OBJECTS_MAX_AGE_SECONDS
+from ai_cctv_core.time import parse_utc, utc_now
+
 LOGGER = logging.getLogger("ai_cctv.preprocessing")
 
 from .performance import TimingWindow
@@ -22,6 +25,8 @@ class LivePublisher:
         self.stopped = threading.Event()
         self._status_lock = threading.Lock()
         self._last_success_at = None
+        self._last_success_observed_age_seconds = None
+        self._last_success_monotonic = None
         self._last_error_code = None
         self._consecutive_failures = 0
         self._reported_error_code = None
@@ -71,20 +76,26 @@ class LivePublisher:
                     self._reported_error_code = code
                 if should_log:
                     LOGGER.warning(
-                        "live object delivery failed",
-                        extra={"camera_id": self.camera_id, "error_code": code},
+                        "live object delivery failed: camera=%s error_code=%s elapsed_seconds=%.3f",
+                        self.camera_id,
+                        code,
+                        time.monotonic() - started,
                     )
             else:
                 with self._status_lock:
                     recovered = self._consecutive_failures > 0
                     self._last_success_at = datetime.now(timezone.utc).isoformat()
+                    self._last_success_observed_age_seconds = (
+                        utc_now() - parse_utc(payload["observed_at"])
+                    ).total_seconds()
+                    self._last_success_monotonic = time.monotonic()
                     self._last_error_code = None
                     self._consecutive_failures = 0
                     self._reported_error_code = None
                 if recovered:
                     LOGGER.info(
-                        "live object delivery recovered",
-                        extra={"camera_id": self.camera_id},
+                        "live object delivery recovered: camera=%s",
+                        self.camera_id,
                     )
             finally:
                 self._timings.record("data_put_seconds", time.monotonic() - started)
@@ -104,8 +115,19 @@ class LivePublisher:
 
     def status(self):
         with self._status_lock:
+            observed_age = self._last_success_observed_age_seconds
+            if observed_age is not None:
+                observed_age += max(
+                    0, time.monotonic() - self._last_success_monotonic
+                )
             return {
                 "last_success_at": self._last_success_at,
+                "observed_age_seconds": observed_age,
+                "stale": observed_age is not None
+                and (
+                    observed_age < 0
+                    or observed_age > LIVE_OBJECTS_MAX_AGE_SECONDS
+                ),
                 "last_error_code": self._last_error_code,
                 "consecutive_failures": self._consecutive_failures,
                 "timings": self._timings.snapshot(),

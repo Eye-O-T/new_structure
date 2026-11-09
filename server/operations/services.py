@@ -69,6 +69,13 @@ _STATES = {
     "dead": "실행 오류",
 }
 _HEALTH = {"healthy": "정상", "unhealthy": "점검 필요", "starting": "준비 중"}
+_ANALYSIS_STARTUP_LABELS = {
+    "ANALYSIS_MODEL_MISSING": "모델 파일 없음",
+    "ANALYSIS_MODEL_INVALID": "모델을 읽을 수 없음",
+    "ANALYSIS_MODEL_STARTUP_TIMEOUT": "모델 준비 시간 초과",
+    "ANALYSIS_PLUGIN_INVALID": "PAR 분석기 설정 오류",
+    "ANALYSIS_STARTUP_FAILED": "분석기 초기화 실패",
+}
 
 
 def _host_path(value: str) -> str:
@@ -394,10 +401,10 @@ def _compose_ps_rows(adapter: ComposeAdapter, deadline: float) -> list[dict[str,
 def get_optional_service_states(
     server_dir: Path,
     installed: DeploymentContext,
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     """선택한 배포의 preprocessing·analysis 컨테이너가 실행 중인지 반환한다."""
 
-    states = {"preprocessing": False, "analysis": False}
+    states: dict[str, Any] = {"preprocessing": False, "analysis": False}
     deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS
     adapter = ComposeAdapter(server_dir, installed.env_file)
     try:
@@ -408,11 +415,14 @@ def get_optional_service_states(
         return states
     for row in rows:
         service = str(row.get("Service", ""))
-        if service in states and str(row.get("State", "")).lower() in {
+        raw_state = str(row.get("State", "")).lower()
+        if service in {"preprocessing", "analysis"} and raw_state in {
             "running",
             "restarting",
         }:
             states[service] = True
+        if service == "analysis" and raw_state in {"exited", "restarting", "dead"}:
+            states["analysis_message"] = _analysis_stopped_status(adapter, deadline)
     return states
 
 
@@ -423,12 +433,40 @@ def _status(adapter: ComposeAdapter, deadline: float) -> str:
         return "실행 중이거나 중지된 서버 컨테이너가 없습니다. ‘서버 시작’을 눌러 시작하세요."
     lines = ["선택한 저장 위치의 서버 상태입니다."]
     for row in rows:
-        name = _SERVICES.get(str(row.get("Service", "")), "알 수 없는 서비스")
-        state = _STATES.get(str(row.get("State", "")).lower(), "상태 확인 필요")
+        service = str(row.get("Service", ""))
+        raw_state = str(row.get("State", "")).lower()
+        name = _SERVICES.get(service, "알 수 없는 서비스")
+        state = _STATES.get(raw_state, "상태 확인 필요")
+        if service == "analysis" and raw_state in {"exited", "restarting", "dead"}:
+            state = _analysis_stopped_status(adapter, deadline) or state
         health = _HEALTH.get(str(row.get("Health", "")).lower(), "")
         lines.append(f"• {name}: {state}" + (f" / {health}" if health else ""))
     lines.append("서비스 실행 상태이며 실제 카메라 영상·감지·녹화는 별도로 확인하세요.")
     return "\n".join(lines)
+
+
+def _analysis_stopped_status(adapter: ComposeAdapter, deadline: float) -> str | None:
+    """컨테이너 로그에서 허용한 분석 준비 오류 코드만 관제용 상태로 바꾼다."""
+
+    try:
+        output = _run(
+            _command(adapter, "logs", "--tail", "100", "analysis"),
+            directory=adapter.server_dir,
+            deadline=deadline,
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return None
+    for code, label in _ANALYSIS_STARTUP_LABELS.items():
+        if code in output:
+            return f"{label} · 분석 중지"
+    return None
+
+
+def _analysis_startup_failure_message(output: str) -> str | None:
+    for code, label in _ANALYSIS_STARTUP_LABELS.items():
+        if code in output:
+            return f"이벤트 분석을 시작하지 못했습니다: {label}. 모델과 설정을 확인하세요."
+    return None
 
 
 def run_service_action(
@@ -469,13 +507,21 @@ def run_service_action(
         service, operation = action.rsplit("-", 1)
         if operation == "on" and service in {"preprocessing", "analysis"}:
             failures = [
-                item for item in adapter.deployment_prerequisites(require_ai_models=True)
+                item
+                for item in adapter.deployment_prerequisites(
+                    require_ai_models=True,
+                    require_analysis_model=(service == "analysis"),
+                )
                 if not item.ok
             ]
             if failures:
+                header = (
+                    "이벤트 분석을 켜려면 필요한 탐지 모델·OSNet 모델·PAR 속성 분석 모델(par_serving_exp3.pt) 파일을 준비해야 합니다.\n"
+                    if service == "analysis"
+                    else "AI 처리를 켜려면 필요한 탐지 모델과 OSNet 모델 파일을 준비해야 합니다.\n"
+                )
                 raise RuntimeError(
-                    "AI 처리를 켜려면 필요한 탐지 모델과 OSNet 모델 파일을 준비해야 합니다.\n"
-                    + "\n".join(item.message for item in failures)
+                    header + "\n".join(item.message for item in failures)
                 )
         progress(f"{service} {'시작' if operation == 'on' else '중지'} 중…")
         commands = []
@@ -489,12 +535,22 @@ def run_service_action(
             else ("stop", service)
         )
         for arguments in commands:
-            _run(
-                _command(adapter, *arguments),
-                directory=adapter.server_dir,
-                deadline=deadline,
-                capture=False,
-            )
+            try:
+                _run(
+                    _command(adapter, *arguments),
+                    directory=adapter.server_dir,
+                    deadline=deadline,
+                    capture=False,
+                )
+            except RuntimeError as exc:
+                message = (
+                    _analysis_startup_failure_message(str(exc))
+                    if service == "analysis"
+                    else None
+                )
+                if message:
+                    raise RuntimeError(message) from None
+                raise
         return f"{service} {'활성화' if operation == 'on' else '비활성화'} 요청을 적용했습니다. 상태를 확인하세요."
     if action == "start":
         progress("모델·인증서와 Docker 실행 준비를 확인하고 있습니다…")
