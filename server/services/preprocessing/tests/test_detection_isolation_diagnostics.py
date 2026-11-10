@@ -33,6 +33,70 @@ class _FakePipeConnection:
 
 
 class DetectionIsolationDiagnosticsTests(unittest.TestCase):
+    def test_child_reports_ready_only_after_warmup(self):
+        calls = []
+
+        class Tracker:
+            def warmup(self):
+                calls.append("warmup")
+
+            def reset(self):
+                pass
+
+            def process(self, _frame):
+                pass
+
+        class Connection(_FakePipeConnection):
+            def send(self, payload):
+                calls.append(payload["kind"])
+                super().send(payload)
+
+        conn = Connection([])
+        with patch(
+            "server.services.preprocessing.processors.detection.isolation.load_factory",
+            return_value=lambda *_args: Tracker(),
+        ):
+            _serve(conn, "pkg:Tracker", ("/model.pt", 0.35, "cpu"))
+        self.assertEqual(calls, ["warmup", "ready"])
+
+    def test_child_reports_warmup_failure_as_startup_failure(self):
+        class Tracker:
+            def warmup(self):
+                raise RuntimeError("warmup failed")
+
+            def reset(self):
+                pass
+
+            def process(self, _frame):
+                pass
+
+        conn = _FakePipeConnection([])
+        with patch(
+            "server.services.preprocessing.processors.detection.isolation.load_factory",
+            return_value=lambda *_args: Tracker(),
+        ):
+            _serve(conn, "pkg:Tracker", ("/model.pt", 0.35, "cpu"))
+        self.assertEqual(conn.sent[0]["kind"], "startup_error")
+
+    def test_cuda_warmup_memory_failure_is_reported(self):
+        class Tracker:
+            def warmup(self):
+                raise RuntimeError("CUDA out of memory")
+
+            def reset(self):
+                pass
+
+            def process(self, _frame):
+                pass
+
+        conn = _FakePipeConnection([])
+        with patch(
+            "server.services.preprocessing.processors.detection.isolation.load_factory",
+            return_value=lambda *_args: Tracker(),
+        ):
+            _serve(conn, "pkg:Tracker", ("/model.pt", 0.35, "cuda:0"))
+        self.assertEqual(conn.sent[0]["error_code"], "GPU_OUT_OF_MEMORY")
+
     def _make_settings(self, snapshots_root: Path) -> Settings:
         return Settings(
             data_service_url="http://data:8000",

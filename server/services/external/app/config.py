@@ -117,6 +117,7 @@ class Settings:
     media_read_password: str
     media_control_url: str = "http://nginx:8080/internal/media"
     preprocessing_health_url: str = "http://preprocessing:8000/health/ready"
+    analysis_health_url: str = "http://analysis:8000/health/ready"
     system_probe_timeout_seconds: float = 3.0
     jwt_issuer: str = "ai-cctv-external"
     jwt_audience: str = "ai-cctv"
@@ -174,6 +175,7 @@ class Settings:
         _validate_http_url("DATA_HEALTH_URL", self.data_health_url)
         _validate_http_url("MEDIA_CONTROL_URL", self.media_control_url)
         _validate_http_url("PREPROCESSING_HEALTH_URL", self.preprocessing_health_url)
+        _validate_http_url("ANALYSIS_HEALTH_URL", self.analysis_health_url)
         if not 0 < self.system_probe_timeout_seconds <= 10:
             raise RuntimeError("SYSTEM_PROBE_TIMEOUT_SECONDS must be in (0, 10]")
         if len(self.internal_token) < 16:
@@ -278,6 +280,10 @@ class Settings:
                 os.getenv(
                     "PREPROCESSING_HEALTH_URL", "http://preprocessing:8000/health/ready"
                 ),
+            ),
+            analysis_health_url=_validate_http_url(
+                "ANALYSIS_HEALTH_URL",
+                os.getenv("ANALYSIS_HEALTH_URL", "http://analysis:8000/health/ready"),
             ),
             system_probe_timeout_seconds=_read_positive_float(
                 "SYSTEM_PROBE_TIMEOUT_SECONDS", 3.0

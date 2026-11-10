@@ -38,7 +38,10 @@ class AnalysisModelStartupError(RuntimeError):
     """로그와 서비스 상태에 쓸 수 있는 제한된 모델 준비 오류다."""
 
     def __init__(self, code: str):
-        if code not in {"ANALYSIS_MODEL_MISSING", "ANALYSIS_MODEL_INVALID"}:
+        if code not in {
+            "ANALYSIS_MODEL_MISSING", "ANALYSIS_MODEL_INVALID",
+            "ANALYSIS_DEVICE_UNAVAILABLE", "ANALYSIS_DEVICE_EXECUTION_FAILED",
+        }:
             raise ValueError("Unsupported analysis model startup error")
         self.startup_error_code = code
         super().__init__(code)
@@ -185,6 +188,20 @@ class PersonAttributeAnalyzer:
     restartable = True
 
     def __init__(self):
+        gpu_value = os.getenv("PREPROCESSING_GPU", "false").strip().lower()
+        if gpu_value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise AnalysisModelStartupError("ANALYSIS_DEVICE_UNAVAILABLE")
+        gpu_requested = gpu_value in {"1", "true", "yes", "on"}
+        requested = os.getenv("ANALYSIS_DEVICE", "auto").strip().lower()
+        if re.fullmatch(r"(?:auto|cpu|cuda(?::[0-9]+)?)", requested) is None:
+            raise AnalysisModelStartupError("ANALYSIS_DEVICE_UNAVAILABLE")
+        if requested.startswith("cuda") and not gpu_requested:
+            raise AnalysisModelStartupError("ANALYSIS_DEVICE_UNAVAILABLE")
+        self.requested_device = requested
+        self._device = torch.device(
+            ("cuda:0" if gpu_requested else "cpu") if requested == "auto"
+            else ("cuda:0" if requested == "cuda" else requested)
+        )
         model_path = Path(os.environ.get("PAR_MODEL_PATH", DEFAULT_MODEL_PATH))
         if not model_path.is_file():
             raise AnalysisModelStartupError("ANALYSIS_MODEL_MISSING")
@@ -196,6 +213,15 @@ class PersonAttributeAnalyzer:
             self._version = bundle.get("model_version", "unknown")
             self._network = _MultiHeadNetwork(self._attributes)
             self._network.load_state_dict(bundle["state_dict"])
+            if self._device.type == "cuda" and (
+                not torch.cuda.is_available()
+                or self._device.index >= torch.cuda.device_count()
+            ):
+                raise AnalysisModelStartupError("ANALYSIS_DEVICE_UNAVAILABLE")
+            try:
+                self._network.to(self._device)
+            except Exception as exc:
+                raise AnalysisModelStartupError("ANALYSIS_DEVICE_EXECUTION_FAILED") from exc
             self._network.eval()
             height, width = bundle["input_size"]
             self._transform = transforms.Compose([
@@ -205,8 +231,23 @@ class PersonAttributeAnalyzer:
             ])
         except FileNotFoundError as exc:
             raise AnalysisModelStartupError("ANALYSIS_MODEL_MISSING") from exc
+        except AnalysisModelStartupError:
+            raise
         except Exception as exc:
             raise AnalysisModelStartupError("ANALYSIS_MODEL_INVALID") from exc
+        try:
+            self._network(torch.zeros((1, 3, height, width), device=self._device))
+        except Exception as exc:
+            raise AnalysisModelStartupError("ANALYSIS_DEVICE_EXECUTION_FAILED") from exc
+
+    def runtime_metadata(self):
+        return {
+            "requested_device": self.requested_device,
+            "execution_device": str(self._device),
+            "execution_provider": (
+                "PyTorch CUDA" if self._device.type == "cuda" else "PyTorch CPU"
+            ),
+        }
 
     @torch.inference_mode()
     def process(self, job: dict, crop_path: Path) -> dict:
@@ -218,14 +259,14 @@ class PersonAttributeAnalyzer:
             raise ValueError("Attribute crop must be at least 16 pixels in each dimension")
 
         rgb = np.ascontiguousarray(image[:, :, ::-1])
-        batch = self._transform(Image.fromarray(rgb)).unsqueeze(0)
+        batch = self._transform(Image.fromarray(rgb)).unsqueeze(0).to(self._device)
         outputs = self._network(batch)
 
         attributes = {}
         for name, classes in self._attributes.items():
             logits = outputs[name][0].float()
             if name in self._multi_label:
-                scores = torch.sigmoid(logits).numpy()
+                scores = torch.sigmoid(logits).cpu().numpy()
                 picked = _select_multi_label(scores, self._display_rules.get(name, {}))
                 order = np.argsort(-scores)
                 attributes[name] = [
@@ -233,7 +274,7 @@ class PersonAttributeAnalyzer:
                     for i in order if picked[i]
                 ][:MAX_TAGS]
             else:
-                scores = torch.softmax(logits, dim=0).numpy()
+                scores = torch.softmax(logits, dim=0).cpu().numpy()
                 best = int(scores.argmax())
                 attributes[name] = {
                     "value": classes[best],

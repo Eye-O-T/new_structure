@@ -1,8 +1,10 @@
 import unittest
 from types import SimpleNamespace
+import os
 from unittest.mock import patch
 
 from server.services.preprocessing.processors.detection.device import resolve_torch_device
+from server.services.preprocessing.app.settings import Settings
 
 
 def fake_torch(available, count):
@@ -15,6 +17,17 @@ def fake_torch(available, count):
 
 
 class YoloDevicePolicyTests(unittest.TestCase):
+    def test_gpu_mode_resolves_auto_to_required_cuda(self):
+        with patch.dict(os.environ, {"PREPROCESSING_GPU": "true", "INFERENCE_DEVICE": "auto"}, clear=True):
+            self.assertEqual(Settings.from_env().device, "cuda:0")
+        with patch.dict(os.environ, {"PREPROCESSING_GPU": "false", "INFERENCE_DEVICE": "auto"}, clear=True):
+            self.assertEqual(Settings.from_env().device, "cpu")
+
+    def test_cuda_device_is_rejected_when_gpu_override_is_disabled(self):
+        with patch.dict(os.environ, {"PREPROCESSING_GPU": "false", "INFERENCE_DEVICE": "cuda:0"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "PREPROCESSING_GPU"):
+                Settings.from_env()
+
     def test_cpu_only_policy(self):
         torch = fake_torch(False, 0)
         self.assertEqual(resolve_torch_device("auto", torch), "cpu")

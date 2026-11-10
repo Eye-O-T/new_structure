@@ -336,7 +336,7 @@ class InstallerWindow(QWidget):
             ("영상 수신 RTSP 포트", self.rtsp_port),
             ("웹 수신 IP", self.public_bind),
             ("카메라 영상 수신 IP", self.rtsp_bind),
-            ("추론 장치", self.inference_device),
+            ("AI 추론 장치 (감지·식별·분석)", self.inference_device),
             ("녹화 파일 길이(초)", self.recording_segment_seconds),
             ("녹화 보관 기간(일)", self.retention_days),
             ("남은 저장 공간 경고(%)", self.storage_warning_free_percent),

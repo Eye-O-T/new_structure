@@ -27,6 +27,14 @@ class PreprocessingDiagnosticsTests(unittest.TestCase):
                 "data_ready": True,
                 "inference_enabled": True,
                 "gpu_requested": True,
+                "identity": {
+                    "ready": True,
+                    "model_ready": True,
+                    "requested_device": "cuda:0",
+                    "execution_device": "cuda:0",
+                    "execution_provider": "CUDAExecutionProvider",
+                    "last_error": "secret-bearing error text",
+                },
                 "worker_count": 1,
                 "workers": {
                     "local-camera": {
@@ -69,6 +77,8 @@ class PreprocessingDiagnosticsTests(unittest.TestCase):
         self.assertTrue(camera["live_objects_stale"])
         self.assertNotIn("private_token", camera["timings"])
         self.assertNotIn("secret-bearing error text", repr(result))
+        self.assertEqual(result["identity"]["execution_device"], "cuda:0")
+        self.assertEqual(result["identity"]["execution_provider"], "CUDAExecutionProvider")
 
 
 if __name__ == "__main__":

@@ -63,6 +63,19 @@ class Settings:
         if config_path:
             config = load_config(config_path)
         inference = config.inference if config is not None else None
+        gpu_requested = _bool("PREPROCESSING_GPU", False)
+        requested_device = os.getenv(
+            "INFERENCE_DEVICE", str(inference.device if inference else "auto")
+        ).strip().lower()
+        if requested_device.startswith("cuda") and not gpu_requested:
+            raise ValueError(
+                "INFERENCE_DEVICE requests CUDA while PREPROCESSING_GPU is disabled"
+            )
+        device = (
+            ("cuda:0" if gpu_requested else "cpu")
+            if requested_device == "auto"
+            else ("cuda:0" if requested_device == "cuda" else requested_device)
+        )
 
         def configured(name: str, fallback: object) -> str:
             # 우선순위는 환경변수, config.yaml 값, 코드 기본값 순서다.
@@ -89,9 +102,7 @@ class Settings:
                     inference.model_path if inference else "/models/default.pt",
                 )
             ),
-            device=configured(
-                "INFERENCE_DEVICE", inference.device if inference else "auto"
-            ),
+            device=device,
             confidence=float(
                 configured(
                     "INFERENCE_CONFIDENCE",

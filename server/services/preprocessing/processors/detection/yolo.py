@@ -38,6 +38,21 @@ class YoloTracker:
             "device_name": self.device_name,
         }
 
+    def warmup(self):
+        """실제 추적 경로를 초기화하고 시험 프레임의 추적 상태를 비운다."""
+        import numpy as np
+
+        self._model.track(
+            np.zeros((640, 640, 3), dtype=np.uint8),
+            persist=True,
+            tracker="bytetrack.yaml",
+            classes=[0],
+            conf=self._confidence,
+            device=self.execution_device,
+            verbose=False,
+        )
+        self.reset()
+
     # 영상 재접속 시 기존 ByteTrack 상태를 초기화해 이전 세션의 궤적을 이어 쓰지 않는다.
     def reset(self):
         for tracker in getattr(getattr(self._model, "predictor", None), "trackers", []):

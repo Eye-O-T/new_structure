@@ -49,7 +49,7 @@ async def feature_status(
 
     preprocessing, analysis = await asyncio.gather(
         probe(settings.preprocessing_health_url),
-        probe("http://analysis:8000/health/ready"),
+        probe(settings.analysis_health_url),
     )
     return {
         "preprocessing": {"status": preprocessing, "enabled": preprocessing == "enabled"},

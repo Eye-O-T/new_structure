@@ -19,6 +19,7 @@ from server.operations.compose import (
 from server.operations.services import (
     _deployment_state,
     _run,
+    _tracking_status,
     get_optional_service_states,
     run_service_action,
 )
@@ -138,6 +139,70 @@ class ComposeAdapterCommandTests(unittest.TestCase):
         self.assertIn("<redacted>", str(raised.exception))
         self.assertNotIn("secret", str(raised.exception))
         self.assertNotIn("private-token", str(raised.exception))
+
+    def test_start_rebuilds_only_currently_running_ai_services(self):
+        installed = DeploymentContext(
+            data_root=self.root,
+            env_file=self.env,
+            config_file=self.root / "config" / "config.yaml",
+            public_url="http://127.0.0.1",
+            rtsp_host="127.0.0.1",
+            rtsp_port=8554,
+            admin_username="admin",
+            allow_insecure_http=True,
+        )
+        cases = [
+            ([{"Service": "preprocessing", "State": "exited"}], ()),
+            ([{"Service": "preprocessing", "State": "running"}], ("preprocessing",)),
+            (
+                [
+                    {"Service": "preprocessing", "State": "running"},
+                    {"Service": "analysis", "State": "restarting"},
+                ],
+                ("preprocessing", "analysis"),
+            ),
+        ]
+        for rows, expected in cases:
+            with self.subTest(expected=expected), patch(
+                "server.operations.services._deployment_state", return_value="matching"
+            ), patch(
+                "server.operations.services._compose_ps_rows", return_value=rows
+            ), patch(
+                "server.operations.services.ComposeAdapter.deployment_prerequisites",
+                return_value=[],
+            ), patch(
+                "server.operations.services._run", return_value=""
+            ) as run_mock, patch(
+                "server.operations.services._status", return_value="ok"
+            ):
+                result = run_service_action(
+                    self.server, installed, "start", lambda _message: None
+                )
+                self.assertEqual(result, "ok")
+                command = run_mock.call_args.args[0]
+                suffix = list(expected) or ["up", "-d", "--build", "--wait"]
+                self.assertEqual(command[-len(suffix):], suffix)
+
+    def test_tracking_status_reports_stale_and_first_observation(self):
+        adapter = ComposeAdapter(self.server, self.env)
+        worker = {
+            "model_ready": True,
+            "capture_connected": True,
+            "live_objects_last_success_at": "2026-11-10T04:58:00Z",
+            "live_objects_stale": True,
+        }
+        payload = {"status": "degraded", "workers": {"local-camera": worker}}
+        with patch("server.operations.services._run", return_value=json.dumps(payload)):
+            self.assertIn("좌표 지연", _tracking_status(adapter, time.monotonic() + 10))
+        worker["live_objects_stale"] = False
+        worker["live_objects_last_success_at"] = None
+        payload["status"] = "ready"
+        with patch("server.operations.services._run", return_value=json.dumps(payload)):
+            self.assertIn("첫 좌표 준비 중", _tracking_status(adapter, time.monotonic() + 10))
+        worker["live_objects_last_success_at"] = "2026-11-10T04:58:00Z"
+        with patch("server.operations.services._run", return_value=json.dumps(payload)):
+            self.assertEqual("실시간 좌표 전달 중", _tracking_status(adapter, time.monotonic() + 10))
+
 
     def test_reset_incompatible_deployment_stops_instead_of_down(self):
         with patch(

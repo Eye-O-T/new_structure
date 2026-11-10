@@ -23,6 +23,9 @@ RUN pip install --no-cache-dir '/opt/ai-cctv-core[processing]'
 COPY server/services/preprocessing/app /app/server/services/preprocessing/app
 COPY server/services/preprocessing/processors /app/server/services/preprocessing/processors
 
+ENV MPLCONFIGDIR=/tmp/matplotlib \
+    YOLO_CONFIG_DIR=/tmp/Ultralytics
+
 USER 65532:65532
 CMD ["uvicorn", "server.services.preprocessing.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

@@ -14,6 +14,20 @@ from .config import CAMERA_ID_PATTERN, Settings
 
 _WORKER_ERROR_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 _WORKER_ERROR_TYPE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+_REQUESTED_DEVICES = {"auto", "cpu", "cuda", "cuda:0", "cuda:1", "cuda:2", "cuda:3"}
+_EXECUTION_DEVICES = {"cpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"}
+_ANALYSIS_STARTUP_CODES = {
+    "ANALYSIS_DEVICE_UNAVAILABLE",
+    "ANALYSIS_DEVICE_EXECUTION_FAILED",
+    "ANALYSIS_MODEL_MISSING",
+    "ANALYSIS_MODEL_INVALID",
+    "ANALYSIS_MODEL_STARTUP_TIMEOUT",
+    "ANALYSIS_STARTUP_FAILED",
+}
+_IDENTITY_DEVICE_CODES = {
+    "IDENTITY_DEVICE_UNAVAILABLE",
+    "IDENTITY_DEVICE_EXECUTION_FAILED",
+}
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -205,8 +219,8 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
                 "event_shutdown_losses": _number(worker.get("event_shutdown_losses")),
                 "model_timeouts": _number(worker.get("model_timeouts")),
                 "last_inference_seconds": _number(worker.get("last_inference_seconds")),
-                "requested_device": _state(worker.get("requested_device"), {"auto", "cpu", "cuda", "cuda:0", "cuda:1", "cuda:2", "cuda:3"}),
-                "execution_device": _state(worker.get("execution_device"), {"cpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"}),
+                "requested_device": _state(worker.get("requested_device"), _REQUESTED_DEVICES),
+                "execution_device": _state(worker.get("execution_device"), _EXECUTION_DEVICES),
                 "timings": safe_timings,
                 "last_detection_at": _timestamp(worker.get("last_detection_at")),
                 "detection_object_count": _number(worker.get("detection_object_count")),
@@ -249,6 +263,7 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
                 "last_error_at": _timestamp(worker.get("last_error_at")),
             }
         )
+    identity_error = identity.get("last_error")
     return {
         "status": _state(payload.get("status"), {"ready", "degraded", "idle"}),
         "data_ready": payload.get("data_ready") is True,
@@ -260,9 +275,17 @@ def public_preprocessing_status(payload: dict[str, Any]) -> dict[str, Any]:
             "ready": identity.get("ready") is True,
             "model_ready": identity.get("model_ready") is True,
             "stalled": identity.get("stalled") is True,
-            "last_error_code": "IDENTITY_WORKER_ERROR"
-            if identity.get("last_error")
-            else None,
+            "requested_device": _state(identity.get("requested_device"), _REQUESTED_DEVICES),
+            "execution_device": _state(identity.get("execution_device"), _EXECUTION_DEVICES),
+            "execution_provider": _state(
+                identity.get("execution_provider"),
+                {"CPUExecutionProvider", "CUDAExecutionProvider"},
+            ),
+            "last_error_code": (
+                _state(identity_error, _IDENTITY_DEVICE_CODES)
+                if isinstance(identity_error, str) and identity_error in _IDENTITY_DEVICE_CODES
+                else "IDENTITY_WORKER_ERROR" if identity_error else None
+            ),
         },
         "event_delivery": {
             "pending": _number(delivery.get("pending")),
@@ -337,6 +360,35 @@ async def system_diagnostics(
             except Exception:
                 return _failure("MEDIA_UNAVAILABLE")
 
+        async def analysis_probe():
+            try:
+                response = await client.get(settings.analysis_health_url)
+                payload = response.json()
+                if response.status_code not in {200, 503} or not isinstance(payload, dict):
+                    raise ValueError("invalid analysis response")
+                detail = _object(payload.get("detail"))
+                source = detail or payload
+                requested = source.get("requested_device")
+                execution = source.get("execution_device")
+                provider = source.get("execution_provider")
+                return {
+                    "status": _state(source.get("status"), {"ready", "degraded", "unavailable"}),
+                    "ready": source.get("ready") is True,
+                    "model_ready": source.get("model_ready") is True,
+                    "stalled": source.get("stalled") is True,
+                    "gpu_requested": source.get("gpu_requested") is True,
+                    "requested_device": _state(requested, _REQUESTED_DEVICES),
+                    "execution_device": _state(execution, _EXECUTION_DEVICES),
+                    "execution_provider": _state(provider, {"PyTorch CPU", "PyTorch CUDA"}),
+                    "last_error_code": (
+                        _state(source.get("last_error"), _ANALYSIS_STARTUP_CODES)
+                        if source.get("last_error")
+                        else None
+                    ),
+                }
+            except Exception:
+                return _failure("ANALYSIS_UNAVAILABLE")
+
         # 전체 회차에도 기한을 적용해 다수 청크를 천천히 보내는 응답에 계속 기다리지 않는다.
         async def bounded(probe, code):
             try:
@@ -350,5 +402,6 @@ async def system_diagnostics(
             bounded(data_probe, "DATA_UNAVAILABLE"),
             bounded(preprocessing_probe, "PREPROCESSING_UNAVAILABLE"),
             bounded(media_probe, "MEDIA_UNAVAILABLE"),
+            bounded(analysis_probe, "ANALYSIS_UNAVAILABLE"),
         )
-        return dict(zip(("data", "preprocessing", "media"), results))
+        return dict(zip(("data", "preprocessing", "media", "analysis"), results))

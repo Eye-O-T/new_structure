@@ -50,7 +50,16 @@ class OsNetProviderTests(unittest.TestCase):
     def test_explicit_cuda_requires_cuda_provider(self):
         ort = SimpleNamespace(get_available_providers=lambda: ["CPUExecutionProvider"])
         with patch.dict(sys.modules, {"onnxruntime": ort}):
-            with self.assertRaisesRegex(ValueError, "CUDAExecutionProvider"):
+            with self.assertRaisesRegex(ValueError, "IDENTITY_DEVICE_UNAVAILABLE"):
+                _load_runtime_session(b"model", "cuda:0")
+
+    def test_cuda_session_initialization_failure_does_not_fall_back(self):
+        ort = SimpleNamespace(
+            get_available_providers=lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            InferenceSession=lambda payload, providers: (_ for _ in ()).throw(RuntimeError("failed")),
+        )
+        with patch.dict(sys.modules, {"onnxruntime": ort}):
+            with self.assertRaisesRegex(ValueError, "IDENTITY_DEVICE_EXECUTION_FAILED"):
                 _load_runtime_session(b"model", "cuda:0")
 
     def test_cuda_provider_reports_requested_index(self):

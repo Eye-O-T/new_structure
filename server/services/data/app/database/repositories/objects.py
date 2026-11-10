@@ -123,6 +123,18 @@ class ObjectRepositoryMixin:
         # 작업자가 중단돼도 5분 뒤 다시 가져갈 수 있어 작업이 영원히 멈추지 않는다.
         now = utc_now()
         stamp = format_utc(now)
+        # 빈 큐를 폴링할 때는 쓰기 잠금을 잡지 않는다. 실제 할당과 만료 처리는
+        # 아래 트랜잭션에서 다시 조회하므로 여러 작업자의 경쟁에도 원자성을 유지한다.
+        with self.database.connection() as connection:
+            candidate = connection.execute(
+                "SELECT 1 FROM object_jobs WHERE stage=? AND "
+                "((attempts>=5 AND (state='pending' OR (state='running' AND lease_until<=?))) "
+                "OR (attempts<5 AND ((state='pending' AND next_attempt_at<=?) "
+                "OR (state='running' AND lease_until<=?)))) LIMIT 1",
+                (stage, stamp, stamp, stamp),
+            ).fetchone()
+        if candidate is None:
+            return None
         with self.database.transaction() as connection:
             exhausted = connection.execute(
                 "SELECT id,event_id FROM object_jobs WHERE stage=? AND attempts>=5 "

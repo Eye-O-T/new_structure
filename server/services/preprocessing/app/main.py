@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
+from ai_cctv_core.processing.isolation import ProcessorStartupError
 from ai_cctv_core.processing.runtime import running_worker, worker_status
 
 from .data_client import DataClient
@@ -38,10 +39,18 @@ def create_app(settings: Settings | None = None):
                     await asyncio.Event().wait()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except ProcessorStartupError as exc:
+                app.state.identity_worker = None
+                app.state.identity_error = exc.code
+                LOGGER.warning("identity initialization failed code=%s", exc.code)
+            except TimeoutError:
+                app.state.identity_worker = None
+                app.state.identity_error = "IDENTITY_MODEL_STARTUP_TIMEOUT"
+                LOGGER.warning("identity initialization timed out; detection continues")
+            except Exception as exc:
                 app.state.identity_worker = None
                 app.state.identity_error = "IDENTITY_STARTUP_FAILED"
-                LOGGER.warning("identity initialization failed; detection continues")
+                LOGGER.warning("identity initialization failed type=%s; detection continues", type(exc).__name__)
             await asyncio.sleep(30)
 
     @asynccontextmanager
@@ -133,15 +142,23 @@ def create_app(settings: Settings | None = None):
             not workers
             or any(
                 worker.get("model_ready")
+                and worker.get("requested_device") != "cpu"
                 and not str(worker.get("execution_device", "")).startswith("cuda")
                 for worker in workers.values()
             )
         )
         identity = state["identity"]
+        identity_gpu_degraded = (
+            state["gpu_requested"]
+            and identity.get("model_ready")
+            and identity.get("requested_device") != "cpu"
+            and not str(identity.get("execution_device", "")).startswith("cuda")
+        )
         delivery = state.get("event_delivery", {})
         degraded = (
             model_degraded
             or gpu_degraded
+            or identity_gpu_degraded
             or not identity["ready"]
             or not identity["model_ready"]
             or identity["stalled"]

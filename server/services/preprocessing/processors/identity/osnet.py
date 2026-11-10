@@ -20,15 +20,26 @@ from .appearance import (
 LOGGER = logging.getLogger(__name__)
 
 
+class IdentityDeviceStartupError(ValueError):
+    def __init__(self, code: str):
+        self.startup_error_code = code
+        super().__init__(code)
+
+
 def _identity_device() -> str:
     value = os.getenv("IDENTITY_DEVICE", "auto").strip().lower()
     if re.fullmatch(r"(?:auto|cpu|cuda(?::[0-9]+)?)", value) is None:
-        raise ValueError("IDENTITY_DEVICE must be auto, cpu, or cuda[:index]")
-    return value
+        raise IdentityDeviceStartupError("IDENTITY_DEVICE_UNAVAILABLE")
+    gpu_requested = os.getenv("PREPROCESSING_GPU", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if value.startswith("cuda") and not gpu_requested:
+        raise IdentityDeviceStartupError("IDENTITY_DEVICE_UNAVAILABLE")
+    if value == "auto":
+        return "cuda:0" if gpu_requested else "cpu"
+    return "cuda:0" if value == "cuda" else value
 
 
 def _load_runtime_session(payload: bytes, device: str):
-    """Use CUDA when it is actually available, while retaining CPU fallback."""
+    """Use the requested execution provider and fail when CUDA was requested but unavailable."""
     try:
         import onnxruntime as ort
     except ImportError as error:
@@ -36,11 +47,11 @@ def _load_runtime_session(payload: bytes, device: str):
     available = ort.get_available_providers()
     cuda = "CUDAExecutionProvider" in available
     if device.startswith("cuda") and not cuda:
-        raise ValueError("CUDAExecutionProvider is unavailable")
+        raise IdentityDeviceStartupError("IDENTITY_DEVICE_UNAVAILABLE")
     if cuda and device != "cpu":
         options = {}
         if device.startswith("cuda:"):
-            options = {"device_id": int(device.split(":", 1)[1])}
+            options["device_id"] = int(device.split(":", 1)[1])
         providers = [("CUDAExecutionProvider", options), "CPUExecutionProvider"]
     else:
         if device == "auto" and not cuda:
@@ -49,11 +60,7 @@ def _load_runtime_session(payload: bytes, device: str):
     try:
         session = ort.InferenceSession(payload, providers=providers)
     except Exception as error:
-        if device == "auto" and cuda:
-            LOGGER.warning("requested_device=auto; OSNet CUDA initialization failed, using CPUExecutionProvider")
-            session = ort.InferenceSession(payload, providers=["CPUExecutionProvider"])
-            return session, "CPUExecutionProvider", "cpu"
-        raise ValueError("OSNet ONNX session cannot be created") from error
+        raise IdentityDeviceStartupError("IDENTITY_DEVICE_EXECUTION_FAILED") from error
     selected = next(
         (
             provider
@@ -63,7 +70,7 @@ def _load_runtime_session(payload: bytes, device: str):
         "CPUExecutionProvider",
     )
     if device.startswith("cuda") and selected != "CUDAExecutionProvider":
-        raise ValueError("OSNet CUDA provider was not selected")
+        raise IdentityDeviceStartupError("IDENTITY_DEVICE_UNAVAILABLE")
     execution_device = "cpu"
     if selected == "CUDAExecutionProvider":
         execution_device = device if device.startswith("cuda:") else "cuda:0"
@@ -96,9 +103,10 @@ class OsNetIdentity:
         )
         payload, self._model_sha256 = _read_onnx_model(configured, models_root)
         self._space_id = f"osnet:{self._model_sha256}:{_ONNX_PREPROCESSING}"
-        self.requested_device = _identity_device()
+        self.requested_device = os.getenv("IDENTITY_DEVICE", "auto").strip().lower()
+        selected_device = _identity_device()
         self._session, self._execution_provider, self.execution_device = _load_runtime_session(
-            payload, self.requested_device
+            payload, selected_device
         )
         self.device_id = (
             int(self.execution_device.split(":", 1)[1])
@@ -106,7 +114,10 @@ class OsNetIdentity:
         )
         # 준비 상태를 알리기 전에 실제 추론해 OpenCV 연산 호환성과 512차원 계약을 검사한다.
         # 이 시험 표본의 결과는 버리고 완료 요청이나 gallery에 보내지 않는다.
-        self._features(np.zeros((256, 128, 3), dtype=np.uint8))
+        try:
+            self._features(np.zeros((256, 128, 3), dtype=np.uint8))
+        except ValueError as error:
+            raise IdentityDeviceStartupError("IDENTITY_DEVICE_EXECUTION_FAILED") from error
 
     def runtime_metadata(self):
         return {

@@ -75,12 +75,12 @@ _HEALTH = {"healthy": "정상", "unhealthy": "점검 필요", "starting": "준�
 _ANALYSIS_STARTUP_LABELS = {
     "ANALYSIS_MODEL_MISSING": "모델 파일 없음",
     "ANALYSIS_MODEL_INVALID": "모델을 읽을 수 없음",
+    "ANALYSIS_DEVICE_UNAVAILABLE": "요청한 GPU 장치를 사용할 수 없음",
+    "ANALYSIS_DEVICE_EXECUTION_FAILED": "요청한 GPU에서 분석 모델 실행 실패",
     "ANALYSIS_MODEL_STARTUP_TIMEOUT": "모델 준비 시간 초과",
     "ANALYSIS_PLUGIN_INVALID": "PAR 분석기 설정 오류",
     "ANALYSIS_STARTUP_FAILED": "분석기 초기화 실패",
 }
-
-
 def _host_path(value: str) -> str:
     """Docker Desktop의 Linux 표기를 Windows 호스트 경로와 비교한다."""
 
@@ -446,8 +446,51 @@ def _status(adapter: ComposeAdapter, deadline: float) -> str:
             state = _analysis_stopped_status(adapter, deadline) or state
         health = _HEALTH.get(str(row.get("Health", "")).lower(), "")
         lines.append(f"• {name}: {state}" + (f" / {health}" if health else ""))
+        if service == "preprocessing" and raw_state == "running":
+            lines.append(f"  감지·좌표 상태: {_tracking_status(adapter, deadline)}")
     lines.append("서비스 실행 상태이며 실제 카메라 영상·감지·녹화는 별도로 확인하세요.")
     return "\n".join(lines)
+
+
+def _tracking_status(adapter: ComposeAdapter, deadline: float) -> str:
+    probe = (
+        "import json,urllib.request;"
+        "o=urllib.request.build_opener(urllib.request.ProxyHandler({}));"
+        "print(json.dumps(json.load(o.open('http://127.0.0.1:8000/health/ready',timeout=3))))"
+    )
+    try:
+        payload = _json(_run(
+            _command(adapter, "exec", "-T", "preprocessing", "python", "-c", probe),
+            directory=adapter.server_dir,
+            deadline=deadline,
+        ))
+        workers = payload.get("workers")
+        if not isinstance(workers, dict):
+            raise ValueError("invalid workers")
+        if payload.get("inference_enabled") is False:
+            return "감지 비활성"
+        if not workers:
+            return "활성 카메라 대기"
+        if any(not isinstance(worker, dict) for worker in workers.values()):
+            raise ValueError("invalid worker")
+        if any(worker.get("last_error_code") for worker in workers.values()):
+            return "감지 모델 오류 · 점검 필요"
+        if any(worker.get("capture_error_code") for worker in workers.values()):
+            return "영상 연결 대기 · 점검 필요"
+        if any(worker.get("live_objects_stale") is True for worker in workers.values()):
+            return "좌표 지연 · 점검 필요"
+        if any(
+            not worker.get("model_ready")
+            or not worker.get("capture_connected")
+            or not worker.get("live_objects_last_success_at")
+            for worker in workers.values()
+        ):
+            return "모델·영상 또는 첫 좌표 준비 중"
+        if payload.get("status") != "ready":
+            return "실행 중 · 점검 필요"
+        return "실시간 좌표 전달 중"
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError):
+        return "조회 실패"
 
 
 def _analysis_stopped_status(adapter: ComposeAdapter, deadline: float) -> str | None:
@@ -804,7 +847,13 @@ def run_service_action(
                 if message:
                     raise RuntimeError(message) from None
                 raise
-        return f"{service} {'활성화' if operation == 'on' else '비활성화'} 요청을 적용했습니다. 상태를 확인하세요."
+        summary = f"{service} {'활성화' if operation == 'on' else '비활성화'} 요청을 적용했습니다."
+        if operation == "on":
+            try:
+                return f"{summary}\n\n{_status(adapter, deadline)}"
+            except (OSError, RuntimeError, ValueError):
+                return f"{summary}\n감지·좌표 상태를 확인하지 못했습니다. 상태 확인을 다시 실행하세요."
+        return summary
     if action == "start":
         progress("모델·인증서와 Docker 실행 준비를 확인하고 있습니다…")
         try:
@@ -818,10 +867,51 @@ def run_service_action(
                 "서버 파일·모델·HTTPS 인증서 또는 Docker 실행 준비가 부족합니다. "
                 "설치 파일과 Docker Desktop을 확인하세요. 설정과 인증키는 유지됩니다."
             )
+        active_optional: list[str] = []
+        if state == "matching":
+            rows = _compose_ps_rows(adapter, deadline)
+            active_optional = [
+                service
+                for service in ("preprocessing", "analysis")
+                if any(
+                    str(row.get("Service", "")) == service
+                    and str(row.get("State", "")).lower()
+                    in {"running", "restarting"}
+                    for row in rows
+                )
+            ]
+            if active_optional:
+                failures = [
+                    item
+                    for item in adapter.deployment_prerequisites(
+                        require_ai_models=True,
+                        require_analysis_model="analysis" in active_optional,
+                    )
+                    if not item.ok
+                ]
+                if failures:
+                    raise RuntimeError(
+                        "실행 중인 AI 서비스의 모델 파일을 확인할 수 없습니다.\n"
+                        + "\n".join(item.message for item in failures)
+                    )
+        environment = read_deployment_env(installed.env_file)
+        gpu_mode = environment.get("PREPROCESSING_GPU", "false").lower() in {
+            "true", "1", "yes"
+        }
+        if not gpu_mode and any(
+            environment.get(key, "").lower().startswith("cuda")
+            for key in ("INFERENCE_DEVICE", "IDENTITY_DEVICE", "ANALYSIS_DEVICE")
+        ):
+            raise RuntimeError(
+                "GPU 모드는 꺼져 있지만 CUDA 장치가 설정되어 있습니다. "
+                "compose.env의 GPU 설정을 확인하세요. 서버는 변경하지 않았습니다."
+            )
         progress(
-            "서버 이미지를 준비하고 실행하고 있습니다. 처음에는 시간이 걸릴 수 있습니다…"
+            "서버 이미지를 준비하고 실행하고 있습니다. "
+            f"대상: 기본 서비스{', ' + ', '.join(active_optional) if active_optional else ''}; "
+            f"GPU 모드: {'GPU' if gpu_mode else 'CPU'}. 처음에는 시간이 걸릴 수 있습니다…"
         )
-        arguments = START_ARGUMENTS
+        arguments = (*START_ARGUMENTS, *active_optional)
     elif action == "restart":
         progress("선택한 저장 위치의 서버를 재시작하고 있습니다…")
         arguments = START_ARGUMENTS if migrated_model else ("restart",)

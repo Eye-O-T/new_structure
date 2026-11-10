@@ -599,8 +599,14 @@ def initialize(request: InstallRequest) -> InstallResult:
         ),
         "INFERENCE_DEVICE": request.inference_device,
         "IDENTITY_DEVICE": (
-            "cpu" if request.inference_device.startswith("cuda")
+            request.inference_device
+            if request.inference_device != "auto"
             else previous_environment.get("IDENTITY_DEVICE", "auto")
+        ),
+        "ANALYSIS_DEVICE": (
+            request.inference_device
+            if request.inference_device != "auto"
+            else previous_environment.get("ANALYSIS_DEVICE", "auto")
         ),
         "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
         "IDENTITY_MODEL_PATH": str(container_identity_path),

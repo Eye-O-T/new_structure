@@ -173,6 +173,12 @@ class LocalAppearanceIdentity:
         *,
         models_root: Path = Path("/models"),
     ):
+        gpu_requested = os.getenv("PREPROCESSING_GPU", "false").strip().lower() in {"1", "true", "yes", "on"}
+        requested_device = os.getenv("IDENTITY_DEVICE", "auto").strip().lower()
+        if requested_device.startswith("cuda"):
+            raise ValueError("LocalAppearanceIdentity is CPU-only and cannot honor a CUDA request")
+        if gpu_requested and requested_device != "cpu":
+            raise ValueError("LocalAppearanceIdentity is CPU-only; select IDENTITY_DEVICE=cpu or use OSNet")
         self._net = None
         self._space_id = "appearance-hsv-v1"
         self._backend = "appearance-hsv-v1"

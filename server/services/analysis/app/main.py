@@ -68,6 +68,7 @@ def create_app():
     @app.get("/health/ready")
     def ready():
         status = worker_status(app.state.worker)
+        status["gpu_requested"] = os.getenv("PREPROCESSING_GPU", "false").strip().lower() in {"1", "true", "yes", "on"}
         if app.state.startup_error:
             status["last_error"] = app.state.startup_error
             raise HTTPException(503, {"status": "unavailable", **status})

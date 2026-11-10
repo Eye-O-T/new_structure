@@ -10,3 +10,11 @@ services:
       args:
         TORCH_INDEX_URL: https://download.pytorch.org/whl/cu126
         ONNX_RUNTIME_PACKAGE: onnxruntime-gpu==1.20.2
+  analysis:
+    image: ai-cctv-analysis:${AI_CCTV_VERSION:-0.3.0}-gpu
+    gpus: all
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu126
+        TORCH_PACKAGE: torch==2.13.0
+        TORCHVISION_PACKAGE: torchvision==0.28.0

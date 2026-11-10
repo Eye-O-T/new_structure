@@ -18,6 +18,7 @@ _STARTUP_ERROR_CODES = {
     "DETECTION_STARTUP_FAILED",
     "GPU_CUDA_BUILD_MISSING",
     "GPU_DEVICE_UNAVAILABLE",
+    "GPU_OUT_OF_MEMORY",
 }
 
 
@@ -111,6 +112,9 @@ def _serve(connection, reference, arguments):
             callable(getattr(tracker, name, None)) for name in ("reset", "process")
         ):
             raise ValueError("Invalid detection processor")
+        warmup = getattr(tracker, "warmup", None)
+        if callable(warmup):
+            warmup()
         runtime = (
             tracker.runtime_metadata()
             if callable(getattr(tracker, "runtime_metadata", None))
@@ -153,6 +157,8 @@ def _serve(connection, reference, arguments):
             message = str(exc).lower()
             if "PAR attribute bundles" in str(exc):
                 error_code = "MODEL_FORMAT_INVALID"
+            elif str(arguments[2]).startswith("cuda") and "out of memory" in message:
+                error_code = "GPU_OUT_OF_MEMORY"
             elif str(arguments[2]).startswith("cuda"):
                 try:
                     import torch

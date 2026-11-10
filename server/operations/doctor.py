@@ -192,7 +192,11 @@ def _preprocessing_checks(payload: dict) -> list[Check]:
             results.append(Check("WARN", "Preprocessing GPU", "GPU is requested; no active camera workers, so detection execution is unverified"))
         elif not ready_workers:
             results.append(Check("WARN", "Preprocessing GPU", "GPU is requested; no detection model is ready"))
-        elif any(not str(worker.get("execution_device", "")).startswith("cuda") for worker in ready_workers):
+        elif any(
+            worker.get("requested_device") != "cpu"
+            and not str(worker.get("execution_device", "")).startswith("cuda")
+            for worker in ready_workers
+        ):
             results.append(Check("WARN", "Preprocessing GPU", "GPU is requested, but a ready detector is running on CPU"))
         else:
             results.append(Check("OK", "Preprocessing GPU", "ready detection workers are using CUDA"))
@@ -217,6 +221,28 @@ def _preprocessing_checks(payload: dict) -> list[Check]:
         )
     identity = payload.get("identity")
     identity = identity if isinstance(identity, dict) else {}
+    identity_last_error = identity.get("last_error")
+    identity_device_error = isinstance(identity_last_error, str) and identity_last_error in {
+        "IDENTITY_DEVICE_UNAVAILABLE",
+        "IDENTITY_DEVICE_EXECUTION_FAILED",
+    }
+    if payload.get("gpu_requested") is True and identity_device_error:
+        results.append(
+            Check(
+                "ERROR", "Identity GPU", identity_last_error
+            )
+        )
+    elif (
+        payload.get("gpu_requested") is True
+        and identity.get("model_ready") is True
+        and identity.get("requested_device") != "cpu"
+    ):
+        identity_gpu = str(identity.get("execution_device", "")).startswith("cuda")
+        results.append(Check(
+            "OK" if identity_gpu else "ERROR",
+            "Identity GPU",
+            "identity worker is using CUDA" if identity_gpu else "GPU is requested, but identity is running on CPU",
+        ))
     identity_ready = (
         identity.get("ready") is True
         and identity.get("model_ready") is True
@@ -332,7 +358,81 @@ def _runtime_checks(adapter: ComposeAdapter) -> list[Check]:
                 f"DeviceRequests={requests_gpu}, CUDA available={device.get('available', False)}, "
                 f"device={device.get('device') or 'unavailable'}"
             )
-            results.append(Check("OK" if ready else "ERROR", "Preprocessing GPU runtime", detail))
+            results.append(
+                Check("OK" if ready else "ERROR", "Preprocessing GPU runtime", detail)
+            )
+        analysis_result = adapter.run("ps", "-q", "analysis", capture=True)
+        analysis_ids = (analysis_result.stdout or "").strip().splitlines()
+        if analysis_result.returncode != 0 or not analysis_ids:
+            results.append(
+                Check(
+                    "WARN", "Analysis GPU runtime",
+                    "container allocation could not be inspected",
+                )
+            )
+        else:
+            allocation = subprocess.run(
+                ["docker", "inspect", "--format", "{{json .HostConfig.DeviceRequests}}", analysis_ids[0]],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            requests_gpu = False
+            if allocation.returncode == 0:
+                try:
+                    requests_gpu = bool(json.loads(allocation.stdout.strip()))
+                except ValueError:
+                    pass
+            runtime = adapter.run(
+                "exec", "-T", "analysis", "python", "-c",
+                "import json,torch; a=torch.cuda.is_available(); print(json.dumps({'available':a,'count':torch.cuda.device_count()}))",
+                capture=True,
+            )
+            try:
+                device = json.loads(runtime.stdout.strip()) if runtime.returncode == 0 else {}
+            except ValueError:
+                device = {}
+            probe = adapter.run(
+                "exec", "-T", "analysis", "python", "-c",
+                (
+                    "import json,urllib.request,urllib.error;"
+                    "op=urllib.request.build_opener(urllib.request.ProxyHandler({}));"
+                    "u='http://127.0.0.1:8000/health/ready';"
+                    "\ntry:\n d=json.load(op.open(u,timeout=3))\n"
+                    "except urllib.error.HTTPError as e:\n"
+                    " d=json.load(e) if e.headers.get('Content-Type','').startswith('application/json') else {}\n"
+                    "except (urllib.error.URLError,ValueError,OSError):\n d={}\n"
+                    "print(json.dumps(d))"
+                ),
+                capture=True,
+            )
+            try:
+                status = json.loads(probe.stdout.strip()) if probe.returncode == 0 else {}
+                status = status.get("detail", status)
+                if not isinstance(status, dict):
+                    status = {}
+            except ValueError:
+                status = {}
+            expected_gpu = environment.get("ANALYSIS_DEVICE", "auto").lower() != "cpu"
+            gpu_ready = (
+                requests_gpu
+                and device.get("available") is True
+                and device.get("count", 0) > 0
+                and status.get("ready") is True
+                and status.get("model_ready") is True
+                and (
+                    not expected_gpu
+                    or str(status.get("execution_device", "")).startswith("cuda")
+                )
+            )
+            results.append(
+                Check(
+                    "OK" if gpu_ready else "ERROR",
+                    "Analysis GPU runtime",
+                    f"DeviceRequests={requests_gpu}, CUDA available={device.get('available', False)}, "
+                    f"model_ready={status.get('model_ready', False)}, "
+                    f"requested={status.get('requested_device', 'unknown')}, "
+                    f"execution={status.get('execution_device', 'unknown')}",
+                )
+            )
     try:
         camera_probe = adapter.run(
             "exec",
@@ -448,15 +548,17 @@ def checks(
         try:
             config = adapter.run("--profile", "ai", "config", "--format", "json", capture=True)
             config_payload = json.loads(config.stdout) if config.returncode == 0 else {}
-            preprocessing = config_payload.get("services", {}).get("preprocessing", {})
-            gpu_configured = bool(preprocessing.get("gpus"))
+            services = config_payload.get("services", {})
+            preprocessing = services.get("preprocessing", {})
+            analysis = services.get("analysis", {})
+            gpu_configured = bool(preprocessing.get("gpus")) and bool(analysis.get("gpus"))
         except (OSError, subprocess.SubprocessError, ValueError, TypeError):
             gpu_configured = False
         results.append(
             Check(
                 "OK" if gpu_configured else "ERROR",
                 "GPU container request",
-                "resolved Compose requests Docker GPU access" if gpu_configured else "resolved Compose GPU request is missing",
+                "resolved Compose requests Docker GPU access for preprocessing and analysis" if gpu_configured else "resolved Compose GPU request is missing from preprocessing or analysis",
             )
         )
         results.append(

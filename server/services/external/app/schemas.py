@@ -319,6 +319,7 @@ class SystemStatusResponse(PublicResponse):
     external: ServiceStatusResponse
     data: dict[str, Any]
     preprocessing: dict[str, Any]
+    analysis: dict[str, Any]
     media: dict[str, Any]
     push: dict[str, Any]
 

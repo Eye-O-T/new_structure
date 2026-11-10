@@ -301,6 +301,7 @@ services:
       MODEL_PATH: /models/${MODEL_FILE:-yolo11n.pt}
       INFERENCE_DEVICE: ${INFERENCE_DEVICE:-auto}
       IDENTITY_DEVICE: ${IDENTITY_DEVICE:-auto}
+      ANALYSIS_DEVICE: ${ANALYSIS_DEVICE:-auto}
       TZ: UTC
     expose:
       - "8000"
@@ -347,6 +348,8 @@ services:
       - ${ANALYSIS_SECRETS_FILE:-./secrets/analysis.env}
     environment:
       ANALYSIS_PLUGIN: ${ANALYSIS_PLUGIN:-server.services.analysis.processors.attributes:PersonAttributeAnalyzer}
+      PREPROCESSING_GPU: ${PREPROCESSING_GPU:-false}
+      ANALYSIS_DEVICE: ${ANALYSIS_DEVICE:-auto}
       OBJECT_MODEL_TIMEOUT_SECONDS: ${OBJECT_MODEL_TIMEOUT_SECONDS:-120}
       OBJECT_STARTUP_TIMEOUT_SECONDS: ${OBJECT_STARTUP_TIMEOUT_SECONDS:-30}
       DATA_SERVICE_URL: http://nginx:8080/internal/data/v1

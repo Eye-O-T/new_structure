@@ -27,7 +27,7 @@ from .validation import ALLOWED_SECRET_KEYS
 SIGNATURE_SCHEMA_VERSION = 1
 SIGNATURE_FILENAME = "contract-signature.json"
 PROJECT_SIGNATURE_FILENAME = ".contract-signature.json"
-# 이 변경은 PAR 기본값과 analysis 재시작 정책만 바꾸며 DB·도메인 계약은 바꾸지 않는다.
+# 이 제한된 업그레이드는 DB·도메인 계약을 바꾸지 않는 알려진 Compose 변경만 허용한다.
 _ANALYSIS_RUNTIME_UPGRADE_OLD_COMPOSE_SHA256 = (
     "33a9c7a0c362d8e3ab4440a5b025021cabefe260600b25666369218757069b60"
 )
@@ -37,10 +37,16 @@ _ANALYSIS_RUNTIME_UPGRADE_OLD_DEPLOYMENT_SHA256 = (
 _ANALYSIS_RUNTIME_UPGRADE_NEW_COMPOSE_SHA256 = (
     "7efaa4a5f317fd85a29550a397971ea047371775efd0787523ea6953a12d0e45"
 )
+_GPU_RUNTIME_UPGRADE_NEW_COMPOSE_SHA256 = (
+    "1de7f5537f7ef8b537397a24db33da7034ec189029267ac6af20cfa614e38db7"
+)
+_GPU_RUNTIME_UPGRADE_NEW_GPU_COMPOSE_SHA256 = (
+    "99d507127415024931d8022f762c6f2f0b7c0fc49a5887565ca6405c59c7cc47"
+)
 
 _COMPONENT_LABELS = {
     "db_schema": "데이터베이스 마이그레이션 스키마 (migrations/*.sql)",
-    "deployment_contract": "배포/설정/시크릿 계약 (AppConfig, compose.yml, 시크릿 키)",
+    "deployment_contract": "배포/설정/시크릿 계약 (AppConfig, Compose, 시크릿 키)",
     "domain_contract": "서비스 간 도메인 데이터 계약 (ai_cctv_core.contracts)",
     "signature_file": "계약 해시 서명 파일 형식",
 }
@@ -165,11 +171,20 @@ def _compute_deployment_contract_hash(server_dir: Path) -> str:
         if compose_path.is_file()
         else ""
     )
+    gpu_compose_path = server_dir / "compose.gpu.yml"
+    if not gpu_compose_path.is_file():
+        gpu_compose_path = _canonical_server_dir() / "compose.gpu.yml"
+    gpu_compose_normalized = (
+        _normalize_text(gpu_compose_path.read_text(encoding="utf-8"))
+        if gpu_compose_path.is_file()
+        else ""
+    )
     payload = {
         "app_config_schema": AppConfig.model_json_schema(),
         "allowed_secret_keys": _ALLOWED_SECRET_KEYS,
         "required_deployment_env_keys": _REQUIRED_DEPLOYMENT_ENV_KEYS,
         "compose_sha256": _sha256_bytes(compose_normalized.encode("utf-8")),
+        "compose_gpu_sha256": _sha256_bytes(gpu_compose_normalized.encode("utf-8")),
     }
     return _sha256_bytes(_canonical_json_bytes(payload))
 
@@ -377,7 +392,7 @@ def ensure_signature_file(
 def migrate_analysis_runtime_signature(
     data_root: Path, server_dir: Path
 ) -> bool:
-    """기존 DB 계약이 같은, 알려진 analysis Compose 변경만 서명 갱신한다."""
+    """DB·도메인 계약이 같고 이전 Compose 해시가 알려진 경우에만 갱신한다."""
 
     resolved_root = data_root.expanduser().resolve()
     resolved_server = server_dir.expanduser().resolve()
@@ -385,9 +400,15 @@ def migrate_analysis_runtime_signature(
     if not compose_path.is_file():
         return False
     compose_normalized = _normalize_text(compose_path.read_text(encoding="utf-8"))
-    if _sha256_bytes(compose_normalized.encode("utf-8")) != (
-        _ANALYSIS_RUNTIME_UPGRADE_NEW_COMPOSE_SHA256
+    if (
+        _sha256_bytes(compose_normalized.encode("utf-8"))
+        != _GPU_RUNTIME_UPGRADE_NEW_COMPOSE_SHA256
     ):
+        return False
+    gpu_compose_path = resolved_server / "compose.gpu.yml"
+    if not gpu_compose_path.is_file() or _sha256_bytes(
+        _normalize_text(gpu_compose_path.read_text(encoding="utf-8")).encode("utf-8")
+    ) != _GPU_RUNTIME_UPGRADE_NEW_GPU_COMPOSE_SHA256:
         return False
 
     stored = _read_signature_file(deployment_signature_path(resolved_root))
@@ -417,19 +438,27 @@ def migrate_analysis_runtime_signature(
     if (
         components.get("db_schema") != current.components["db_schema"]
         or components.get("domain_contract") != current.components["domain_contract"]
-        or components.get("deployment_contract")
-        != _ANALYSIS_RUNTIME_UPGRADE_OLD_DEPLOYMENT_SHA256
     ):
         return False
-    old_compose_payload = {
-        "app_config_schema": AppConfig.model_json_schema(),
-        "allowed_secret_keys": _ALLOWED_SECRET_KEYS,
-        "required_deployment_env_keys": _REQUIRED_DEPLOYMENT_ENV_KEYS,
-        "compose_sha256": _ANALYSIS_RUNTIME_UPGRADE_OLD_COMPOSE_SHA256,
-    }
-    if _sha256_bytes(_canonical_json_bytes(old_compose_payload)) != (
-        _ANALYSIS_RUNTIME_UPGRADE_OLD_DEPLOYMENT_SHA256
+    old_deployment_hashes = []
+    for old_compose_hash in (
+        _ANALYSIS_RUNTIME_UPGRADE_OLD_COMPOSE_SHA256,
+        _ANALYSIS_RUNTIME_UPGRADE_NEW_COMPOSE_SHA256,
     ):
+        old_compose_payload = {
+            "app_config_schema": AppConfig.model_json_schema(),
+            "allowed_secret_keys": _ALLOWED_SECRET_KEYS,
+            "required_deployment_env_keys": _REQUIRED_DEPLOYMENT_ENV_KEYS,
+            "compose_sha256": old_compose_hash,
+        }
+        candidate_hash = _sha256_bytes(_canonical_json_bytes(old_compose_payload))
+        if (
+            old_compose_hash == _ANALYSIS_RUNTIME_UPGRADE_OLD_COMPOSE_SHA256
+            and candidate_hash != _ANALYSIS_RUNTIME_UPGRADE_OLD_DEPLOYMENT_SHA256
+        ):
+            continue
+        old_deployment_hashes.append(candidate_hash)
+    if components.get("deployment_contract") not in old_deployment_hashes:
         return False
 
     old_combined = _sha256_bytes(

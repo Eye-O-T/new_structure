@@ -14,9 +14,12 @@ Data에서 작업과 사람 영역 이미지(크롭)의 경로를 받아 추가 
 
 ```dotenv
 ANALYSIS_PLUGIN=server.services.analysis.processors.attributes:PersonAttributeAnalyzer
+ANALYSIS_DEVICE=auto
 ```
 
-기본 컨테이너 경로는 `/models/par_serving_exp3.pt`다. 호스트의 `MODELS_DIR`에 `par_serving_exp3.pt`를 두어야 한다. analysis 시작은 모델 번들·가중치 로드가 성공한 뒤에만 완료되며, 파일 누락·번들 오류·초기화 시간 초과는 제한된 오류 코드로 기록한 뒤 프로세스를 종료한다. analysis Compose 재시작은 최대 3회이며, 그 뒤에는 모델 복구 후 담당자가 다시 시작해야 한다. 실패한 시작은 작업을 수령하거나 완료·분석 완료 이벤트를 만들지 않는다. 가동 중 격리 모델의 재로딩이 실패하면 현재 작업을 성공 처리하지 않고 재시도 상태로 반환한 뒤 analysis 프로세스를 종료한다. PAR 분석기는 CPU에서 ResNet34 번들을 제한 로더로 읽고 `gender`, `age`, `hat`, `upper_color`, `lower_color`, `sleeve`, `lower_type`, `carrying`을 `metadata.attributes`에 반환한다. 속성 점수는 모델 출력의 상대 점수이며 실제 신원·나이 또는 정답 확률을 뜻하지 않는다. 이 모델에는 위험도·흉기·행동 분류가 없다.
+`PREPROCESSING_GPU=true`이면 기본 `auto`는 Analysis에서도 CUDA 0번을 필수로 사용한다. GPU Compose override는 Analysis에 CUDA wheel과 GPU 자원을 함께 지정한다. CUDA 장치 준비나 PAR 실제 warm-up이 실패하면 `ANALYSIS_DEVICE_UNAVAILABLE` 또는 `ANALYSIS_DEVICE_EXECUTION_FAILED`로 시작을 거부하며 CPU로 대체하지 않는다. 특정 모델만 CPU에서 실행하려면 `ANALYSIS_DEVICE=cpu`를 명시한다. `/health/ready`와 관리자 시스템 상태에는 요청 장치와 실제 실행 장치가 표시된다.
+
+기본 컨테이너 경로는 `/models/par_serving_exp3.pt`다. 호스트의 `MODELS_DIR`에 `par_serving_exp3.pt`를 두어야 한다. analysis 시작은 모델 번들·가중치 로드가 성공한 뒤에만 완료되며, 파일 누락·번들 오류·장치 준비·실행·초기화 시간 초과는 제한된 오류 코드로 기록한 뒤 프로세스를 종료한다. analysis Compose 재시작은 최대 3회이며, 그 뒤에는 모델 복구 후 담당자가 다시 시작해야 한다. 실패한 시작은 작업을 수령하거나 완료·분석 완료 이벤트를 만들지 않는다. 가동 중 격리 모델의 재로딩이 실패하면 현재 작업을 성공 처리하지 않고 재시도 상태로 반환한 뒤 analysis 프로세스를 종료한다. PAR 분석기는 제한 로더로 ResNet34 번들을 읽고 선택한 실행 장치에서 추론해 `gender`, `age`, `hat`, `upper_color`, `lower_color`, `sleeve`, `lower_type`, `carrying`을 `metadata.attributes`에 반환한다. 속성 점수는 모델 출력의 상대 점수이며 실제 신원·나이 또는 정답 확률을 뜻하지 않는다. 이 모델에는 위험도·흉기·행동 분류가 없다.
 
 이 분석기는 `global_person_id`를 지정할 수 없다. 인물 연결 작업과 완료 순서는 독립적이다. 스냅샷·모델은 읽기 전용이며 DB는 직접 열지 않는다.
 

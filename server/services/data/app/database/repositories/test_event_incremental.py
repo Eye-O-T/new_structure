@@ -2,7 +2,9 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 from ai_cctv_core.contracts.objects import (
     IdentityDescriptor,
@@ -26,6 +28,49 @@ def _sample_observation(session_id: str = "a" * 32) -> dict:
 
 
 class IncrementalEventTests(unittest.TestCase):
+    def test_empty_object_queue_does_not_take_write_transaction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = DataRepository(Database(Path(directory) / "data.sqlite"))
+            repository.initialize()
+            with patch.object(repository.database, "transaction", side_effect=AssertionError("write lock")):
+                self.assertIsNone(repository.claim_object_job("analysis"))
+
+    def test_concurrent_claims_assign_one_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = DataRepository(Database(Path(directory) / "data.sqlite"))
+            repository.initialize()
+            with repository.database.transaction() as connection:
+                connection.execute(
+                    "INSERT INTO cameras(camera_id,name,stream_path,created_at,updated_at) "
+                    "VALUES('cam_001','Camera','cam_001','now','now')"
+                )
+            self._create_appearance(repository)
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                claims = list(executor.map(repository.claim_object_job, ("analysis", "analysis")))
+            self.assertEqual(sum(claim is not None for claim in claims), 1)
+
+    def test_exhausted_pending_job_is_marked_failed_even_if_not_due(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = DataRepository(Database(Path(directory) / "data.sqlite"))
+            repository.initialize()
+            with repository.database.transaction() as connection:
+                connection.execute(
+                    "INSERT INTO cameras(camera_id,name,stream_path,created_at,updated_at) "
+                    "VALUES('cam_001','Camera','cam_001','now','now')"
+                )
+            self._create_appearance(repository)
+            with repository.database.transaction() as connection:
+                connection.execute(
+                    "UPDATE object_jobs SET attempts=5,next_attempt_at='9999-01-01T00:00:00Z' "
+                    "WHERE stage='analysis'"
+                )
+            self.assertIsNone(repository.claim_object_job("analysis"))
+            with repository.database.connection() as connection:
+                row = connection.execute(
+                    "SELECT state FROM object_jobs WHERE stage='analysis'"
+                ).fetchone()
+            self.assertEqual(row["state"], "failed")
+
     def test_late_and_sparse_event_ids_are_ordered_by_storage_id(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = DataRepository(Database(Path(directory) / "data.sqlite"))

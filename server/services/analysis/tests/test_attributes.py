@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -9,6 +10,8 @@ import torch
 from ai_cctv_core.processing.plugins import load_factory
 from server.services.analysis.processors.attributes import (
     BUNDLE_FORMAT,
+    _MultiHeadNetwork,
+    AnalysisModelStartupError,
     PersonAttributeAnalyzer,
     _load_bundle,
     _select_multi_label,
@@ -34,6 +37,32 @@ def valid_bundle():
 
 
 class AttributeBundleTests(unittest.TestCase):
+    def test_cuda_request_without_gpu_mode_fails_with_safe_device_code(self):
+        with patch.dict("os.environ", {"ANALYSIS_DEVICE": "cuda:0", "PREPROCESSING_GPU": "false"}, clear=True):
+            with self.assertRaises(AnalysisModelStartupError) as caught:
+                PersonAttributeAnalyzer()
+        self.assertEqual(caught.exception.startup_error_code, "ANALYSIS_DEVICE_UNAVAILABLE")
+
+    def test_explicit_cpu_runs_par_and_reports_the_execution_device(self):
+        bundle = valid_bundle()
+        bundle["state_dict"] = _MultiHeadNetwork(bundle["attributes"]).state_dict()
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.save(bundle, directory)
+            with patch.dict("os.environ", {
+                "PAR_MODEL_PATH": str(path),
+                "ANALYSIS_DEVICE": "cpu",
+                "PREPROCESSING_GPU": "false",
+            }, clear=True):
+                analyzer = PersonAttributeAnalyzer()
+                with patch(
+                    "server.services.analysis.processors.attributes.load_observation_crop",
+                    return_value=np.zeros((32, 32, 3), dtype=np.uint8),
+                ):
+                    result = analyzer.process({}, path)
+        self.assertEqual(analyzer.runtime_metadata()["execution_device"], "cpu")
+        self.assertEqual(result["outcome"], "complete")
+        self.assertIn("hat", result["metadata"]["attributes"])
+
     def save(self, bundle, directory):
         path = Path(directory) / "model.pt"
         torch.save(bundle, path)

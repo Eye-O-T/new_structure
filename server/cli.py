@@ -539,7 +539,7 @@ def _add_initialization_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--inference-device",
         default="auto",
-        help="inference device: auto, cpu, cuda, or cuda:<index> (default: auto)",
+        help="AI inference device for detection, identity, and analysis: auto, cpu, cuda, or cuda:<index> (default: auto)",
     )
     tls = parser.add_argument_group("TLS files")
     tls.add_argument(

@@ -21,6 +21,8 @@ Preprocessing의 Docker `healthy`는 HTTP health 응답을 받았다는 뜻입�
 시스템 진단에서 `preprocessing.status`와 카메라별
 `live_objects_stale`·`live_objects_observed_age_seconds`를 확인해 좌표가 영상에 표시될
 만큼 최신인지 함께 확인하십시오. 만료된 좌표는 재생 영상 위에 표시되지 않습니다.
+서버 제어판의 ‘상태 확인’에는 감지 모델·영상·첫 좌표의 준비 여부와 좌표 지연이 표시됩니다.
+활성 카메라가 없으면 대기 상태이며, YOLO는 워밍업 추론을 마친 뒤 모델 준비 완료로 표시됩니다.
 
 Pi에서는 다음을 사용합니다.
 
