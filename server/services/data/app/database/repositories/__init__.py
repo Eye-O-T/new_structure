@@ -2,6 +2,10 @@
 """이벤트와 후속 알림·객체 작업은 같은 연결에서 함께 커밋한다.
 분야별 mixin은 SQL을 나누되 별도 중첩 트랜잭션을 열지 않는다."""
 
+from datetime import datetime
+import threading
+from typing import Any
+
 from ..connection import Database
 from .base import CameraHasHistory, CameraLimitReached, EdgeIdentityConflict
 from .cameras import CamerasRepositoryMixin
@@ -41,6 +45,9 @@ class DataRepository(
         self.database = database
         self.identity_match_threshold = identity_match_threshold
         self.identity_match_margin = identity_match_margin
+        self._live_objects_lock = threading.RLock()
+        self._live_objects_by_camera: dict[str, dict[str, Any]] = {}
+        self._track_presence_flushed_at: dict[tuple[str, str, str], datetime] = {}
 
     def initialize(self) -> None:
         self.database.initialize()

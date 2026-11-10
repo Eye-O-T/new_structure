@@ -337,7 +337,12 @@ class CamerasRepositoryMixin:
                     """,
                     (old_edge_device_id, old_edge_device_id, old_edge_device_id, old_edge_device_id),
                 )
-        return _camera(row)
+        updated = _camera(row)
+        if updated is not None and not updated.get("enabled", True):
+            clear_cache = getattr(self, "clear_live_objects_cache", None)
+            if callable(clear_cache):
+                clear_cache(camera_id)
+        return updated
 
     def get_edge_device(self, edge_device_id: str) -> dict[str, Any] | None:
         with self.database.connection() as connection:
@@ -678,7 +683,12 @@ class CamerasRepositoryMixin:
                         """,
                         (edge_device_id, edge_device_id, edge_device_id, edge_device_id),
                     )
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted:
+            clear_cache = getattr(self, "clear_live_objects_cache", None)
+            if callable(clear_cache):
+                clear_cache(camera_id)
+        return deleted
 
     # 기존 카메라에만 송출 사용자명·해시를 저장하고 최초 생성 시각은 유지한다.
     def put_camera_publish_credential(

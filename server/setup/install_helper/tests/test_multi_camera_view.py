@@ -320,3 +320,57 @@ class MultiCameraViewTests(unittest.TestCase):
         )
         self.assertEqual(self.window.event_list.count(), 1)
         self.assertEqual(self.window.metric_appear["value"].text(), "1")
+
+    def test_camera_view_reuses_scaled_base_pixmap_across_object_updates(self):
+        from PyQt5.QtGui import QColor, QImage
+        from server.desktop.admin.camera_view import CameraView
+
+        view = CameraView("cam-1", "Camera 1")
+        view.resize(640, 480)
+        view.surface.resize(600, 400)
+
+        frame1 = QImage(1280, 720, QImage.Format_RGB888)
+        frame1.fill(QColor("#1d4ed8"))
+        frame2 = QImage(1280, 720, QImage.Format_RGB888)
+        frame2.fill(QColor("#15803d"))
+
+        view.set_frame(frame1)
+        self.assertEqual(view._base_pixmap_builds, 1)
+        self.assertIsNotNone(view._cached_base_pixmap)
+        first_cached = view._cached_base_pixmap
+
+        # Multiple set_objects calls must reuse the cached base pixmap without rescaling
+        for pid in ("1", "2", "3"):
+            view.set_objects(
+                {
+                    "stale": False,
+                    "frame_width": 1280,
+                    "frame_height": 720,
+                    "objects": [
+                        {
+                            "person_id": pid,
+                            "global_person_id": 10,
+                            "bbox": [100, 100, 300, 500],
+                        }
+                    ],
+                }
+            )
+        view.set_overlay_enabled(False)
+        view.set_overlay_enabled(True)
+        self.assertEqual(view._base_pixmap_builds, 1)
+        self.assertIs(view._cached_base_pixmap, first_cached)
+
+        # New frame invalidates and rebuilds the cache
+        view.set_frame(frame2)
+        self.assertEqual(view._base_pixmap_builds, 2)
+
+        # Surface resize rebuilds the cache for the new dimensions
+        view.surface.resize(480, 320)
+        view._render()
+        self.assertEqual(view._base_pixmap_builds, 3)
+
+        # Stopping clears the cache
+        view.show_stopped("중지됨")
+        self.assertIsNone(view._cached_base_pixmap)
+        self.assertIsNone(view._cached_base_key)
+        view.close()

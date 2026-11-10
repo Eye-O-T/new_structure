@@ -117,6 +117,48 @@ class LiveObjectsRepositoryTests(unittest.TestCase):
         self.assertFalse(result["stale"])
         self.assertEqual(result["objects"][0]["person_id"], "7")
 
+    def test_track_presence_db_writes_are_throttled_to_one_second_while_memory_stays_live(self):
+        session = "b" * 32
+        timings_list = []
+        for step_ms in (0, 200, 400, 600, 800, 1000):
+            ts = NOW + timedelta(milliseconds=step_ms)
+            timings = {}
+            with patch(
+                "server.services.data.app.database.repositories.objects.utc_now",
+                return_value=ts,
+            ):
+                self.repository.put_live_objects(
+                    "cam_001",
+                    self._payload(
+                        ts,
+                        objects=[{**PERSON, "bbox": [10 + step_ms // 100, 20, 110, 220]}],
+                        session=session,
+                    ),
+                    timings=timings,
+                )
+                live = self.repository.get_live_objects("cam_001")
+            self.assertFalse(live["stale"])
+            self.assertEqual(live["objects"][0]["bbox"][0], 10 + step_ms // 100)
+            timings_list.append((step_ms, timings))
+
+        with self.repository.database.connection() as connection:
+            row = connection.execute(
+                "SELECT first_seen_at, last_seen_at FROM person_track_presence "
+                "WHERE camera_id='cam_001' AND tracking_session_id=? AND person_id='7'",
+                (session,),
+            ).fetchone()
+            live_table_count = connection.execute(
+                "SELECT COUNT(*) FROM live_objects"
+            ).fetchone()[0]
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["first_seen_at"], "2026-11-09T12:00:00.000Z")
+        self.assertEqual(row["last_seen_at"], "2026-11-09T12:00:01.000Z")
+        self.assertEqual(live_table_count, 0)
+        for step_ms, timings in timings_list[1:-1]:
+            self.assertEqual(timings["db_lock_wait_seconds"], 0.0, step_ms)
+            self.assertEqual(timings["db_transaction_seconds"], 0.0, step_ms)
+
 
 if __name__ == "__main__":
     unittest.main()

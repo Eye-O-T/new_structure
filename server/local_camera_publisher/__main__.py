@@ -16,6 +16,9 @@ from server.operations.local_camera import (
     write_runtime_state,
 )
 
+SUPPORTED_ENCODERS = ("h264_nvenc", "libx264")
+EARLY_FAILURE_FALLBACK_SECONDS = 5.0
+
 
 def _ffmpeg_path() -> str:
     value = resolve_ffmpeg_executable()
@@ -37,6 +40,24 @@ def _sanitize_error(text: str) -> str:
     return lines[-1][:200] if lines else ""
 
 
+def _candidate_encoders(preferred: str | None = None) -> tuple[str, ...]:
+    raw = (
+        preferred
+        if preferred is not None
+        else os.getenv("AI_CCTV_LOCAL_CAMERA_ENCODER", "auto")
+    )
+    normalized = str(raw or "auto").strip().lower()
+    if normalized == "libx264":
+        return ("libx264",)
+    if normalized == "h264_nvenc":
+        return ("h264_nvenc",)
+    return SUPPORTED_ENCODERS
+
+
+def _startup_wait_seconds(encoder: str) -> float:
+    return 0.8 if encoder == "h264_nvenc" else 0.4
+
+
 def _build_command(
     ffmpeg: str,
     *,
@@ -46,6 +67,7 @@ def _build_command(
     height: int,
     fps: int,
     explicit_dshow_mode: bool,
+    encoder: str = "libx264",
 ) -> list[str]:
     gop = max(1, fps)
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "dshow"]
@@ -61,23 +83,49 @@ def _build_command(
         cmd += ["-vf", f"scale={width}:{height},hflip", "-r", str(fps)]
     else:
         cmd += ["-vf", "hflip"]
+    if encoder == "h264_nvenc":
+        cmd += [
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p1",
+            "-tune",
+            "ull",
+            "-rc",
+            "cbr",
+            "-b:v",
+            "2500k",
+            "-maxrate",
+            "2500k",
+            "-bufsize",
+            "5000k",
+            "-g",
+            str(gop),
+            "-bf",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    else:
+        cmd += [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-g",
+            str(gop),
+            "-keyint_min",
+            str(gop),
+            "-sc_threshold",
+            "0",
+            "-bf",
+            "0",
+            "-pix_fmt",
+            "yuv420p",
+        ]
     cmd += [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-tune",
-        "zerolatency",
-        "-g",
-        str(gop),
-        "-keyint_min",
-        str(gop),
-        "-sc_threshold",
-        "0",
-        "-bf",
-        "0",
-        "-pix_fmt",
-        "yuv420p",
         "-f",
         "rtsp",
         "-rtsp_transport",
@@ -123,6 +171,7 @@ def main() -> int:
         width = int(payload.get("width", 1280))
         height = int(payload.get("height", 720))
         fps = int(payload.get("fps", 30))
+        encoders = _candidate_encoders(payload.get("encoder"))
         ffmpeg = _ffmpeg_path()
 
         state.parent.mkdir(parents=True, exist_ok=True)
@@ -135,63 +184,83 @@ def main() -> int:
         if os.name == "nt":
             popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-        command = _build_command(
-            ffmpeg,
-            device=device,
-            stream_url=stream_url,
-            width=width,
-            height=height,
-            fps=fps,
-            explicit_dshow_mode=True,
-        )
-        child = subprocess.Popen(command, **popen_kwargs)
-        time.sleep(0.4)
-        if child.poll() is not None:
-            # Retry with device default DirectShow pin format if 1280x720@30fps was rejected
+        child: subprocess.Popen | None = None
+        stopping = False
+
+        def terminate(_signum, _frame):
+            nonlocal stopping
+            stopping = True
+            if child is not None and child.poll() is None:
+                child.terminate()
+
+        signal.signal(signal.SIGTERM, terminate)
+        signal.signal(signal.SIGINT, terminate)
+
+        candidates = [
+            (encoder, explicit_mode)
+            for encoder in encoders
+            for explicit_mode in (True, False)
+        ]
+        skip_nvenc = False
+        for index, (encoder, explicit_mode) in enumerate(candidates):
+            if stopping:
+                break
+            if skip_nvenc and encoder == "h264_nvenc":
+                continue
             stderr_handle.seek(0)
             stderr_handle.truncate()
-            fallback_cmd = _build_command(
+            command = _build_command(
                 ffmpeg,
                 device=device,
                 stream_url=stream_url,
                 width=width,
                 height=height,
                 fps=fps,
-                explicit_dshow_mode=False,
+                explicit_dshow_mode=explicit_mode,
+                encoder=encoder,
             )
-            child = subprocess.Popen(fallback_cmd, **popen_kwargs)
-            time.sleep(0.4)
+            started_at = time.monotonic()
+            child = subprocess.Popen(command, **popen_kwargs)
+            del command
+            time.sleep(_startup_wait_seconds(encoder))
             if child.poll() is not None:
+                continue
+
+            write_runtime_state(
+                state,
+                {
+                    "helper_pid": os.getpid(),
+                    "ffmpeg_pid": child.pid,
+                    "camera_id": camera_id,
+                    "device_name": device,
+                    "encoder": encoder,
+                },
+            )
+            rc = child.wait()
+            has_libx264_fallback = any(
+                rem_enc == "libx264" for rem_enc, _ in candidates[index + 1 :]
+            )
+            if (
+                rc != 0
+                and not stopping
+                and encoder == "h264_nvenc"
+                and has_libx264_fallback
+                and (time.monotonic() - started_at) < EARLY_FAILURE_FALLBACK_SECONDS
+            ):
+                skip_nvenc = True
+                continue
+            if rc != 0:
                 stderr_handle.flush()
-                stderr_text = _read_stderr_log(stderr_log)
-                _record_error(
-                    error_path,
-                    stderr_text or "카메라 장치를 열거나 RTSP 서버에 연결하지 못했습니다.",
-                )
-                return child.returncode or 1
+                _record_error(error_path, _read_stderr_log(stderr_log))
+            return rc
 
-        del payload, stream_url, command
-        write_runtime_state(
-            state,
-            {
-                "helper_pid": os.getpid(),
-                "ffmpeg_pid": child.pid,
-                "camera_id": camera_id,
-                "device_name": device,
-            },
+        stderr_handle.flush()
+        stderr_text = _read_stderr_log(stderr_log)
+        _record_error(
+            error_path,
+            stderr_text or "카메라 장치를 열거나 RTSP 서버에 연결하지 못했습니다.",
         )
-
-        def terminate(_signum, _frame):
-            if child.poll() is None:
-                child.terminate()
-
-        signal.signal(signal.SIGTERM, terminate)
-        signal.signal(signal.SIGINT, terminate)
-        rc = child.wait()
-        if rc != 0:
-            stderr_handle.flush()
-            _record_error(error_path, _read_stderr_log(stderr_log))
-        return rc
+        return child.returncode if child is not None and child.returncode else 1
     except Exception as exc:
         _record_error(error_path, str(exc))
         return 1

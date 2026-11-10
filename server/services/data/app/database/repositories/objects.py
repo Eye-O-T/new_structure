@@ -1,5 +1,6 @@
 # 인물 식별·추가 분석의 작업 대기열, 최신 객체 좌표, 카메라 간 인물 연결을 저장한다.
 
+import copy
 import json
 import uuid
 from datetime import timedelta
@@ -8,13 +9,50 @@ from ai_cctv_core.contracts.objects import (
     LIVE_OBJECTS_MAX_AGE_SECONDS,
     ObjectJobCompletion,
 )
-from ai_cctv_core.time import format_utc, utc_now
+from ai_cctv_core.time import format_utc, parse_utc, utc_now
 
 from .events import _insert_analysis_completed_event
 from .identity import conflicting_global_ids, note_track_observation, resolve_identity
 from .job_state import update_event_job_state
 
+TRACK_PRESENCE_FLUSH_INTERVAL_SECONDS = 1.0
+
+
 class ObjectRepositoryMixin:
+    def clear_live_objects_cache(
+        self, camera_id: str | None = None, *, cutoff: str | None = None
+    ) -> None:
+        cutoff_dt = parse_utc(cutoff) if cutoff else None
+        with self._live_objects_lock:
+            if camera_id is not None:
+                self._live_objects_by_camera.pop(camera_id, None)
+                stale_keys = [
+                    key
+                    for key in self._track_presence_flushed_at
+                    if key[0] == camera_id
+                ]
+                for key in stale_keys:
+                    self._track_presence_flushed_at.pop(key, None)
+                return
+            if cutoff_dt is not None:
+                expired_cameras = [
+                    cam_id
+                    for cam_id, record in self._live_objects_by_camera.items()
+                    if record["observed_dt"] < cutoff_dt
+                ]
+                for cam_id in expired_cameras:
+                    self._live_objects_by_camera.pop(cam_id, None)
+                expired_tracks = [
+                    key
+                    for key, flushed_dt in self._track_presence_flushed_at.items()
+                    if flushed_dt < cutoff_dt
+                ]
+                for key in expired_tracks:
+                    self._track_presence_flushed_at.pop(key, None)
+                return
+            self._live_objects_by_camera.clear()
+            self._track_presence_flushed_at.clear()
+
     def requeue_unconfigured_objects(self, stage):
         # 아직 모델이 없는 작업은 실패와 구분한다. 모델 연결 후 이 목록을 다시 대기 상태로 옮긴다.
         now = format_utc(utc_now())
@@ -38,34 +76,97 @@ class ObjectRepositoryMixin:
     def put_live_objects(self, camera_id, payload, timings=None):
         stamp = format_utc(utc_now())
         observed = format_utc(payload.observed_at)
-        with self.database.transaction(timings) as connection:
-            changed = connection.execute(
-                "INSERT INTO live_objects VALUES (?,?,?,?) ON CONFLICT(camera_id) DO UPDATE SET payload_json=excluded.payload_json,observed_at=excluded.observed_at,received_at=excluded.received_at WHERE excluded.observed_at>live_objects.observed_at",
-                (camera_id, payload.model_dump_json(), observed, stamp),
-            )
-            if changed.rowcount:
-                # 모든 활성 track의 관측 구간을 보존하여 늦게 완료되는 식별에도 동시성을 검사한다.
-                for obj in payload.objects:
+        observed_dt = parse_utc(observed)
+        received_dt = parse_utc(stamp)
+        objects_to_flush = []
+        with self._live_objects_lock:
+            current = self._live_objects_by_camera.get(camera_id)
+            if current is not None and observed <= current["observed_at"]:
+                if timings is not None:
+                    timings.setdefault("db_lock_wait_seconds", 0.0)
+                    timings.setdefault("db_transaction_seconds", 0.0)
+                return
+            if (
+                current is not None
+                and current["tracking_session_id"] != payload.tracking_session_id
+            ):
+                stale_keys = [
+                    key
+                    for key in self._track_presence_flushed_at
+                    if key[0] == camera_id and key[1] != payload.tracking_session_id
+                ]
+                for key in stale_keys:
+                    self._track_presence_flushed_at.pop(key, None)
+            self._live_objects_by_camera[camera_id] = {
+                "payload": payload.model_dump(mode="json"),
+                "observed_at": observed,
+                "observed_dt": observed_dt,
+                "received_at": stamp,
+                "received_dt": received_dt,
+                "tracking_session_id": payload.tracking_session_id,
+            }
+            # 모든 활성 track의 관측 구간을 보존하여 늦게 완료되는 식별에도 동시성을 검사한다.
+            # 동일 트랙의 DB 쓰기는 1.0초 간격(ACTIVE_OBSERVATION_SECONDS=3초 이내)으로 병합한다.
+            for obj in payload.objects:
+                track_key = (camera_id, payload.tracking_session_id, obj.person_id)
+                last_flushed = self._track_presence_flushed_at.get(track_key)
+                if (
+                    last_flushed is None
+                    or (observed_dt - last_flushed).total_seconds()
+                    >= TRACK_PRESENCE_FLUSH_INTERVAL_SECONDS
+                ):
+                    objects_to_flush.append(obj.person_id)
+            if len(self._track_presence_flushed_at) > 256:
+                expired_keys = [
+                    key
+                    for key, flushed_dt in self._track_presence_flushed_at.items()
+                    if (observed_dt - flushed_dt).total_seconds()
+                    > LIVE_OBJECTS_MAX_AGE_SECONDS * 2
+                ]
+                for key in expired_keys:
+                    self._track_presence_flushed_at.pop(key, None)
+
+        if objects_to_flush:
+            with self.database.transaction(timings) as connection:
+                for person_id in objects_to_flush:
                     note_track_observation(
                         connection,
                         camera_id,
                         payload.tracking_session_id,
-                        obj.person_id,
+                        person_id,
                         observed,
                     )
+            with self._live_objects_lock:
+                for person_id in objects_to_flush:
+                    track_key = (camera_id, payload.tracking_session_id, person_id)
+                    prev = self._track_presence_flushed_at.get(track_key)
+                    if prev is None or observed_dt > prev:
+                        self._track_presence_flushed_at[track_key] = observed_dt
+        elif timings is not None:
+            timings.setdefault("db_lock_wait_seconds", 0.0)
+            timings.setdefault("db_transaction_seconds", 0.0)
 
     # 활성 카메라의 신선한 관찰에 같은 추적 세션의 전역 인물 ID를 결합한다.
     def get_live_objects(self, camera_id):
-        from ai_cctv_core.time import parse_utc
-
         now = utc_now()
+        with self._live_objects_lock:
+            record = self._live_objects_by_camera.get(camera_id)
+        if record is None:
+            return {
+                "camera_id": camera_id,
+                "objects": [],
+                "stale": True,
+                "stale_reason": "no_observation",
+                "observed_age_seconds": None,
+                "received_age_seconds": None,
+            }
         with self.database.connection() as connection:
-            row = connection.execute(
-                "SELECT l.* FROM live_objects l JOIN cameras c ON c.camera_id=l.camera_id WHERE l.camera_id=? AND c.enabled=1",
+            camera_row = connection.execute(
+                "SELECT enabled FROM cameras WHERE camera_id=? AND enabled=1",
                 (camera_id,),
             ).fetchone()
             # 실시간 좌표의 보관 기한을 넘었거나 미래 시각인 값은 화면에 남기지 않는다.
-            if row is None:
+            if camera_row is None:
                 return {
                     "camera_id": camera_id,
                     "objects": [],
@@ -74,8 +175,8 @@ class ObjectRepositoryMixin:
                     "observed_age_seconds": None,
                     "received_age_seconds": None,
                 }
-            observed_age = (now - parse_utc(row["observed_at"])).total_seconds()
-            received_age = (now - parse_utc(row["received_at"])).total_seconds()
+            observed_age = (now - record["observed_dt"]).total_seconds()
+            received_age = (now - record["received_dt"]).total_seconds()
             if not 0 <= observed_age <= LIVE_OBJECTS_MAX_AGE_SECONDS:
                 return {
                     "camera_id": camera_id,
@@ -85,16 +186,17 @@ class ObjectRepositoryMixin:
                     "observed_age_seconds": max(0, observed_age),
                     "received_age_seconds": max(0, received_age),
                 }
-            result = json.loads(row["payload_json"])
-            links = {
-                r["person_id"]: r["global_person_id"]
-                for r in connection.execute(
-                    "SELECT person_id,global_person_id FROM person_identity_links WHERE camera_id=? AND tracking_session_id=?",
-                    (camera_id, result["tracking_session_id"]),
-                ).fetchall()
-            }
-            for obj in result["objects"]:
-                obj["global_person_id"] = links.get(obj["person_id"])
+            result = copy.deepcopy(record["payload"])
+            if result["objects"]:
+                links = {
+                    r["person_id"]: r["global_person_id"]
+                    for r in connection.execute(
+                        "SELECT person_id,global_person_id FROM person_identity_links WHERE camera_id=? AND tracking_session_id=?",
+                        (camera_id, result["tracking_session_id"]),
+                    ).fetchall()
+                }
+                for obj in result["objects"]:
+                    obj["global_person_id"] = links.get(obj["person_id"])
             return {
                 **result,
                 "camera_id": camera_id,

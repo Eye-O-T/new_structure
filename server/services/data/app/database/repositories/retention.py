@@ -142,6 +142,9 @@ class RetentionRepositoryMixin:
             # 삭제 완료 tombstone도 한 보관 기간 더 남겨 늦은 완료 통지의 중복 등록을 억제한다.
             remove("recording_segments", "status='deleted' AND updated_at<?", (cutoff,))
             remove("identity_gallery", "observed_at<?", (cutoff,))
+        clear_cache = getattr(self, "clear_live_objects_cache", None)
+        if callable(clear_cache):
+            clear_cache(cutoff=cutoff)
         return counts
 
     def snapshot_is_referenced(self, path: str) -> bool:

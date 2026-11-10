@@ -137,12 +137,15 @@ def publisher_status(data_root: Path) -> dict[str, Any]:
     if not running:
         path.unlink(missing_ok=True)
         return {"status": "stopped"}
-    return {
+    result: dict[str, Any] = {
         "status": "running",
         "pid": state["ffmpeg_pid"],
         "camera_id": str(state.get("camera_id", "")),
         "device_name": str(state.get("device_name", "")),
     }
+    if state.get("encoder"):
+        result["encoder"] = str(state["encoder"])
+    return result
 
 
 def save_device_setting(data_root: Path, device_name: str) -> None:

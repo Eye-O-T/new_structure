@@ -36,6 +36,9 @@ class CameraView(QFrame):
         self.camera_id = camera_id
         self.name = name or camera_id
         self._frame = None
+        self._cached_base_pixmap = None
+        self._cached_base_key = None
+        self._base_pixmap_builds = 0
         self._objects = None
         self._objects_received_at = 0.0
         self._overlay_enabled = True
@@ -189,10 +192,14 @@ class CameraView(QFrame):
     def show_loading(self, message):
         self.set_status(message, "#facc15")
         if self._frame is None:
+            self._cached_base_pixmap = None
+            self._cached_base_key = None
             self.surface.setPixmap(QPixmap())
             self.surface.setText(message)
 
     def show_error(self, message):
+        self._cached_base_pixmap = None
+        self._cached_base_key = None
         self.set_status("연결 오류", "#ef4444")
         self.surface.setPixmap(QPixmap())
         self.surface.setText(message)
@@ -202,6 +209,9 @@ class CameraView(QFrame):
 
     def show_stopped(self, message):
         self._frame = None
+        self._cached_base_pixmap = None
+        self._cached_base_key = None
+        self._base_pixmap_builds = 0
         self._objects = None
         self._objects_received_at = 0.0
         self.surface.setPixmap(QPixmap())
@@ -226,25 +236,14 @@ class CameraView(QFrame):
         self._objects_received_at = time.monotonic() if self._objects else 0.0
         self._render()
 
-    def _render(self):
-        if (
-            self._frame is None
-            or self.surface.width() <= 0
-            or self.surface.height() <= 0
-        ):
-            return
+    def _build_base_pixmap(self, width, height, display_width, display_height):
+        self._base_pixmap_builds += 1
         source = QPixmap.fromImage(self._frame)
-        width, height = self.surface.width(), self.surface.height()
-        scale = min(width / source.width(), height / source.height())
-        display_width, display_height = (
-            round(source.width() * scale),
-            round(source.height() * scale),
-        )
         x, y = (width - display_width) // 2, (height - display_height) // 2
-        canvas = QPixmap(width, height)
-        canvas.fill(QColor("#0f172a"))
-        painter = QPainter(canvas)
-        painter.drawPixmap(
+        base = QPixmap(width, height)
+        base.fill(QColor("#0f172a"))
+        base_painter = QPainter(base)
+        base_painter.drawPixmap(
             x,
             y,
             source.scaled(
@@ -254,37 +253,81 @@ class CameraView(QFrame):
                 Qt.SmoothTransformation,
             ),
         )
-        if self._overlay_enabled and time.monotonic() - self._objects_received_at <= 3:
-            for entry in overlay_items(self._objects, width, height):
-                x1, y1, x2, y2 = entry["rect"]
-                item = entry["item"]
-                painter.setPen(QPen(QColor("#22c55e"), 2))
-                painter.drawRect(round(x1), round(y1), round(x2 - x1), round(y2 - y1))
-                label = format_person_label(item)
-                font = QFont("Arial", 9, QFont.Bold)
-                painter.setFont(font)
-                metrics = painter.fontMetrics()
-                label_width = min(width, metrics.horizontalAdvance(label) + 10)
-                label_height = metrics.height() + 6
-                label_x = max(0, min(round(x1), width - label_width))
-                label_y = (
-                    round(y1) - label_height - 2
-                    if round(y1) >= label_height + 2
-                    else min(height - label_height, round(y1) + 2)
-                )
-                painter.fillRect(
-                    label_x,
-                    label_y,
-                    label_width,
-                    label_height,
-                    QColor(15, 23, 42, 220),
-                )
-                painter.setPen(QColor("#ffffff"))
-                painter.drawText(
-                    label_x + 5,
-                    label_y + 3 + metrics.ascent(),
-                    label,
-                )
+        base_painter.end()
+        return base
+
+    def _render(self):
+        if (
+            self._frame is None
+            or self._frame.isNull()
+            or self.surface.width() <= 0
+            or self.surface.height() <= 0
+        ):
+            return
+        width, height = self.surface.width(), self.surface.height()
+        frame_width, frame_height = self._frame.width(), self._frame.height()
+        if frame_width <= 0 or frame_height <= 0:
+            return
+        scale = min(width / frame_width, height / frame_height)
+        display_width, display_height = (
+            round(frame_width * scale),
+            round(frame_height * scale),
+        )
+        base_key = (
+            self._frame.cacheKey(),
+            width,
+            height,
+            display_width,
+            display_height,
+        )
+        if self._cached_base_pixmap is None or self._cached_base_key != base_key:
+            self._cached_base_pixmap = self._build_base_pixmap(
+                width, height, display_width, display_height
+            )
+            self._cached_base_key = base_key
+
+        entries = (
+            overlay_items(self._objects, width, height)
+            if self._overlay_enabled and time.monotonic() - self._objects_received_at <= 3
+            else []
+        )
+        if not entries:
+            self.surface.setText("")
+            self.surface.setPixmap(self._cached_base_pixmap)
+            return
+
+        canvas = self._cached_base_pixmap.copy()
+        painter = QPainter(canvas)
+        font = QFont("Arial", 9, QFont.Bold)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        for entry in entries:
+            x1, y1, x2, y2 = entry["rect"]
+            item = entry["item"]
+            painter.setPen(QPen(QColor("#22c55e"), 2))
+            painter.drawRect(round(x1), round(y1), round(x2 - x1), round(y2 - y1))
+            label = format_person_label(item)
+            label_width = min(width, metrics.horizontalAdvance(label) + 10)
+            label_height = metrics.height() + 6
+            label_x = max(0, min(round(x1), width - label_width))
+            label_y = (
+                round(y1) - label_height - 2
+                if round(y1) >= label_height + 2
+                else min(height - label_height, round(y1) + 2)
+            )
+            painter.fillRect(
+                label_x,
+                label_y,
+                label_width,
+                label_height,
+                QColor(15, 23, 42, 220),
+            )
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(
+                label_x + 5,
+                label_y + 3 + metrics.ascent(),
+                label,
+            )
         painter.end()
         self.surface.setText("")
         self.surface.setPixmap(canvas)

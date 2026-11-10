@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 from server.desktop.launcher import desktop_command
 from server.edge_onboarding.host_helper import run_host_helper
-from server.local_camera_publisher.__main__ import _build_command, _sanitize_error
+from server.local_camera_publisher import __main__ as local_camera_main
+from server.local_camera_publisher.__main__ import (
+    _build_command,
+    _candidate_encoders,
+    _sanitize_error,
+)
 from server.operations.local_camera import (
     _pid_running,
     error_state_path,
@@ -115,6 +120,83 @@ class ExecutionInterfaceTests(unittest.TestCase):
         self.assertEqual(
             fallback[fallback.index("-vf") + 1], "scale=1280:720,hflip"
         )
+        nvenc = _build_command(
+            "ffmpeg",
+            device="720p HD Camera",
+            stream_url="rtsp://127.0.0.1:8554/local-camera",
+            width=1280,
+            height=720,
+            fps=30,
+            explicit_dshow_mode=True,
+            encoder="h264_nvenc",
+        )
+        self.assertEqual(nvenc[nvenc.index("-c:v") + 1], "h264_nvenc")
+        self.assertNotIn("-sc_threshold", nvenc)
+        self.assertNotIn("-keyint_min", nvenc)
+        self.assertEqual(_candidate_encoders("auto"), ("h264_nvenc", "libx264"))
+        self.assertEqual(_candidate_encoders("libx264"), ("libx264",))
+        self.assertEqual(_candidate_encoders("h264_nvenc"), ("h264_nvenc",))
+
+    def test_local_camera_publisher_falls_back_from_nvenc_to_libx264(self):
+        import io
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_file = root / "runtime" / "local-camera.json"
+            payload = {
+                "state_path": str(state_file),
+                "error_path": str(root / "runtime" / "local-camera.error.txt"),
+                "device_name": "720p HD Camera",
+                "camera_id": "local-camera",
+                "stream_url": "rtsp://127.0.0.1:8554/local-camera",
+                "width": 1280,
+                "height": 720,
+                "fps": 30,
+            }
+            launched_encoders = []
+            recorded_states = []
+
+            class FakeChild:
+                def __init__(self, encoder, pid):
+                    self.encoder = encoder
+                    self.pid = pid
+                    self.returncode = 1 if encoder == "h264_nvenc" else 0
+
+                def poll(self):
+                    return 1 if self.encoder == "h264_nvenc" else None
+
+                def wait(self):
+                    return self.returncode
+
+                def terminate(self):
+                    pass
+
+            def fake_popen(cmd, **_kwargs):
+                encoder = cmd[cmd.index("-c:v") + 1]
+                launched_encoders.append(encoder)
+                return FakeChild(encoder, 100 + len(launched_encoders))
+
+            with patch.object(
+                local_camera_main.sys, "stdin", io.StringIO(json.dumps(payload))
+            ), patch.object(
+                local_camera_main, "_ffmpeg_path", return_value="ffmpeg"
+            ), patch.object(
+                local_camera_main.subprocess, "Popen", side_effect=fake_popen
+            ), patch.object(
+                local_camera_main.time, "sleep"
+            ), patch.object(
+                local_camera_main,
+                "write_runtime_state",
+                side_effect=lambda _path, data: recorded_states.append(dict(data)),
+            ):
+                rc = local_camera_main.main()
+
+            self.assertEqual(rc, 0)
+            self.assertEqual(
+                launched_encoders, ["h264_nvenc", "h264_nvenc", "libx264"]
+            )
+            self.assertEqual(len(recorded_states), 1)
+            self.assertEqual(recorded_states[0]["encoder"], "libx264")
 
     def test_duplicate_local_camera_start_reuses_the_running_process(self):
         expected = {
