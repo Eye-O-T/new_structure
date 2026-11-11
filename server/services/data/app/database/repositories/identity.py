@@ -10,10 +10,9 @@ from datetime import timedelta
 from ai_cctv_core.contracts.objects import IdentityDescriptor
 from ai_cctv_core.time import format_utc, parse_utc
 
-MATCH_THRESHOLD = 0.97
+MATCH_THRESHOLD = 0.6
 MATCH_MARGIN = 0.05
 MAX_OBSERVATION_GAP_SECONDS = 1800
-SAME_CAMERA_EXCLUSION_SECONDS = 30
 MAX_GALLERY_SAMPLES = 5000
 ACTIVE_OBSERVATION_SECONDS = 3
 
@@ -150,16 +149,9 @@ def resolve_identity(
                 MAX_GALLERY_SAMPLES,
             ),
         ).fetchall()
-        blocked_ids = {
-            candidate["global_person_id"]
-            for candidate in candidates
-            if candidate["camera_id"] == row["camera_id"]
-            and (candidate["tracking_session_id"], candidate["person_id"])
-            != (session, row["person_id"])
-            and abs((observed - parse_utc(candidate["observed_at"])).total_seconds())
-            <= SAME_CAMERA_EXCLUSION_SECONDS
-        }
-        blocked_ids.update(conflicting_global_ids(connection, row, session, stamp))
+        # 같은 카메라에서는 관측 구간이 실제로 겹친 track의 ID만 배제한다.
+        # 앞 track이 끝난 직후 이어진 track(추적 ID 교체·재진입)은 후보로 비교한다.
+        blocked_ids = conflicting_global_ids(connection, row, session, stamp)
         scores: dict[str, float] = {}
         norm = math.hypot(*descriptor.features)
         for candidate in candidates:

@@ -3,9 +3,11 @@
 import json
 from pathlib import Path
 
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QFormLayout, QComboBox, QLineEdit,
     QPushButton, QLabel, QPlainTextEdit, QFileDialog, QMessageBox, QScrollArea,
+    QTabWidget,
 )
 
 from server.edge_onboarding.server_api import (
@@ -14,10 +16,14 @@ from server.edge_onboarding.server_api import (
     write_publish_credentials,
 )
 from .tasks import TaskOwner
+from .edge_panel import EdgePanel
 
 
 class CameraManagement(TaskOwner, QDialog):
-    def __init__(self, api, parent=None):
+    def __init__(
+        self, api, parent=None, *, server_url="", rtsp_host="127.0.0.1",
+        rtsp_port=8554, data_root=None,
+    ):
         super().__init__(parent)
         self.api = api
         self.pending = None
@@ -25,11 +31,23 @@ class CameraManagement(TaskOwner, QDialog):
         self.setWindowTitle("카메라 등록 · 운영 설정")
         self.resize(760, 800)
         layout = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
+        self.edge_panel = EdgePanel(api, self)
+        self.edge_panel.configure(
+            public_url=server_url,
+            rtsp_host=rtsp_host,
+            rtsp_port=rtsp_port,
+            data_root=Path(data_root) if data_root else Path.cwd(),
+        )
+        self.edge_panel.busy_changed.connect(self._edge_busy_changed)
+        self.edge_panel.registration_finished.connect(self._refresh_after_edge)
+        self.tabs.addTab(self.edge_panel, "신규 Edge 연결")
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         self.body = QWidget()
         scroll.setWidget(self.body)
-        layout.addWidget(scroll)
+        self.tabs.addTab(scroll, "등록된 카메라")
         body = QVBoxLayout(self.body)
         self.camera = QComboBox()
         body.addWidget(self.camera)
@@ -49,11 +67,12 @@ class CameraManagement(TaskOwner, QDialog):
         self.apply_profile.clicked.connect(self.set_profile)
         body.addWidget(self.apply_profile)
         self.camera.currentIndexChanged.connect(self.reset_profile)
-        body.addWidget(QLabel("새 등록에는 모든 항목 입력 / 수정에는 변경할 항목만 입력"))
+        body.addWidget(QLabel("선택한 카메라의 설정을 수정하거나 게시 계정을 재발급합니다."))
         form = QFormLayout()
         self.fields = {}
-        for key, label in [("camera_id", "새 카메라 ID"), ("name", "이름"),
-                           ("edge_device_id", "Edge 장치 ID"), ("edge_management_url", "Edge 관리 주소"),
+        for key, label in [("camera_id", "카메라 ID"), ("name", "이름"),
+                           ("edge_device_id", "Edge 장치 ID"),
+                           ("edge_management_url", "Edge 관리 주소"),
                            ("edge_recovery_url", "Edge 복구 주소"), ("edge_auth_token", "새 Edge 인증 토큰")]:
             entry = QLineEdit()
             if key == "edge_auth_token":
@@ -65,7 +84,7 @@ class CameraManagement(TaskOwner, QDialog):
             self.enabled.addItem(text, value)
         form.addRow("사용 설정", self.enabled)
         body.addLayout(form)
-        for text, callback in [("새 카메라 등록", self.register), ("선택한 카메라 수정", self.update),
+        for text, callback in [("선택한 카메라 수정", self.update),
                                ("게시 계정 재발급", self.rotate)]:
             button = QPushButton(text)
             button.clicked.connect(callback)
@@ -79,6 +98,15 @@ class CameraManagement(TaskOwner, QDialog):
         layout.addWidget(self.message)
         self.refresh()
 
+    def _edge_busy_changed(self, busy):
+        self.tabs.setTabEnabled(1, not busy)
+
+    def _refresh_after_edge(self):
+        if self.task is None:
+            self.refresh()
+        else:
+            self.task.finished.connect(lambda: QTimer.singleShot(0, self.refresh))
+
     def reset_profile(self):
         self.profile.clear()
         self.apply_profile.setEnabled(False)
@@ -89,6 +117,7 @@ class CameraManagement(TaskOwner, QDialog):
             self.camera.clear()
             for item in items:
                 self.camera.addItem(f"{item.get('name', '')} · {item['camera_id']}", item["camera_id"])
+            self.edge_panel.confirm_registration_status(items)
             self.message.setText("목록을 갱신했습니다.")
         self.execute(self.api.cameras, completed)
 
@@ -154,14 +183,6 @@ class CameraManagement(TaskOwner, QDialog):
             return False
         return True
 
-    def register(self):
-        values = {key: field.text().strip() for key, field in self.fields.items()}
-        if not all(values.values()):
-            self.message.setText("등록할 카메라의 모든 항목을 입력하세요.")
-            return
-        if self.choose_output():
-            self.execute(lambda: self.api.register_edge(**values), self.handoff)
-
     def rotate(self):
         camera_id = self.camera.currentData()
         if not camera_id or self.pending:
@@ -193,14 +214,14 @@ class CameraManagement(TaskOwner, QDialog):
         self.message.setText("게시 계정을 저장했습니다. 이 파일을 해당 Edge에 적용하세요. 목록 새로고침으로 등록 결과를 확인하세요.")
 
     def reject(self):
-        if self.pending:
-            self.message.setText("게시 계정을 저장한 뒤 닫으세요.")
+        if self.pending or self.task is not None or self.edge_panel.busy or self.edge_panel.has_pending:
+            self.message.setText("진행 중인 작업과 게시 계정 저장을 마친 뒤 닫으세요.")
             return
         super().reject()
 
     def closeEvent(self, event):
-        if self.pending:
+        if self.pending or self.task is not None or self.edge_panel.busy or self.edge_panel.has_pending:
             event.ignore()
-            self.message.setText("게시 계정을 저장한 뒤 닫으세요.")
+            self.message.setText("진행 중인 작업과 게시 계정 저장을 마친 뒤 닫으세요.")
         else:
             super().closeEvent(event)

@@ -274,7 +274,15 @@ class SettingsWindow(TaskOwner, LegacySettingsWindow):
             return
         from .management import CameraManagement
 
-        dialog = CameraManagement(self.api, self)
+        owner = self.parent()
+        dialog = CameraManagement(
+            self.api,
+            self,
+            server_url=owner.server_url,
+            rtsp_host=owner.rtsp_host,
+            rtsp_port=owner.rtsp_port,
+            data_root=self.local_publisher.data_root,
+        )
         dialog.exec_()
         self.execute(self.api.cameras, self.reload_cameras)
 

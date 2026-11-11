@@ -21,7 +21,7 @@ uv run --project server/setup/install_helper --locked python -m server.desktop.s
 uv run --project server/setup/install_helper --locked python -m server.desktop.admin
 ```
 
-일반 운영에서는 저장소 루트의 `ai_cctv.ps1`을 사용합니다. `gui`는 기본 Docker
+일반 운영에서는 저장소 루트의 `ai_cctv.ps1`을 사용합니다. `cli manager`의 `CCTV 관제 · Edge 연결 열기`에서 로그인한 뒤 `카메라 등록 · 운영 설정`의 `신규 Edge 연결` 탭으로 신규 Edge를 등록·페어링할 수 있습니다. `gui`는 기본 Docker
 서비스를 준비한 뒤 선택한 AI 서비스와 Local Camera Publisher를 적용하고 CCTV 관제 화면을
 실행합니다. `cli stop`만 Publisher와 Docker 서비스를 함께 종료하며, 관제 화면을
 닫아도 둘은 종료되지 않습니다.
@@ -36,5 +36,7 @@ uv run --project server/setup/install_helper --locked python -m server.desktop.a
 
 `edge probe`와 `edge pair`는 `--input <json-file>` 또는 표준 입력으로 구조화된 JSON을
 받습니다. 운영 토큰과 게시 비밀번호는 명령행 인수나 일반 출력에 넣지 않습니다.
+
+현재 수동 등록과 Pi 설정은 [Edge–Server 페어링 절차](../docs/edge-server-pairing-guide.md)를 따릅니다. 관제 GUI에 남아 있는 Edge 패널을 다시 연결하는 작업은 [인터페이스 수정 계획](../docs/server-edge-gui-interface-plan.md)에 정리되어 있습니다.
 
 기존 `server.setup.install_helper.*` 경로는 호환성을 위해 유지됩니다. 신규 코드와 문서는 위 경로를 사용해야 합니다.

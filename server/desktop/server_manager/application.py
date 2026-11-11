@@ -152,7 +152,7 @@ class ServerManagerWindow(QWidget):
     def _desktop_group(self) -> QGroupBox:
         group = QGroupBox("CCTV 관제")
         layout = QHBoxLayout(group)
-        button = QPushButton("CCTV 관제 화면 열기")
+        button = QPushButton("CCTV 관제 · Edge 연결 열기")
         button.clicked.connect(self._open_admin)
         layout.addWidget(button)
         return group
@@ -161,9 +161,9 @@ class ServerManagerWindow(QWidget):
         try:
             process = launch_desktop("admin", admin_arguments(self.deployment))
         except OSError as exc:
-            self.output.setPlainText(f"CCTV 관제 화면 실행 실패: {exc}")
+            self.output.setPlainText(f"CCTV 관제 · Edge 연결 화면 실행 실패: {exc}")
             return
-        self.activity.setText(f"CCTV 관제 화면 실행됨 (PID {process.pid})")
+        self.activity.setText(f"CCTV 관제 · Edge 연결 화면 실행됨 (PID {process.pid})")
 
     def _network_group(self) -> QGroupBox:
         group = QGroupBox("네트워크 설정")

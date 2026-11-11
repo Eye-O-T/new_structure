@@ -611,7 +611,7 @@ def initialize(request: InstallRequest) -> InstallResult:
         "IDENTITY_PLUGIN": IDENTITY_PLUGIN,
         "IDENTITY_MODEL_PATH": str(container_identity_path),
         "IDENTITY_MATCH_THRESHOLD": previous_environment.get(
-            "IDENTITY_MATCH_THRESHOLD", "0.97"
+            "IDENTITY_MATCH_THRESHOLD", "0.6"
         ),
         "IDENTITY_MATCH_MARGIN": previous_environment.get(
             "IDENTITY_MATCH_MARGIN", "0.05"

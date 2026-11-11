@@ -2,7 +2,9 @@
 
 카메라 영상을 H.264로 중앙 영상 서버(MediaMTX)에 보내며 Pi에도 기록한다. 중앙 연결 장애 중에도 로컬 백업을 유지한다. 대상은 Raspberry Pi OS Bookworm ARM64이며, AI 모델은 중앙에서 실행한다.
 
-중앙 서버는 저장소 [설치 안내](../README.md)를 먼저 따른다. 아래 설치 명령은 Pi에서, 등록은 중앙 PC의 설치 도우미에서 실행한다.
+중앙 서버는 저장소 [설치 안내](../README.md)를 먼저 따른다. 아래 설치 명령은 Pi에서, 중앙 등록은 Server를 실행하는 PC에서 수행한다.
+
+현재 소스의 GUI 자동 연결 패널은 복원 대상이다. 지금 사용할 수 있는 CLI 수동 등록과 Pi 설정, GUI 수정 후의 자동 연결은 [Edge–Server 페어링 절차서](../docs/edge-server-pairing-guide.md)를 따른다. 아래 GUI 설명은 해당 패널 연결 후의 흐름이다.
 
 ## 설치와 연결
 
@@ -13,10 +15,10 @@ sha256sum -c ai-cctv-edge_0.3.2_arm64.deb.sha256
 test "$(dpkg --print-architecture)" = arm64
 sudo apt update
 sudo apt install ./ai-cctv-edge_0.3.2_arm64.deb
-sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001
+sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --interface eth0
 ```
 
-`pair`는 최초 등록용 검색과 설정 수신을 시작한다. 장치마다 `edge-001`·`cam-001`을 고유한 ID로 바꾸고 등록이 끝날 때까지 Pi 터미널을 열어 둔다. 별도의 Pairing Key를 Pi 명령에 입력하지 않는다.
+`pair`는 최초 등록용 검색과 설정 수신을 시작한다. 장치마다 `edge-001`·`cam-001`을 고유한 ID로, `eth0`를 실제 IPv4 인터페이스로 바꾸고 등록이 끝날 때까지 Pi 터미널을 열어 둔다. 별도의 Pairing Key를 Pi 명령에 입력하지 않는다.
 
 같은 신뢰 IPv4 LAN의 설치 도우미에서 관리 화면의 **카메라 연결**을 연다. 관리자 계정·비밀번호로 로그인한다. 등록 화면에서 이 Edge 전용의 무작위 32자 이상 운영 인증 토큰을 입력하고 **Edge 찾기** → Edge 선택 → **선택한 Edge 연결**을 실행한다. 이 값은 등록 과정에서 Pi 설정에 전달되어 Control·Recovery 요청을 인증한다. 필요하면 **연결 확인**으로 먼저 점검한다. 고급 설정에서 중앙 RTSP 주소·카메라 ID·화질(`hd`/`fhd`)을 확인·변경할 수 있다. 중앙 RTSP 주소는 Pi에서 접근할 중앙 PC의 LAN 주소다. 검색 실패 시 UDP 37020 방화벽과 공유기의 장치 간 통신 차단(AP 격리)을 확인한다.
 
@@ -53,8 +55,10 @@ sudo ai-cctv-edge status
 2. Windows 설치 후 새 PowerShell에서 등록한다. CLI는 중앙 관리자 비밀번호를 숨김 입력으로 받으며 기본 계정명은 `admin`이다. 다르면 `--username`을 추가한다. 관리 8003·복구 8002 주소는 중앙 컨테이너에서 접근할 수 있는 Pi 주소로 지정한다. 소스 CLI 실행법은 [설치 도우미 README](../server/setup/install_helper/README.md#개발-실행)를 따른다.
 
    ```powershell
-   AI_CCTV_CLI.exe edge-register cam-001 --server-url https://cctv.example.com --name Entrance --edge-device-id edge-001 --management-url http://192.0.2.41:8003 --recovery-url http://192.0.2.41:8002 --edge-auth-token-file 'C:\secure\edge-001-control.token' --publish-credentials-output 'C:\secure\cam-001-publish.json'
+   AI_CCTV_CLI.exe edge-register cam-001 --server-url https://cctv.example.com --name Entrance --edge-device-id edge-001 --edge-mac-address aa:bb:cc:dd:ee:ff --management-url http://192.0.2.41:8003 --recovery-url http://192.0.2.41:8002 --edge-auth-token-file 'C:\secure\edge-001-control.token' --publish-credentials-output 'C:\secure\cam-001-publish.json'
    ```
+
+   MAC 주소도 Pi에서 조회한 실제 값으로 바꾼다.
 
 3. 생성된 JSON을 해당 Edge로 전달한다.
 

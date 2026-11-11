@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -79,6 +80,8 @@ def probe_edge_connection(
         raise EdgePairingError("Edge health response is not UTF-8 JSON") from exc
     if not isinstance(result, dict) or result.get("status") not in {"pairing", "alive"}:
         raise EdgePairingError("Edge health probe did not report a live service")
+    if result.get("device_id") != edge.device_id or result.get("camera_id") != edge.camera_id:
+        raise EdgePairingError("Edge health response identity does not match the discovery advertisement")
     return {
         "status": result["status"],
         "device_id": edge.device_id,
@@ -103,6 +106,9 @@ def validate_pairing_settings(
     if (
         not normalized_host
         or normalized_host in {"0.0.0.0", "::"}
+        or normalized_host.lower() == "localhost"
+        or normalized_host.lower().endswith(".localhost")
+        or normalized_host.lower() == "localhost.localdomain"
         or "://" in normalized_host
         or any(
             character.isspace() or character in "/@?#" for character in normalized_host
@@ -111,6 +117,13 @@ def validate_pairing_settings(
         raise EdgePairingError(
             "a reachable central RTSP host is required", "central_host"
         )
+    try:
+        if ipaddress.ip_address(normalized_host).is_loopback:
+            raise EdgePairingError(
+                "a reachable central RTSP host is required", "central_host"
+            )
+    except ValueError:
+        pass
     if isinstance(central_port, bool) or not 1 <= central_port <= 65535:
         raise EdgePairingError(
             "central RTSP port must be in range 1..65535", "central_port"

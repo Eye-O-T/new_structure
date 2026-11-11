@@ -34,9 +34,10 @@ YOLO 탐지 모델과 OSNet ONNX 모델을 준비하고 설치 설정에서 모�
 
 ## Edge 배포
 
-Pi는 Raspberry Pi OS Bookworm ARM64와 프로젝트의 Edge DEB를 사용합니다. 최초 pairing,
-수동 설정, 체크섬 검증은 [Edge 안내](../edge/README.md)에 있습니다. 장치 발견과 최초
-설정은 신뢰 LAN 안에서 수행하십시오.
+Pi는 Raspberry Pi OS Bookworm ARM64와 프로젝트의 Edge DEB를 사용합니다. 패키지 설치와
+체크섬 검증은 [Edge 안내](../edge/README.md), 현재 가능한 수동 연결과 GUI 수정 후의 자동
+연결은 [페어링 절차](edge-server-pairing-guide.md)를 따릅니다. 장치 발견과 최초 설정은
+신뢰 LAN 안에서 수행하십시오.
 
 ## 모바일과 푸시
 
