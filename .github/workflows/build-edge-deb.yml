@@ -2,6 +2,14 @@ name: Build Edge DEB
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "edge/**"
+      - ".github/workflows/build-edge-deb.yml"
+  pull_request:
+    paths:
+      - "edge/**"
+      - ".github/workflows/build-edge-deb.yml"
 
 permissions:
   contents: read

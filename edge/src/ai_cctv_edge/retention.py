@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from pathlib import Path
+
+from .segments import metadata_path, read_segment_metadata
+
+
+def _remove_segment(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    metadata_path(path).unlink(missing_ok=True)
 
 
 def enforce_retention(
@@ -12,6 +20,7 @@ def enforce_retention(
     now: float | None = None,
     *,
     preserve_newest: bool = False,
+    camera_id: str | None = None,
 ) -> list[Path]:
     """기록 중인 파일을 보호하면서 오래된 TS 조각을 삭제한다."""
 
@@ -23,7 +32,24 @@ def enforce_retention(
             stat = path.stat()
         except FileNotFoundError:
             continue
-        files.append((stat.st_mtime, stat.st_size, path))
+        metadata = read_segment_metadata(
+            path,
+            camera_id=camera_id or camera_root.name,
+        )
+        modified_at = stat.st_mtime
+        if metadata is not None:
+            try:
+                modified_at = datetime.fromisoformat(
+                    str(metadata["end_time"]).replace("Z", "+00:00")
+                ).astimezone(UTC).timestamp()
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
+        files.append((modified_at, stat.st_size, path))
+
+    # A stale sidecar must not accumulate after a segment is removed elsewhere.
+    for sidecar in camera_root.rglob("*.ts.json") if camera_root.exists() else []:
+        if not sidecar.with_suffix("").is_file():
+            sidecar.unlink(missing_ok=True)
 
     protected = None
     # 캡처 중에는 가장 최근 파일이 아직 열려 있을 수 있어 용량 한도보다 파일 보호를 우선한다.
@@ -34,7 +60,7 @@ def enforce_retention(
     retained = []
     for mtime, size, path in sorted(files):
         if path != protected and mtime < cutoff:
-            path.unlink(missing_ok=True)
+            _remove_segment(path)
             deleted.append(path)
         else:
             retained.append((mtime, size, path))
@@ -46,7 +72,7 @@ def enforce_retention(
             break
         if path == protected:
             continue
-        path.unlink(missing_ok=True)
+        _remove_segment(path)
         total -= size
         deleted.append(path)
 

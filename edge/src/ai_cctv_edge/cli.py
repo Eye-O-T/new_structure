@@ -36,7 +36,7 @@ from .pairing import (
 from .recovery import create_app
 from .runner import EdgeRunner
 from .state import ProfileSelectionStore, default_state_root
-from .network import interface_ipv4
+from .network import interface_ipv4, interface_mac
 
 try:  # Windows에서도 설정 검증을 사용할 수 있게 한다.
     import pwd
@@ -238,6 +238,9 @@ def pair(
 ) -> int:
     """미설정 Edge를 광고하고 인증된 초기 설정을 한 번 수락한다."""
 
+    if not interface:
+        raise ValueError("an IPv4 interface is required for pairing")
+
     session = PairingSession(
         config_path=path.expanduser().resolve(),
         token_file=(token_file or path.parent / "recovery.token").expanduser().resolve(),
@@ -248,9 +251,9 @@ def pair(
     )
     if session.marker_path.exists():
         raise ValueError("Edge is already configured; pairing mode is first-setup only")
-    if interface is not None:
-        # Fail before starting uvicorn so a typo cannot leave a misleading pairing process running.
-        interface_ipv4(interface)
+    # Fail before starting uvicorn or the advertiser if interface details are invalid.
+    interface_ipv4(interface)
+    interface_mac(interface)
     import uvicorn
 
     stopped = threading.Event()
@@ -368,6 +371,7 @@ def main(argv: list[str] | None = None) -> int:
     pairing.add_argument("--supported-profiles", default="hd,fhd")
     pairing.add_argument(
         "--interface",
+        required=True,
         help="IPv4 interface used for directed discovery broadcast, e.g. eth0",
     )
     args = parser.parse_args(argv)

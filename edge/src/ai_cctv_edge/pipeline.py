@@ -38,6 +38,20 @@ def _encoder_command(config: EdgeConfig) -> list[str]:
     raise ValueError("video.encoder must be x264enc or v4l2h264enc")
 
 
+# 셸 인용 없이 GStreamer 문법으로 파이프라인 설명을 만든다.
+def build_gstreamer_description(command: list[str]) -> str:
+    parts = []
+    for part in command[1:]:
+        if part == "-e":
+            continue
+        key, separator, value = part.partition("=")
+        if separator and key in {"location", "socket-path"}:
+            value = value.replace("\\", "\\\\").replace('"', '\\"')
+            part = f'{key}="{value}"'
+        parts.append(part)
+    return " ".join(parts)
+
+
 # 백업 폴더를 준비하고 한 번 인코딩한 영상을 로컬 녹화와 송출에 나누는 명령을 만든다.
 def build_gstreamer_command(
     config: EdgeConfig, compact_utc_timestamp: str
@@ -60,6 +74,7 @@ def build_gstreamer_command(
         ),
         "!",
         "watchdog",
+        "name=edge_frame_watchdog",
         f"timeout={int(config.monitoring.frame_timeout_seconds * 1000)}",
         "!",
         "videoconvert",
@@ -88,6 +103,7 @@ def build_gstreamer_command(
             "drop=false",
             "!",
             "splitmuxsink",
+            "name=edge_recording_sink",
             f"location={location}",
             "muxer-factory=mpegtsmux",
             f"max-size-time={nanoseconds}",

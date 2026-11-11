@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import os
-import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -14,10 +11,7 @@ from fastapi.responses import FileResponse
 
 from .auth import BearerAuthenticator, load_tokens
 from .config import EdgeConfig
-from .state import default_state_root
-
-FILENAME = re.compile(r"^(\d{8}T\d{6}(?:\.\d+)?Z)_(\d{6})\.ts$")
-
+from .segments import read_segment_metadata, segment_overlaps
 
 # 복구 요청의 시간대가 있는 ISO 시각을 UTC로 맞추고 시간대 없는 값은 거부한다.
 def _parse(value: str) -> datetime:
@@ -29,16 +23,6 @@ def _parse(value: str) -> datetime:
 
 
 # 캡처 시작 시각과 세그먼트 번호로 시작을 계산하며 구형 파일명은 수정 시각으로 추정한다.
-def _segment_start(path: Path, segment_seconds: int) -> datetime:
-    match = FILENAME.fullmatch(path.name)
-    if match:
-        return _parse(match.group(1)) + timedelta(
-            seconds=(int(match.group(2)) * segment_seconds)
-        )
-    return datetime.fromtimestamp(path.stat().st_mtime - segment_seconds, UTC)
-
-
-# 영상 전체를 메모리에 올리지 않고 조각씩 읽어 전송 검증용 해시를 계산한다.
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -47,66 +31,37 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _capture_may_write(camera_id: str) -> bool:
-    """마지막 파일이 기록 중일 가능성이 있으면 보수적으로 보호한다."""
-
-    try:
-        payload = json.loads(
-            (default_state_root() / "status.json").read_text(encoding="utf-8")
-        )
-        if payload.get("camera_id") != camera_id:
-            return True
-        state = payload.get("state")
-        if state in {"stopped", "error"}:
-            return False
-        if state not in {"starting", "running"}:
-            return True
-        pid = int(payload["runner_pid"])
-        if pid <= 0:
-            return False
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        # 캡처 실행 프로세스가 사라졌다면 마지막 파일도 더 이상 기록되지 않아 복구할 수 있다.
-        return False
-    except PermissionError:
-        return True
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
-        # 상태를 확인할 수 없으면 기록 중일 수 있다고 보고 마지막 파일의 공개를 보류한다.
-        return True
-
-
 def _recoverable_segments(
     camera_root: Path,
     *,
-    capture_may_write: bool,
+    camera_id: str,
 ) -> tuple[Path, ...]:
-    """기록이 끝난 영상 조각만 반환한다."""
+    """Return nonempty segments with validated completion metadata only."""
 
-    candidates: list[tuple[int, str, Path]] = []
+    candidates: list[tuple[datetime, str, Path]] = []
     for path in camera_root.rglob("*.ts") if camera_root.exists() else ():
         try:
             stat = path.stat()
         except OSError:
             continue
-        if stat.st_size > 0:
-            candidates.append((stat.st_mtime_ns, path.as_posix(), path))
-    if not candidates:
-        return ()
+        metadata = read_segment_metadata(path, camera_id=camera_id)
+        if stat.st_size > 0 and metadata is not None:
+            try:
+                segment_start = _parse(str(metadata["start_time"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            candidates.append((segment_start, path.as_posix(), path))
     candidates.sort()
-    # 크기·해시 불일치를 막기 위해 캡처 종료가 확인된 경우에만 마지막 파일을 공개한다.
-    selected = candidates[:-1] if capture_may_write else candidates
-    return tuple(item[2] for item in selected)
+    return tuple(item[2] for item in candidates)
 
 
-# 카메라별 백업 루트와 인증을 고정한 복구 전용 HTTP 서비스를 만든다.
 def create_app(config_path: str | Path) -> FastAPI:
     config = EdgeConfig.load(config_path)
     authenticate = BearerAuthenticator(
         load_tokens(config.control.token_file, config.recovery.token_file)
     )
     camera_root = (config.backup.root / config.camera_id).resolve()
-    app = FastAPI(title="AI_CCTV Edge Recovery", version="0.3.2")
+    app = FastAPI(title="AI_CCTV Edge Recovery", version="0.3.3")
 
     @app.get("/health/live")
     def health_live():
@@ -131,14 +86,20 @@ def create_app(config_path: str | Path) -> FastAPI:
         items = []
         for path in _recoverable_segments(
             camera_root,
-            capture_may_write=_capture_may_write(config.camera_id),
+            camera_id=config.camera_id,
         ):
-            segment_start = _segment_start(path, config.backup.segment_seconds)
-            segment_end = segment_start + timedelta(
-                seconds=config.backup.segment_seconds
-            )
-            if segment_start < query_end and segment_end > query_start:
-                stat = path.stat()
+            metadata = read_segment_metadata(path, camera_id=config.camera_id)
+            if metadata is None:
+                continue
+            segment_start = _parse(str(metadata["start_time"]))
+            segment_end = _parse(str(metadata["end_time"]))
+            if segment_overlaps(segment_start, segment_end, query_start, query_end):
+                try:
+                    stat = path.stat()
+                    checksum = _sha256(path)
+                except OSError:
+                    # Retention may remove a finalized file during this query.
+                    continue
                 items.append(
                     {
                         "camera_id": config.camera_id,
@@ -146,7 +107,7 @@ def create_app(config_path: str | Path) -> FastAPI:
                         "end_time": segment_end.isoformat().replace("+00:00", "Z"),
                         "relative_path": path.relative_to(camera_root).as_posix(),
                         "size": stat.st_size,
-                        "sha256": _sha256(path),
+                        "sha256": checksum,
                     }
                 )
         return {"camera_id": config.camera_id, "items": items}
@@ -168,7 +129,7 @@ def create_app(config_path: str | Path) -> FastAPI:
             raise HTTPException(status_code=404, detail="segment not found")
         if target not in _recoverable_segments(
             camera_root,
-            capture_may_write=_capture_may_write(config.camera_id),
+            camera_id=config.camera_id,
         ):
             raise HTTPException(status_code=409, detail="segment is not finalized")
         return FileResponse(target, media_type="video/mp2t", filename=target.name)

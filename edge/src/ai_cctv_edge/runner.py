@@ -443,6 +443,7 @@ class EdgeRunner:
                     self.config.backup.max_bytes,
                     self.config.backup.max_age_hours,
                     preserve_newest=True,
+                    camera_id=self.config.camera_id,
                 )
                 if deleted:
                     LOGGER.info("retention removed %d segments", len(deleted))

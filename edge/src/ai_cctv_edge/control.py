@@ -425,6 +425,7 @@ class LocalProfileRuntime:
                 camera_online = status.get("camera_input") == "online"
                 central_online = (
                     self.config.rtsp.mode != "central_publish"
+                    or status.get("stream_requested", True) is False
                     or status.get("central_connection_status") == "online"
                 )
                 if (
@@ -833,7 +834,7 @@ def create_control_app(
 
     app = FastAPI(
         title="AI_CCTV Edge Management",
-        version="0.3.2",
+        version="0.3.3",
         lifespan=lifespan,
     )
 
