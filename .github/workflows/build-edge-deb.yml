@@ -48,6 +48,8 @@ jobs:
           dpkg-deb --version
 
       - name: Download MediaMTX ARM64
+        env:
+          EXPECTED_ARCHIVE_SHA256: 4542af4acdea9948ce6cbb662b39896915339159420c50bcb7ed37caba1d96d7
         run: |
           mkdir -p vendor
 
@@ -55,12 +57,16 @@ jobs:
           curl -fL \
             "https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/$ARCHIVE" \
             -o "/tmp/$ARCHIVE"
-          curl -fL \
-            https://github.com/bluenviron/mediamtx/releases/download/v1.9.0/checksums.sha256 \
-            -o /tmp/mediamtx-checksums.sha256
-
-          EXPECTED_ARCHIVE_SHA256="$(awk -v name="$ARCHIVE" '$2 == name || $2 == "*" name {print $1; exit}' /tmp/mediamtx-checksums.sha256)"
-          test "${#EXPECTED_ARCHIVE_SHA256}" -eq 64
+          case "$EXPECTED_ARCHIVE_SHA256" in
+            ''|*[!0-9a-f]*)
+              echo "::error::EXPECTED_ARCHIVE_SHA256 must be lowercase hexadecimal"
+              exit 1
+              ;;
+          esac
+          if [ "${#EXPECTED_ARCHIVE_SHA256}" -ne 64 ]; then
+            echo "::error::EXPECTED_ARCHIVE_SHA256 must contain 64 characters"
+            exit 1
+          fi
           printf '%s  %s\n' "$EXPECTED_ARCHIVE_SHA256" "/tmp/$ARCHIVE" | sha256sum --check -
 
           tar -xzf "/tmp/$ARCHIVE" -C vendor
@@ -68,8 +74,8 @@ jobs:
           chmod +x vendor/mediamtx
 
           vendor/mediamtx --version
-          # Archive digest came from the release checksums; pin the extracted binary
-          # digest for the package builder's independent file-level verification.
+          # Pin the extracted binary digest for the package builder's independent
+          # file-level verification.
           HASH="$(sha256sum vendor/mediamtx | awk '{print $1}')"
           echo "MEDIAMTX_SHA256=$HASH" >> "$GITHUB_ENV"
 
