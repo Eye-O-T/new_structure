@@ -11,7 +11,9 @@ COPY --from=upstream /mediamtx /usr/local/bin/mediamtx
 # COPY의 기준은 Compose의 build.context인 이 mediamtx 폴더다.
 COPY recording-complete-hook.sh /usr/local/bin/recording-complete-hook
 
-RUN chmod 0755 /usr/local/bin/mediamtx /usr/local/bin/recording-complete-hook
+# Windows checkout에서도 Linux shebang이 실행되도록 줄 끝을 정규화한다.
+RUN sed -i 's/\r$//' /usr/local/bin/recording-complete-hook \
+    && chmod 0755 /usr/local/bin/mediamtx /usr/local/bin/recording-complete-hook
 
 EXPOSE 8554 8888 9996 9997
 # 종료 신호를 전달하여 쓰던 녹화 구간을 정리할 기회를 준다.
