@@ -23,17 +23,21 @@ def has_active_recording_file(camera_id: str, settings: Settings) -> bool:
         return False
     max_age = max(float(settings.central_recording_segment_seconds) * 2.0, 120.0)
     now_ts = utc_now().timestamp()
-    for path in camera_dir.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.suffix.lower() not in {".mp4", ".fmp4", ".ts", ".mpegts"}:
-            continue
+    directories = [camera_dir]
+    while directories:
         try:
-            stat = path.stat()
+            entries = sorted(directories.pop().iterdir(), key=lambda path: path.name)
         except OSError:
             continue
-        if stat.st_size > 0 and (now_ts - stat.st_mtime) <= max_age:
-            return True
+        for path in reversed(entries):
+            if path.is_file() and path.suffix.lower() in {".mp4", ".fmp4", ".ts", ".mpegts"}:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                if stat.st_size > 0 and (now_ts - stat.st_mtime) <= max_age:
+                    return True
+        directories.extend(path for path in entries if not path.is_symlink() and path.is_dir())
     return False
 
 

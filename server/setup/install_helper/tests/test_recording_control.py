@@ -451,6 +451,33 @@ class RecordingControlBackendTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_recording_scan_prefers_recent_directories_and_checks_older_ones(self):
+        camera_dir = self.storage_root / "cam-1"
+        older = camera_dir / "2025"
+        newer = camera_dir / "2026"
+        older.mkdir(parents=True)
+        newer.mkdir()
+        old_file = older / "old.mp4"
+        new_file = newer / "new.mp4"
+        old_file.write_bytes(b"old")
+        new_file.write_bytes(b"new")
+        visited = []
+        original = Path.iterdir
+
+        def track(path):
+            visited.append(path)
+            return original(path)
+
+        with patch.object(Path, "iterdir", track):
+            self.assertTrue(has_active_recording_file("cam-1", self.data_settings))
+        self.assertIn(newer, visited)
+        self.assertNotIn(older, visited)
+
+        new_file.unlink()
+        self.assertTrue(has_active_recording_file("cam-1", self.data_settings))
+        old_file.unlink()
+        self.assertFalse(has_active_recording_file("cam-1", self.data_settings))
+
     def test_step1_migration_preserves_existing_cameras_and_defaults_new_cameras_to_stopped(
         self,
     ):
