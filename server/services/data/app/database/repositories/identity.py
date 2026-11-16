@@ -11,7 +11,7 @@ from ai_cctv_core.contracts.objects import IdentityDescriptor
 from ai_cctv_core.time import format_utc, parse_utc
 
 MATCH_THRESHOLD = 0.6
-MATCH_MARGIN = 0.05
+MATCH_MARGIN = 0.0
 MAX_OBSERVATION_GAP_SECONDS = 1800
 MAX_GALLERY_SAMPLES = 5000
 ACTIVE_OBSERVATION_SECONDS = 3

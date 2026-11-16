@@ -48,7 +48,7 @@ class Settings:
     config_path: Path | None = None
     # 모델·카메라 자료로 교정할 운영값이다. 코사인 점수는 동일인 확률이 아니다.
     identity_match_threshold: float = 0.6
-    identity_match_margin: float = 0.05
+    identity_match_margin: float = 0.0
 
     # 개별 환경 변수, 공통 설정 파일, 기본값 순으로 실행 설정을 구성한다.
     @classmethod
@@ -176,7 +176,7 @@ class Settings:
             identity_match_threshold=float(
                 os.getenv("IDENTITY_MATCH_THRESHOLD", "0.6")
             ),
-            identity_match_margin=float(os.getenv("IDENTITY_MATCH_MARGIN", "0.05")),
+            identity_match_margin=float(os.getenv("IDENTITY_MATCH_MARGIN", "0")),
         )
 
     def data_api_tokens(self) -> dict[str, str]:

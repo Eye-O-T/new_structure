@@ -614,7 +614,7 @@ def initialize(request: InstallRequest) -> InstallResult:
             "IDENTITY_MATCH_THRESHOLD", "0.6"
         ),
         "IDENTITY_MATCH_MARGIN": previous_environment.get(
-            "IDENTITY_MATCH_MARGIN", "0.05"
+            "IDENTITY_MATCH_MARGIN", "0"
         ),
         "ANALYSIS_PLUGIN": ANALYSIS_PLUGIN,
         "LOGS_DIR": directories["logs"],
