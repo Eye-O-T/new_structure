@@ -27,6 +27,7 @@ from ..schemas import (
     VideoProfileStatePatch,
 )
 from ..storage.recordings import has_active_recording_file
+from ..storage.recording_cache import invalidate_active_recording_file_cache
 
 router = APIRouter()
 
@@ -163,6 +164,8 @@ def update_camera(
         raise ApiError(409, "EDGE_IDENTITY_CONFLICT", str(exc)) from exc
     if camera is None:
         raise _not_found("camera")
+    if "enabled" in values or "recording_enabled" in values:
+        invalidate_active_recording_file_cache(camera_id)
     return _with_recording_file_state(camera, settings)
 
 
@@ -254,6 +257,7 @@ def delete_camera(camera_id: str, repository: Repo) -> Response:
         ) from exc
     if not deleted:
         raise _not_found("camera")
+    invalidate_active_recording_file_cache(camera_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

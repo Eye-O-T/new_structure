@@ -22,6 +22,7 @@ from ..schemas import (
     RecordingSegmentCreate,
 )
 from ..storage.paths import normalize_relative_path
+from ..storage.recording_cache import invalidate_active_recording_file_cache
 from ..storage.recordings import prepare_recording_hook, prepare_segment
 
 router = APIRouter()
@@ -40,6 +41,7 @@ def create_recording_segment(
         post_roll_seconds=settings.event_post_roll_seconds,
     )
     segment["idempotent_replay"] = not created
+    invalidate_active_recording_file_cache(payload.camera_id)
     return segment
 
 
@@ -125,4 +127,5 @@ def recording_complete_hook(
         post_roll_seconds=settings.event_post_roll_seconds,
     )
     segment["idempotent_replay"] = not created
+    invalidate_active_recording_file_cache(camera_id)
     return segment

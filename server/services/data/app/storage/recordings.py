@@ -8,6 +8,10 @@ from typing import Any
 
 from ai_cctv_core.time import central_recording_start, format_utc, utc_now
 
+from .recording_cache import (
+    active_recording_file_cached,
+    invalidate_active_recording_file_cache,
+)
 from ..config import Settings
 from ..database.repositories import DataRepository
 from ..errors import ApiError
@@ -19,26 +23,30 @@ def has_active_recording_file(camera_id: str, settings: Settings) -> bool:
     """카메라 저장 경로에 최근 생성·갱신된 녹화 파일이 존재하는지 확인한다."""
 
     camera_dir = settings.storage_root / camera_id
-    if not camera_dir.is_dir():
+
+    def inspect() -> bool:
+        if not camera_dir.is_dir():
+            return False
+        max_age = max(float(settings.central_recording_segment_seconds) * 2.0, 120.0)
+        now_ts = utc_now().timestamp()
+        directories = [camera_dir]
+        while directories:
+            try:
+                entries = sorted(directories.pop().iterdir(), key=lambda path: path.name)
+            except OSError:
+                continue
+            for path in reversed(entries):
+                if path.is_file() and path.suffix.lower() in {".mp4", ".fmp4", ".ts", ".mpegts"}:
+                    try:
+                        stat = path.stat()
+                    except OSError:
+                        continue
+                    if stat.st_size > 0 and (now_ts - stat.st_mtime) <= max_age:
+                        return True
+            directories.extend(path for path in entries if not path.is_symlink() and path.is_dir())
         return False
-    max_age = max(float(settings.central_recording_segment_seconds) * 2.0, 120.0)
-    now_ts = utc_now().timestamp()
-    directories = [camera_dir]
-    while directories:
-        try:
-            entries = sorted(directories.pop().iterdir(), key=lambda path: path.name)
-        except OSError:
-            continue
-        for path in reversed(entries):
-            if path.is_file() and path.suffix.lower() in {".mp4", ".fmp4", ".ts", ".mpegts"}:
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                if stat.st_size > 0 and (now_ts - stat.st_mtime) <= max_age:
-                    return True
-        directories.extend(path for path in entries if not path.is_symlink() and path.is_dir())
-    return False
+
+    return active_recording_file_cached(camera_id, settings.storage_root, inspect)
 
 
 # 완료 파일의 이름·크기와 통지된 길이로 중앙 녹화 메타데이터 및 재전송 키를 만든다.

@@ -3,6 +3,7 @@
 - [사용자 안내](user-guide.md): 최초 설치, 카메라 등록, 데스크톱·모바일 사용
 - [배포 안내](deployment-guide.md): Windows Server, Edge, Android 준비와 설정
 - [운영·복원 안내](operations.md): 상태 점검, 백업, 복구와 장애 대응
+- [CPU·메모리 사용량 감소 작업 계획](system-resource-optimization-plan-2026-11-16.md): 조사·개선 검증 결과에 따른 배포 통합, 메모리 시험, 코드 개선 순서와 인수 기준
 - [Pi 카메라 영상 송출 장애 수정 계획](pi-camera-stream-fix-plan.md): 직결 이더넷 주소 수정, 적용 순서, 실장비 검증과 롤백
 - [Pi 카메라 영상 송출 복구 실행 계획](pi-camera-stream-remediation-plan.md): 전원 복구 후 확인된 원인, 세션 한정 SSH 작업 범위, Pi 주소 수정과 최종 검증
 - [구성·네트워크](architecture.md): 서비스 책임, 포트와 데이터 흐름
