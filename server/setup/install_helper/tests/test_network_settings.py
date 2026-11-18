@@ -74,6 +74,36 @@ class NetworkSettingsTests(unittest.TestCase):
         self.assertEqual(settings.public_scheme, "http")
         self.assertEqual(settings.rtsp_port, 8554)
 
+    def test_apply_http_with_missing_default_tls_files(self):
+        cert_root = self.root / "certs"
+        with self.env.open("a", encoding="utf-8") as handle:
+            handle.write(f"CERTS_DIR={cert_root.as_posix()}\n")
+        deployment = DeploymentContext(
+            self.root, self.env, self.config, "http://192.168.0.10",
+            "192.168.0.10", 8554, "admin", True,
+        )
+        settings = NetworkSettings(
+            "http", "http://192.168.0.10", "192.168.0.10", 80,
+            443, "192.168.50.1", 8554, True, False, Path(),
+        )
+        with patch(
+            "server.operations.network.ComposeAdapter.run",
+            return_value=CompletedProcess([], 0, stdout="", stderr=""),
+        ), patch(
+            "server.operations.services.run_service_action", return_value="started"
+        ) as start:
+            result = apply_network_settings(
+                settings, deployment, self.server, lambda _message: None,
+                cert_path=cert_root / "tls.crt", key_path=cert_root / "tls.key",
+            )
+        self.assertEqual(result, "started")
+        saved = load_network_settings(self.env, self.server)
+        self.assertEqual(saved.rtsp_bind_address, "192.168.50.1")
+        self.assertEqual(saved.public_base_url, "http://192.168.0.10")
+        self.assertIn("RTSP_PUBLIC_HOST=192.168.50.1", self.env.read_text(encoding="utf-8"))
+        self.assertFalse(cert_root.exists())
+        start.assert_called_once()
+
     def test_apply_restores_files_when_compose_validation_fails(self):
         original_env = self.env.read_text(encoding="utf-8")
         original_config = self.config.read_text(encoding="utf-8")

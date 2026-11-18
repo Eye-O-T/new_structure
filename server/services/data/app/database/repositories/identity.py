@@ -116,6 +116,7 @@ def resolve_identity(
     *,
     threshold: float = MATCH_THRESHOLD,
     margin: float = MATCH_MARGIN,
+    exclude_overlapping_tracks: bool = True,
 ) -> tuple[str, dict]:
     """비공개 표본을 비교하고 확정할 ID와 공개 가능한 결정 근거만 반환한다."""
     track = (row["camera_id"], session, row["person_id"])
@@ -151,7 +152,11 @@ def resolve_identity(
         ).fetchall()
         # 같은 카메라에서는 관측 구간이 실제로 겹친 track의 ID만 배제한다.
         # 앞 track이 끝난 직후 이어진 track(추적 ID 교체·재진입)은 후보로 비교한다.
-        blocked_ids = conflicting_global_ids(connection, row, session, stamp)
+        blocked_ids = (
+            conflicting_global_ids(connection, row, session, stamp)
+            if exclude_overlapping_tracks
+            else set()
+        )
         scores: dict[str, float] = {}
         norm = math.hypot(*descriptor.features)
         for candidate in candidates:

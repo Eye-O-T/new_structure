@@ -310,6 +310,7 @@ class ObjectRepositoryMixin:
                     stamp,
                     threshold=self.identity_match_threshold,
                     margin=self.identity_match_margin,
+                    exclude_overlapping_tracks=self.identity_exclude_overlapping_tracks,
                 )
                 result_metadata["match"] = match
             # 두 단계가 독립적으로 끝나므로 DB의 최신 metadata에서 자기 단계의 결과만 바꾼다.
@@ -321,7 +322,7 @@ class ObjectRepositoryMixin:
             if stage == "identity" and global_person_id is not None:
                 # person_id는 재접속 후 다시 쓰일 수 있으므로 카메라와 추적 세션을 함께 식별한다.
                 session = metadata["object"]["tracking_session_id"]
-                if global_person_id in conflicting_global_ids(
+                if self.identity_exclude_overlapping_tracks and global_person_id in conflicting_global_ids(
                     connection, row, session, stamp
                 ):
                     raise ValueError(

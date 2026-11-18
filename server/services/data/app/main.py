@@ -32,6 +32,7 @@ def create_app(
         ),
         identity_match_threshold=runtime_settings.identity_match_threshold,
         identity_match_margin=runtime_settings.identity_match_margin,
+        identity_exclude_overlapping_tracks=runtime_settings.identity_exclude_overlapping_tracks,
     )
 
     # 요청 수신 전에 초기화와 파일 대조를 마치고 종료 시 백그라운드 작업 취소를 기다린다.

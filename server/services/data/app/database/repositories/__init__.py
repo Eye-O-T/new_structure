@@ -40,11 +40,13 @@ class DataRepository(
         *,
         identity_match_threshold: float = MATCH_THRESHOLD,
         identity_match_margin: float = MATCH_MARGIN,
+        identity_exclude_overlapping_tracks: bool = True,
     ) -> None:
         validate_match_policy(identity_match_threshold, identity_match_margin)
         self.database = database
         self.identity_match_threshold = identity_match_threshold
         self.identity_match_margin = identity_match_margin
+        self.identity_exclude_overlapping_tracks = identity_exclude_overlapping_tracks
         self._live_objects_lock = threading.RLock()
         self._live_objects_by_camera: dict[str, dict[str, Any]] = {}
         self._track_presence_flushed_at: dict[tuple[str, str, str], datetime] = {}

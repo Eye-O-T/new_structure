@@ -273,7 +273,7 @@ def apply_network_settings(
     from .services import run_service_action
 
     tracked_files = [deployment.env_file, deployment.config_file]
-    if cert_path is not None or key_path is not None:
+    if settings.public_scheme == "https" and (cert_path is not None or key_path is not None):
         tracked_files.extend(_certificate_targets(deployment, server_dir))
     snapshot = {path: _snapshot(path) for path in tracked_files}
     services_may_have_changed = False
@@ -286,7 +286,8 @@ def apply_network_settings(
             cert_path=cert_path,
             key_path=key_path,
         )
-        _replace_tls_material(deployment, server_dir, cert_path, key_path)
+        if settings.public_scheme == "https":
+            _replace_tls_material(deployment, server_dir, cert_path, key_path)
         progress("변경한 Compose 구성을 검증하고 있습니다…")
         _validate_compose_configuration(server_dir, deployment.env_file)
         services_may_have_changed = True
