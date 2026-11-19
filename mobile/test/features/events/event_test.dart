@@ -32,4 +32,33 @@ void main() {
     });
     expect(event.media['annotated_snapshot'], isTrue);
   });
+
+  test('formats skipped analysis with current PID and GPID', () {
+    final event = Event.fromJson({
+      'id': 'event-1',
+      'camera_id': 'cam-1',
+      'event_type': 'person_appeared',
+      'occurred_at': '2026-01-01T00:00:00Z',
+      'person_id': '12',
+      'global_person_id': 307,
+      'metadata': {
+        'analysis': {
+          'status': 'skipped',
+          'result': {'reason_code': 'NOT_FULL_BODY'},
+        },
+      },
+    });
+    expect(event.displayTitle, 'pid:12/gpid:307 is not full body');
+    expect(event.isNotFullBody, isTrue);
+  });
+
+  test('does not label historical events without skipped metadata', () {
+    final event = Event.fromJson({
+      'id': 'event-1',
+      'camera_id': 'cam-1',
+      'event_type': 'person_appeared',
+      'occurred_at': '2026-01-01T00:00:00Z',
+    });
+    expect(event.displayTitle, event.title);
+  });
 }

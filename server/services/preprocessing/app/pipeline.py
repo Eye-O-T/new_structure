@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ai_cctv_core.identifiers import validate_camera_id
+from ai_cctv_core.processing.observation_quality import evaluate_border_margin
 from ai_cctv_core.time import format_utc, utc_now
 
 from ..processors.detection.contracts import DetectionFrame, DetectionResult
@@ -638,9 +639,9 @@ class CameraWorker(threading.Thread):
             "result_postprocess_seconds", self.status.last_postprocess_seconds
         )
         self.status.detection_object_count = len(detections)
-        if self._publisher is not None and now - last_publish >= 0.2:
-            # 모바일 박스용 최신 좌표는 최대 초당 2번 보낸다. 영상 전송과
-            # 별개이므로 모바일에서 보이는 영상 프레임과 정확히 동기화되지는 않는다.
+        if self._publisher is not None and now - last_publish >= 0.1:
+            # 화면 박스용 최신 좌표는 최대 초당 10번 보낸다. 실제 갱신 속도는
+            # 탐지 주기에 제한되며 영상 프레임과 정확히 동기화되지는 않는다.
             self._publisher.submit(
                 {
                     "tracking_session_id": self.tracking_session_id,
@@ -704,6 +705,11 @@ class CameraWorker(threading.Thread):
                 "selected_at": format_utc(candidate.selected_at),
                 "quality": "usable" if candidate.score[0] else "insufficient",
                 "window_seconds": self.settings.observation_window_seconds,
+                "border_check": evaluate_border_margin(
+                    candidate.detection["bbox"],
+                    candidate.frame.shape[1],
+                    candidate.frame.shape[0],
+                ),
             },
         )
         self._timings.record("event_persistence_seconds", time.monotonic() - started)

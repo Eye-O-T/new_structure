@@ -45,6 +45,8 @@ Edge 녹화 복구와 전체 백업 절차는 [운영과 백업](../../../docs/o
 
 객체 분석(`stage="analysis"`)이 `outcome="complete"`로 완료되면 원본 `person_appeared` 이벤트의 `metadata.analysis` 갱신과 같은 트랜잭션에서 `event_type="analysis_completed"` 이벤트를 함께 저장한다. 결정적 `source_event_id`로 중복 생성을 막고, `metadata`에 `appearance_event_id`·`appearance_occurred_at`·`analysis_job_id`·`tracking_session_id`·`analysis` 사본을 기록한다. 완료 이벤트에는 객체 작업·FCM 발송·현장 녹화 자동 연결을 생성하지 않는다. 시작 시 `initialize_runtime()`(또는 `repository.backfill_analysis_completed_events()`)이 과거 완료 분석 중 대응 `analysis_completed` 이벤트가 없는 항목을 원래 `metadata.analysis.updated_at` 시각 기준으로 최대 100건 단위 트랜잭션으로 보완 생성한다.
 
+새 사람 관측은 `lib/ai_cctv_core/processing/observation_quality.py`의 경계 여백 판정을 작업 생성 시점에 다시 계산한다. 좌우 2%, 상하 3%를 모두 충족하면 identity와 analysis 작업을 만들고, 미통과면 identity 작업만 만든다. 미통과 원본 등장 이벤트는 `metadata.analysis.status="skipped"`, `reason_code="NOT_FULL_BODY"`로 기록하며 analysis 작업 행·분석 추론·`analysis_completed` 이벤트는 생성하지 않는다. 이 `skipped`는 이벤트 metadata 상태이며 `object_jobs.state` 값이 아니다. 과거 이벤트의 경계 정보 부재는 미통과로 해석하지 않는다.
+
 완료 녹화 등록과 관련 이벤트 연결은 같은 SQLite 트랜잭션에서 확정한다. 연결 중 실패하면 등록도 취소되며, 완료 통지 재전송은 기존 녹화에 연결을 멱등하게 보강한다. 파일 대조 작업은 구형 버전에서 남은 연결 누락도 실행당 최대 1,000개씩 회복한다.
 
 ## 검증

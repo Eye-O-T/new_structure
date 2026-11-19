@@ -40,7 +40,7 @@ LIVE_RTSP_OPTIONS = {
     "analyzeduration": "100000",
     "probesize": "262144",
 }
-OBJECT_POLL_INTERVAL_SECONDS = 0.2
+OBJECT_POLL_INTERVAL_SECONDS = 0.1
 EVENT_POLL_INTERVAL_SECONDS = 0.5
 NULL_GPID_REFRESH_INTERVAL_SECONDS = 5.0
 POLL_REQUEST_TIMEOUT_SECONDS = 10.0
@@ -182,6 +182,9 @@ def legacy_event(event):
         "appearance_event_id": metadata.get("appearance_event_id"),
         "appearance_occurred_at": metadata.get("appearance_occurred_at"),
         "analysis_job_id": metadata.get("analysis_job_id"),
+        "identity_status": (metadata.get("identity") or {}).get("status")
+        if isinstance(metadata.get("identity"), dict)
+        else None,
         "metadata": metadata,
     }
 
@@ -210,7 +213,7 @@ def _upsert_retained_event(retained, item):
         for index, existing in enumerate(retained):
             if str(existing.get("id")) == str(event_id):
                 updated = dict(existing)
-                for key in ("person_id", "global_person_id", "gender", "age"):
+                for key in ("person_id", "global_person_id", "gender", "age", "identity_status"):
                     if item.get(key) is not None:
                         updated[key] = item[key]
                 if isinstance(item.get("metadata"), dict) and item["metadata"]:
@@ -236,17 +239,32 @@ def _refresh_retained_event_ids(retained, item):
                 if item.get(key) is not None and existing.get(key) != item.get(key):
                     existing[key] = item[key]
                     changed = True
+            if isinstance(item.get("metadata"), dict) and item["metadata"]:
+                if existing.get("metadata") != item["metadata"]:
+                    existing["metadata"] = dict(item["metadata"])
+                    identity = item["metadata"].get("identity")
+                    existing["identity_status"] = identity.get("status") if isinstance(identity, dict) else None
+                    changed = True
             return existing, changed
     return None, False
 
 
 def _has_unresolved_analysis_event(retained):
     return any(
-        (
+        item.get("global_person_id") is None
+        and (
             item.get("event_type") == "analysis_completed"
             or item.get("type") == "analysis_completed"
+            or (
+                item.get("event_type") == "person_appeared"
+                and isinstance(item.get("metadata"), dict)
+                and isinstance(item["metadata"].get("analysis"), dict)
+                and item["metadata"]["analysis"].get("status") == "skipped"
+                and isinstance(item["metadata"]["analysis"].get("result"), dict)
+                and item["metadata"]["analysis"]["result"].get("reason_code") == "NOT_FULL_BODY"
+                and item.get("identity_status") == "pending"
+            )
         )
-        and item.get("global_person_id") is None
         for item in retained
     )
 

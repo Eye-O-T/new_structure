@@ -56,6 +56,25 @@ def format_analysis_completed_description(event):
     return f"{analysis_identity} 분석 완료{suffix}"
 
 
+def format_not_full_body_description(event):
+    pid = event.get("person_id")
+    gpid = event.get("global_person_id")
+    return f"pid:{pid if pid is not None else '-'}/gpid:{gpid if gpid is not None else 'null'} is not full body"
+
+
+def is_not_full_body_event(event):
+    metadata = event.get("metadata")
+    analysis = metadata.get("analysis") if isinstance(metadata, dict) else None
+    result = analysis.get("result") if isinstance(analysis, dict) else None
+    return (
+        (event.get("type") or event.get("event_type")) in {"appear", "person_appeared"}
+        and isinstance(analysis, dict)
+        and analysis.get("status") == "skipped"
+        and isinstance(result, dict)
+        and result.get("reason_code") == "NOT_FULL_BODY"
+    )
+
+
 class CCTVMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -580,7 +599,11 @@ class CCTVMainWindow(QMainWindow):
         if event_type == "appear":
             self.appear_count += 1
             self.metric_appear["value"].setText(str(self.appear_count))
-            desc = f"{identity} 출현"
+            desc = (
+                format_not_full_body_description(event)
+                if is_not_full_body_event(event)
+                else f"{identity} 출현"
+            )
             color = "#22c55e"
         elif event_type == "disappear":
             self.disappear_count += 1

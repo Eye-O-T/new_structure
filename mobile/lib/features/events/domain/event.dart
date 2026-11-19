@@ -51,6 +51,20 @@ class Event {
 
   /// 앱에 아직 등록되지 않은 이벤트도 숨기지 않고 서버의 원래 종류를 표시한다.
   String get title => eventLabels[eventType] ?? eventType;
+
+  bool get isNotFullBody {
+    final analysis = metadata['analysis'];
+    final result = analysis is Map ? analysis['result'] : null;
+    return eventType == 'person_appeared' &&
+        analysis is Map &&
+        analysis['status'] == 'skipped' &&
+        result is Map &&
+        result['reason_code'] == 'NOT_FULL_BODY';
+  }
+
+  String get displayTitle => isNotFullBody
+      ? 'pid:${personId ?? '-'}/gpid:${globalPersonId ?? 'null'} is not full body'
+      : title;
 }
 
 String? preferredEventImageKind(Event event) {

@@ -5,6 +5,8 @@ from datetime import datetime
 import math
 import threading
 
+from ai_cctv_core.processing.observation_quality import evaluate_border_margin
+
 
 @dataclass
 class Candidate:
@@ -39,8 +41,16 @@ def quality(frame, detection):
         )
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     area = (x2 - x1) * (y2 - y1)
+    border_check = evaluate_border_margin(
+        detection["bbox"], frame.shape[1], frame.shape[0]
+    )
     # 확률이 아닌 선택 순위다. 정보 있는 크롭, 선명도와 충분한 영역, 크기 순으로 비교한다.
-    return (int(valid), min(sharpness, 500) * min(area / 32768, 1), math.log1p(area))
+    return (
+        int(valid),
+        int(valid and border_check["border_clear"]),
+        min(sharpness, 500) * min(area / 32768, 1),
+        math.log1p(area),
+    )
 
 
 class ObservationBuffer:

@@ -24,7 +24,7 @@ class _ObjectOverlayState extends ConsumerState<ObjectOverlay> {
   void initState() {
     super.initState();
     unawaited(_poll());
-    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       // 네트워크가 멈췄을 때 오래된 위치가 현재 위치처럼 남지 않도록 3초 뒤 지운다.
       if (_age.elapsed > const Duration(seconds: 3) && _frame != null) {
         setState(() => _frame = null);

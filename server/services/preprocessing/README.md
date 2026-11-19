@@ -52,6 +52,8 @@ ONNX Runtime으로 실행하며, 입력은 RGB `float32` NCHW `1×3×256×128`�
 
 현재 입력은 **등장 뒤 짧은 창에서 고른 crop 한 장**이다. 배포 기본 `OBSERVATION_WINDOW_SECONDS=1` 동안 정보가 있는 영역·선명도·크기를 비교하며 특징 평균은 하지 않는다. 카메라별 후보 메모리는 `OBSERVATION_BUFFER_MAX_BYTES=33554432`로 제한하며 상한 초과·퇴장·재접속·정상 종료 때 남은 후보를 확정한다. 0초로 설정하면 즉시 저장한다. 최초 등장 시각을 유지하고 선택 시각·`usable|insufficient` 품질은 이벤트의 `observation_selection`에 기록한다. 확정 이후 입력은 교체하지 않는다. 누락·손상·16픽셀 미만·상수 영상은 OSNet이 실패 처리한다. 유사한 옷·조명·자세·가림으로 오연결·분리가 가능하며, 실명이나 확정 신원 확인에 사용하지 않는다.
 
+대표 후보는 유효성, 원본 프레임 경계 여백, 기존 선명도·면적 순으로 비교한다. 좌우 각각 원본 너비의 2%, 상하 각각 원본 높이의 3%를 확보한 후보에 우선순위를 준다. 해당 판정과 방향별 거리는 등장 이벤트의 `metadata.observation_selection.border_check`에 기록한다. 이는 전신 보장이 아니라 화면 경계 여백 휴리스틱이다. Data는 같은 bbox와 원본 크기로 판정을 다시 계산하고, 미통과 관측은 identity만 실행하며 속성 analysis를 생략한다.
+
 유지할 기준은 [객체 스키마](../../../lib/ai_cctv_core/contracts/objects.py), [플러그인 프로토콜](../../../lib/ai_cctv_core/processing/plugins.py), [공통 실행기](../../../lib/ai_cctv_core/processing/worker.py), [Data 작업 API](../data/app/api/objects.py)다.
 
 ## 실행과 검증

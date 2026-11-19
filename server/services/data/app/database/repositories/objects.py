@@ -12,6 +12,7 @@ from ai_cctv_core.contracts.objects import (
 from ai_cctv_core.time import format_utc, parse_utc, utc_now
 
 from .events import _insert_analysis_completed_event
+from ai_cctv_core.processing.observation_quality import evaluate_border_margin
 from .identity import conflicting_global_ids, note_track_observation, resolve_identity
 from .job_state import update_event_job_state
 
@@ -212,7 +213,30 @@ class ObjectRepositoryMixin:
         if observation is None:
             return
         now = format_utc(utc_now())
-        for stage in ("identity", "analysis"):
+        border_check = evaluate_border_margin(
+            observation["bbox"], observation["frame_width"], observation["frame_height"]
+        )
+        metadata = dict(values.get("metadata", {}))
+        selection = dict(metadata.get("observation_selection", {}))
+        selection["border_check"] = border_check
+        metadata["observation_selection"] = selection
+        if not border_check["border_clear"]:
+            metadata["analysis"] = {
+                "status": "skipped",
+                "updated_at": now,
+                "result": {"reason_code": "NOT_FULL_BODY"},
+            }
+            connection.execute(
+                "UPDATE events SET metadata_json=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False), event_id),
+            )
+        else:
+            metadata["analysis"] = {"status": "pending"}
+            connection.execute(
+                "UPDATE events SET metadata_json=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False), event_id),
+            )
+        for stage in (("identity",) if not border_check["border_clear"] else ("identity", "analysis")):
             connection.execute(
                 "INSERT INTO object_jobs(event_id,stage,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,?)",
                 (event_id, stage, now, now, now),

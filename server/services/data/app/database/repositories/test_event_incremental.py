@@ -20,7 +20,7 @@ from .events import analysis_completed_source_event_id
 def _sample_observation(session_id: str = "a" * 32) -> dict:
     return ObjectObservation(
         tracking_session_id=session_id,
-        bbox=[10, 20, 110, 220],
+        bbox=[500, 100, 800, 900],
         frame_width=1920,
         frame_height=1080,
         crop_path="crops/person.jpg",
@@ -121,6 +121,43 @@ class IncrementalEventTests(unittest.TestCase):
                 },
             }
         )
+
+    def test_border_failure_keeps_identity_and_skips_analysis(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = DataRepository(Database(Path(directory) / "data.sqlite"))
+            repository.initialize()
+            with repository.database.transaction() as connection:
+                connection.execute(
+                    "INSERT INTO cameras(camera_id,name,stream_path,created_at,updated_at) "
+                    "VALUES('cam_001','Camera','cam_001','now','now')"
+                )
+            observation = _sample_observation()
+            observation["bbox"] = [0, 100, 300, 900]
+            event = repository.create_event(
+                {
+                    "camera_id": "cam_001",
+                    "event_type": "person_appeared",
+                    "occurred_at": "2026-11-06T06:00:00.000Z",
+                    "person_id": "7",
+                    "object_observation": observation,
+                    "metadata": {
+                        "object": observation,
+                        "analysis": {"status": "pending"},
+                        "observation_selection": {"border_check": {"border_clear": True}},
+                    },
+                }
+            )
+            self.assertIsNotNone(repository.claim_object_job("identity"))
+            self.assertIsNone(repository.claim_object_job("analysis"))
+            stored = repository.get_event(int(event["id"]))
+            self.assertEqual(stored["metadata"]["analysis"]["status"], "skipped")
+            self.assertEqual(
+                stored["metadata"]["analysis"]["result"]["reason_code"],
+                "NOT_FULL_BODY",
+            )
+            self.assertFalse(
+                stored["metadata"]["observation_selection"]["border_check"]["border_clear"]
+            )
 
     def test_analysis_completion_commits_event_atomically_without_jobs_push_or_recordings(self):
         with tempfile.TemporaryDirectory() as directory:

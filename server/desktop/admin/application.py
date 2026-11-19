@@ -912,6 +912,13 @@ class CCTVMainWindow(ReferenceWindow):
                 if (event.get("type") or event.get("event_type"))
                 == "analysis_completed"
                 else None,
+                bool(
+                    isinstance(event.get("metadata"), dict)
+                    and isinstance(event["metadata"].get("analysis"), dict)
+                    and event["metadata"]["analysis"].get("status") == "skipped"
+                    and isinstance(event["metadata"]["analysis"].get("result"), dict)
+                    and event["metadata"]["analysis"]["result"].get("reason_code") == "NOT_FULL_BODY"
+                ),
                 event.get("message"),
             )
             for event in events
@@ -1541,6 +1548,13 @@ class CCTVMainWindow(ReferenceWindow):
             metadata = detail.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
             is_analysis_completed = detail.get("event_type") == "analysis_completed"
+            analysis = metadata.get("analysis") if isinstance(metadata.get("analysis"), dict) else {}
+            analysis_result = analysis.get("result") if isinstance(analysis.get("result"), dict) else {}
+            is_not_full_body = (
+                detail.get("event_type") == "person_appeared"
+                and analysis.get("status") == "skipped"
+                and analysis_result.get("reason_code") == "NOT_FULL_BODY"
+            )
             pid_value = (
                 detail.get("person_id")
                 if detail.get("person_id") is not None
@@ -1592,6 +1606,8 @@ class CCTVMainWindow(ReferenceWindow):
                 )
             for name, value in fields:
                 _add_wrapped_label(f"{name}: {value}")
+            if is_not_full_body:
+                _add_wrapped_label("속성 분석 생략: 화면 경계 여백 기준 미통과")
             for label, content, _content_type, error in media_results:
                 if error:
                     _add_wrapped_label(f"{label}: {error}")

@@ -13,7 +13,7 @@ class EventCard extends StatelessWidget {
     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
     child: ListTile(
       leading: const Icon(Icons.notifications_active_outlined),
-      title: Text(event.title),
+      title: Text(event.displayTitle),
       subtitle: Text(
         '${event.cameraId}\n${event.occurredAt.toLocal().toString().split('.').first}',
       ),

@@ -63,7 +63,7 @@ class EventDetailScreen extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
             children: [
               Text(
-                value.title,
+                value.displayTitle,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 8),
@@ -75,13 +75,17 @@ class EventDetailScreen extends ConsumerWidget {
               _DetailField(label: '이벤트 ID', value: value.id),
               const SizedBox(height: 6),
               _DetailField(label: '이벤트 유형', value: value.eventType),
+              if (value.isNotFullBody) ...[
+                const SizedBox(height: 8),
+                const Text('속성 분석을 생략했습니다. 화면 경계 여백 기준을 충족하지 못했습니다.'),
+              ],
               const SizedBox(height: 24),
               if (isPersonEvent) ...[
                 if (imageKind != null)
                   _EventImage(eventId: value.id, kind: imageKind)
                 else
                   const Text('이미지가 없습니다.'),
-                if (value.media['annotated_snapshot'] == true)
+                if (!value.isNotFullBody && value.media['annotated_snapshot'] == true)
                   TextButton(
                     onPressed: () => showDialog<void>(
                       context: context,

@@ -17,6 +17,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 
 from ai_cctv_core.time import format_utc, parse_utc
+from ai_cctv_core.processing.observation_quality import evaluate_border_margin
 
 from ..config import Settings
 from ..dependencies import Repo, RuntimeSettings, _page
@@ -85,7 +86,20 @@ def _event_values(payload: EventCreate, settings: Settings) -> dict[str, Any]:
         values["metadata"]["object"] = observation
         values["metadata"]["tracking_session_id"] = observation["tracking_session_id"]
         values["metadata"]["identity"] = {"status": "pending"}
-        values["metadata"]["analysis"] = {"status": "pending"}
+        border_check = evaluate_border_margin(
+            observation["bbox"], observation["frame_width"], observation["frame_height"]
+        )
+        selection = values["metadata"].setdefault("observation_selection", {})
+        selection["border_check"] = border_check
+        values["metadata"]["analysis"] = (
+            {"status": "pending"}
+            if border_check["border_clear"]
+            else {
+                "status": "skipped",
+                "updated_at": values["occurred_at"],
+                "result": {"reason_code": "NOT_FULL_BODY"},
+            }
+        )
     return values
 
 
