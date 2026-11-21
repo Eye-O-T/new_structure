@@ -159,6 +159,17 @@ sudo ai-cctv-edge status
 
 재부팅 뒤 촬영·제어·복구 세 서비스가 복귀하고 저장된 송출·녹화 의도가 유지되어야 한다. 녹화가 시작된 상태였다면 중앙 영상과 녹화도 복귀해야 한다. 로그 조회와 재시작은 각각 `sudo ai-cctv-edge logs`, `sudo ai-cctv-edge restart`다. 로그 조회는 `Ctrl+C`로 끝낸다. 업데이트 전 `/etc/ai-cctv-edge/`와 `/var/lib/ai-cctv-edge/` 및 별도 백업 경로를 보존하고 새 패키지를 같은 방법으로 설치한 뒤 `sudo ai-cctv-edge restart`로 적용한다. 이미 설정된 장치에는 `pair`를 다시 실행하지 않는다. `sudo apt remove ai-cctv-edge`는 운영 데이터를 자동 삭제하지 않는다.
 
+구형 설정에 `network.interface`가 없으면 업데이트만으로 Edge–Server 통신이 시작되지 않는다. 기존 설정을 백업하고 `ip -br -4 addr`로 현재 서버와 통신하는 NIC를 확인한 뒤 `sudoedit /etc/ai-cctv-edge/config.toml`에서 다음 항목을 추가한다. 이미 `[network]`가 있다면 그 안에 `interface`를 추가·수정하며 같은 테이블을 중복 작성하지 않는다. `eth0`는 실제 사용할 인터페이스명으로 바꾼다.
+
+```toml
+[network]
+interface = "eth0"
+```
+
+이 설정 이관은 기존 Device ID·Camera ID·토큰·서버 등록을 유지한다. 설정 저장 후 `sudo ai-cctv-edge restart`와 `sudo ai-cctv-edge status`로 확인한다. 다른 NIC로 전환하면 서버에 저장된 관리·복구 URL도 확인해야 한다.
+
+`226/NAMESPACE`와 `/run/ai-cctv-edge-network: No such file or directory`는 서비스의 런타임 디렉터리 생성 누락이다. `nft ... unexpected table`이 `destroy table` 줄에 나오면 설치된 nftables와 패키지 문법이 호환되지 않는 상태다. 두 문제는 수정 코드가 포함된 새 패키지를 설치해야 한다. 수정 유닛은 `RuntimeDirectory=`로 디렉터리를 만들고, 정책은 Bookworm 지원 문법으로 하나의 배치 안에서 Edge 테이블만 교체한다. 디렉터리를 수동 생성하는 것만으로 nft 문법 문제까지 해결되지는 않는다.
+
 기본 로컬 백업은 `/var/lib/ai-cctv-edge/recordings/<camera-id>/`의 약 10초 MPEG-TS 조각이다. 녹화가 완료되면 실제 시작·종료 시각을 담은 `.ts.json` 메타데이터가 생성된다. 백업·이전 시 TS와 해당 메타데이터를 함께 보존한다. Recovery API는 유효한 완료 메타데이터가 있는 TS만 목록과 다운로드로 제공하며, 메타데이터 없는 기존 영상은 자동 복구 대상에서 제외된다.
 
 24시간 또는 20 GiB 보존 한도를 넘으면 오래된 조각과 해당 메타데이터를 함께 정리한다. 메타데이터 없는 기존 TS도 파일 수정 시각을 기준으로 정리 대상이 되므로 필요한 영상은 보존 한도 밖의 별도 저장소에 복사한다. 긴 장애에서도 모든 영상을 무기한 보존하는 구성은 아니다. 보존 한도는 `/etc/ai-cctv-edge/config.toml`의 `[backup]`에서 조정하고 서비스를 재시작한다. 백업 경로를 바꾸면 `ai-cctv-edge` 서비스 계정에 쓰기 권한이 있어야 한다. 서비스가 홈 디렉터리 접근을 제한하므로 `/home/pi` 대신 `/mnt/cctv` 같은 별도 저장소 경로를 사용한다.

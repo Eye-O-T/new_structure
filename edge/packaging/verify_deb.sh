@@ -52,6 +52,15 @@ for path in \
     [ -f "$path" ] || fail "required package payload is missing: $path"
 done
 
+# The directory must exist before systemd prepares the ReadWritePaths namespace.
+for unit in ai-cctv-edge-network.service ai-cctv-edge-repair-recovery.service; do
+    unit_path="$work/root/lib/systemd/system/$unit"
+    grep -Fxq 'RuntimeDirectory=ai-cctv-edge-network' "$unit_path" || \
+        fail "$unit does not create its network runtime directory"
+    grep -Fxq 'RuntimeDirectoryPreserve=yes' "$unit_path" || \
+        fail "$unit would remove shared network state on stop"
+done
+
 # 0755는 소유자에게 쓰기, 나머지 사용자에게 읽기·실행을 허용하는 실행 파일 권한이다.
 [ "$(stat -c '%a' "$work/root/usr/bin/ai-cctv-edge")" = 755 ] || \
     fail "Edge CLI launcher is not mode 0755"

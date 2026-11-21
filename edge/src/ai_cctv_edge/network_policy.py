@@ -141,6 +141,12 @@ def _apply(script: str) -> None:
         raise RuntimeError(f"nft ruleset application failed: {applied.stderr.strip()}")
 
 
+def _replace_table(ruleset: str = "") -> None:
+    # Bookworm nftables has no `destroy table`. `add` also accepts an existing
+    # table, so create-if-missing, delete, and rebuild can share one transaction.
+    _apply(f"add table inet {TABLE}\ndelete table inet {TABLE}\n" + ruleset)
+
+
 def apply_persistent(config: EdgeConfig) -> None:
     if not config.network.interface:
         _apply_local_only(config)
@@ -150,12 +156,12 @@ def apply_persistent(config: EdgeConfig) -> None:
     if config.rtsp.mode == "central_pull":
         ports.append(config.rtsp.edge_port)
     with policy_lock():
-        script = f"destroy table inet {TABLE}\n" + render_ruleset(
+        script = render_ruleset(
             interface=interface,
             ports=tuple(ports),
             service_uid=_service_uid(),
         )
-        _apply(script)
+        _replace_table(script)
         show = subprocess.run(
             ["nft", "list", "table", "inet", TABLE],
             capture_output=True, text=True, timeout=5, check=False,
@@ -184,8 +190,7 @@ def _apply_local_only(config: EdgeConfig) -> None:
         ports.append(config.rtsp.edge_port)
     ports = list(dict.fromkeys(ports))
     with policy_lock():
-        script = f"""destroy table inet {TABLE}
-table inet {TABLE} {{
+        script = f"""table inet {TABLE} {{
   chain input {{
     type filter hook input priority -20; policy accept;
   }}
@@ -197,7 +202,7 @@ table inet {TABLE} {{
   }}
 }}
 """
-        _apply(script)
+        _replace_table(script)
         shown = subprocess.run(
             ["nft", "list", "table", "inet", TABLE],
             capture_output=True, text=True, timeout=5, check=False,
@@ -215,10 +220,10 @@ table inet {TABLE} {{
 def apply_pairing(interface: str, address: str, port: int) -> None:
     ipaddress.IPv4Address(address)
     with policy_lock():
-        script = f"destroy table inet {TABLE}\n" + render_ruleset(
+        script = render_ruleset(
             interface=interface, ports=(port,), service_uid=0, pairing=True
         )
-        _apply(script)
+        _replace_table(script)
 
 
 def verify_persistent(config: EdgeConfig) -> None:
@@ -262,10 +267,5 @@ def verify_persistent(config: EdgeConfig) -> None:
 
 def remove_policy() -> None:
     with policy_lock():
-        result = subprocess.run(
-            ["nft", "destroy", "table", "inet", TABLE],
-            capture_output=True, text=True, timeout=5, check=False,
-        )
-        if result.returncode and "No such file" not in result.stderr:
-            raise RuntimeError(f"could not remove Edge network policy: {result.stderr.strip()}")
+        _replace_table()
         STATE_PATH.unlink(missing_ok=True)
