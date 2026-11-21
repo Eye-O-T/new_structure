@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,17 +20,30 @@ except ImportError:  # pragma: no cover - Windows development environment
 @unittest.skipUnless(pwd is not None and os.name == "posix" and os.geteuid() == 0, "requires Linux root for UID permission checks")
 class StartupPermissionTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        # Hosted runner checkout parents may be inaccessible after dropping UID.
+        self.temp = tempfile.TemporaryDirectory(dir="/tmp")
+        self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         os.chmod(self.root, 0o755)
+        package = self.root / "ai_cctv_edge"
+        shutil.copytree(
+            Path(startup.__file__).parent,
+            package,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        for path in (package, *package.rglob("*")):
+            os.chmod(path, 0o755 if path.is_dir() else 0o644)
         self.config = self.root / "config.toml"
-        self.config.write_text("test configuration\n", encoding="utf-8")
+        shutil.copyfile(Path(__file__).parents[1] / "config" / "config.example.toml", self.config)
+        os.chmod(self.config, 0o644)
         self.private = self.root / "repair"
         self.private.mkdir(mode=0o700)
         os.chmod(self.private, 0o700)
         self.startup_dir = self.root / "runtime"
-        self.startup_dir.mkdir(mode=0o755)
-        os.chmod(self.startup_dir, 0o755)
+        account = pwd.getpwnam("nobody")
+        self.startup_dir.mkdir(mode=0o750)
+        os.chown(self.startup_dir, 0, account.pw_gid)
+        os.chmod(self.startup_dir, 0o750)
         self.startup_file = self.startup_dir / "startup.json"
         self.startup_file.write_text(json.dumps({
             "version": 1,
@@ -38,11 +52,8 @@ class StartupPermissionTests(unittest.TestCase):
             "config_sha256": hashlib.sha256(self.config.read_bytes()).hexdigest(),
             "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
         }), encoding="utf-8")
-        os.chown(self.startup_file, 0, pwd.getpwnam("nobody").pw_gid)
+        os.chown(self.startup_file, 0, account.pw_gid)
         os.chmod(self.startup_file, 0o440)
-
-    def tearDown(self):
-        self.temp.cleanup()
 
     def _as_service_user(self, source):
         account = pwd.getpwnam("nobody")
@@ -55,9 +66,13 @@ class StartupPermissionTests(unittest.TestCase):
         )
         return subprocess.run(
             [sys.executable, "-c", code],
+            cwd=self.root,
+            env={**os.environ, "PYTHONPATH": str(self.root)},
             capture_output=True,
             text=True,
-            preexec_fn=lambda: (os.setgid(account.pw_gid), os.setuid(account.pw_uid)),
+            user=account.pw_uid,
+            group=account.pw_gid,
+            extra_groups=(),
             check=False,
         )
 
@@ -76,6 +91,8 @@ class StartupPermissionTests(unittest.TestCase):
         )
         result = self._as_service_user(code)
         self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PermissionError", result.stderr)
+        self.assertTrue(json.loads(self.startup_file.read_text(encoding="utf-8"))["allowed"])
 
     def test_config_change_invalidates_startup_authorization(self):
         self.config.write_text("changed configuration\n", encoding="utf-8")
