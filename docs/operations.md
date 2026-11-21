@@ -32,6 +32,8 @@ sudo ai-cctv-edge status
 sudo ai-cctv-edge logs
 ```
 
+Edge 서비스 시작 전 root 사전 검사는 설정, 네트워크 정책, 미완료 Repair 상태를 확인합니다. 실패하면 `sudo ai-cctv-edge logs`에서 원인을 확인하고 Repair 복원을 완료하십시오. `/var/lib/ai-cctv-edge/repair/`의 journal과 백업 권한을 완화하거나 파일을 삭제하지 마십시오. 서비스가 정상 기동해도 송출·녹화 요청은 별도이므로 Server GUI에서 요청한 뒤 실제 영상 수신을 확인하십시오.
+
 Pi 주소가 바뀌면 Server Manager에서 등록 주소를 갱신합니다. 장애 중 Edge의 로컬 녹화는
 중앙 복구 작업자가 다시 연결된 뒤 manifest와 파일 크기·SHA-256을 확인해 가져옵니다.
 복구 진행 상태와 마지막 오류는 Server 진단 화면 또는 Data 준비 상태에서 확인합니다.

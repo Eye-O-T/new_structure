@@ -65,6 +65,9 @@ fi
 
 # systemd가 갱신된 서비스 정의를 다시 읽게 한다. 새 장치의 자동 시작 활성화는 초기 설정에서 한다.
 systemctl daemon-reload
+# Package files and configuration handling are complete. Clear the transition
+# guard before the normal root startup preflight runs for restarted services.
+rm -f /var/lib/ai-cctv-edge/repair/package-transition
 if [ -n "${2:-}" ]; then
     # 구형 설정은 관리자가 NIC를 이관할 때까지 기존 프로세스를 건드리지 않는다.
     if grep -q '^\[network\]$' /etc/ai-cctv-edge/config.toml && \
@@ -88,6 +91,3 @@ if [ -n "${2:-}" ]; then
         echo "AI CCTV Edge network.interface must be configured before the services can be restarted." >&2
     fi
 fi
-
-# A matching postinst removes the upgrade guard only after package and service work succeeds.
-rm -f /var/lib/ai-cctv-edge/repair/package-transition

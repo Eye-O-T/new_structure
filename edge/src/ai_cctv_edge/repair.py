@@ -15,6 +15,7 @@ from .config import EdgeConfig
 from .network_policy import apply_persistent
 from .network import selected_interface_ipv4
 from .state import ProfileSelectionStore, default_state_root
+from .startup import invalidate_startup
 
 REPAIR_ROOT = Path("/var/lib/ai-cctv-edge/repair")
 PACKAGE_TRANSITION = REPAIR_ROOT / "package-transition"
@@ -24,6 +25,10 @@ UNITS = (
     "ai-cctv-edge-control.service",
     "ai-cctv-edge-recovery.service",
 )
+
+
+class RepairLockBusy(RuntimeError):
+    """Another process currently owns the Repair/configuration lock."""
 
 
 def _sync_dir(path: Path) -> None:
@@ -55,6 +60,17 @@ def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     return result
 
 
+def _repair_owner_is_running(journal: dict) -> bool:
+    owner = journal.get("owner_pid")
+    if not isinstance(owner, int) or owner <= 1:
+        return False
+    try:
+        command = Path(f"/proc/{owner}/cmdline").read_bytes().replace(b"\0", b" ")
+        return b"ai-cctv-edge" in command and b"repair" in command
+    except OSError:
+        return False
+
+
 def _active_units() -> list[str]:
     return [unit for unit in UNITS if _systemctl("is-active", "--quiet", unit, check=False).returncode == 0]
 
@@ -83,10 +99,13 @@ def repair_lock(root: Path = REPAIR_ROOT) -> Iterator[None]:
     try:
         import fcntl
 
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.fchown(fd, 0, 0)
+        os.fchmod(fd, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RepairLockBusy("another Edge configuration or Repair operation is running") from exc
         yield
-    except BlockingIOError as exc:
-        raise RuntimeError("another Edge configuration or Repair operation is running") from exc
     finally:
         os.close(fd)
 
@@ -206,15 +225,19 @@ def recover_pending(
     try:
         with repair_lock(root):
             return _recover_pending(config_path, root, start_services=start_services)
-    except RuntimeError:
+    except RepairLockBusy:
         journal_path = root / "journal.json"
         if start_services or not journal_path.exists():
             raise
         try:
-            phase = json.loads(journal_path.read_text(encoding="utf-8")).get("phase")
-        except (OSError, json.JSONDecodeError):
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            phase = journal.get("phase")
+        except (OSError, UnicodeError, json.JSONDecodeError):
             raise
-        if phase in {"LOCAL_CONFIGURED", "COMMITTED"}:
+        if phase == "COMMITTED" or (
+            phase in {"LOCAL_CONFIGURED", "ROLLING_BACK"}
+            and _repair_owner_is_running(journal)
+        ):
             return False
         raise
 
@@ -231,6 +254,7 @@ def repair_pairing(config_path: Path, *, device_id: str, camera_id: str, interfa
         if old_config.rtsp.mode != "central_publish":
             raise ValueError("Repair currently supports central_publish configurations only")
         paths = _targets(old_config, config_path)
+        invalidate_startup()
         selected_network = selected_interface_ipv4(interface)
         for name, host in (("control", old_config.control.bind_host), ("recovery", old_config.recovery.bind_host)):
             if host not in {"0.0.0.0", selected_network.address}:
@@ -241,7 +265,14 @@ def repair_pairing(config_path: Path, *, device_id: str, camera_id: str, interfa
         journal_path = REPAIR_ROOT / "journal.json"
         try:
             files = _snapshot(paths, backup)
-            journal = {"phase": "PREPARED", "backup_dir": str(backup), "files": files, "active_units": active}
+            journal = {
+                "phase": "PREPARED",
+                "backup_dir": str(backup),
+                "files": files,
+                "active_units": active,
+                "owner_pid": os.getpid(),
+                "repair_job_id": str(uuid.uuid4()),
+            }
             _write_journal(journal_path, journal)
         except Exception:
             shutil.rmtree(backup, ignore_errors=True)
@@ -272,6 +303,8 @@ def repair_pairing(config_path: Path, *, device_id: str, camera_id: str, interfa
         except BaseException:
             try:
                 _systemctl("stop", *UNITS, check=False)
+                journal["phase"] = "ROLLING_BACK"
+                _write_journal(journal_path, journal)
                 _restore(journal, config_path)
             except Exception as restore_error:
                 journal["phase"] = "RECOVERY_REQUIRED"

@@ -40,7 +40,8 @@ from .runner import EdgeRunner
 from .state import ProfileSelectionStore, default_state_root
 from .network import interface_mac, selected_interface_ipv4
 from .network_policy import apply_pairing, apply_persistent, verify_persistent
-from .repair import PACKAGE_TRANSITION, REPAIR_ROOT, repair_lock, repair_pairing
+from .repair import PACKAGE_TRANSITION, repair_lock, repair_pairing
+from .startup import require_startup, verify_startup
 
 try:  # Windows에서도 설정 검증을 사용할 수 있게 한다.
     import pwd
@@ -445,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         "apply-network-policy",
         "remove-network-policy",
         "verify-network-policy",
+        "verify-startup",
     ):
         sub.add_parser(command)
     sub.choices["doctor"].add_argument(
@@ -486,6 +488,8 @@ def main(argv: list[str] | None = None) -> int:
     repair.add_argument("--interface")
     recover_repair = sub.add_parser("recover-repair", help=argparse.SUPPRESS)
     recover_repair.add_argument("--defer-services", action="store_true")
+    startup = sub.choices["verify-startup"]
+    startup.add_argument("--entrypoint", required=True, choices=("run", "serve-control", "serve-recovery"))
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -579,10 +583,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Repair failed: {exc}")
             return 1
     if args.command in {"start", "stop", "restart"}:
+        if os.name != "posix" or os.geteuid() != 0:
+            raise PermissionError("service control requires root")
         if PACKAGE_TRANSITION.exists() and args.command != "stop":
             raise RuntimeError("Edge package upgrade is in progress")
-        if args.command in {"start", "restart"} and (REPAIR_ROOT / "journal.json").exists():
-            raise RuntimeError("Repair recovery must finish before Edge services can start")
         return systemctl(args.command)
     if args.command == "logs":
         return subprocess.run(
@@ -608,8 +612,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[{check.status}] {check.name}: {check.message}")
         return 1 if any(check.status == "ERROR" for check in checks) else 0
     if args.command == "run":
-        if (REPAIR_ROOT / "journal.json").exists():
-            raise RuntimeError("Repair recovery must finish before Edge services can start")
+        require_startup(args.config, "run")
         return EdgeRunner(args.config).run()
     if args.command == "recover-repair":
         from .repair import recover_pending
@@ -632,18 +635,17 @@ def main(argv: list[str] | None = None) -> int:
         config = EdgeConfig.load(args.config)
         verify_persistent(config)
         return 0
+    if args.command == "verify-startup":
+        verify_startup(args.config, args.entrypoint)
+        return 0
     if args.command == "serve-control":
-        if (REPAIR_ROOT / "journal.json").exists():
-            raise RuntimeError("Repair recovery must finish before Edge services can start")
+        require_startup(args.config, "serve-control")
         config = EdgeConfig.load(args.config)
-        verify_persistent(config)
         serve_http_on_interface(create_control_app(args.config), config, recovery=False)
         return 0
     if args.command == "serve-recovery":
-        if (REPAIR_ROOT / "journal.json").exists():
-            raise RuntimeError("Repair recovery must finish before Edge services can start")
+        require_startup(args.config, "serve-recovery")
         config = EdgeConfig.load(args.config)
-        verify_persistent(config)
         serve_http_on_interface(create_app(args.config), config, recovery=True)
         return 0
     parser.error("unsupported command")

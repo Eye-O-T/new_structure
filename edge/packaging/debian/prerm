@@ -3,8 +3,10 @@
 # 녹화·상태·사용자 설정을 직접 삭제하지 않아 운영 데이터가 제거 과정에서 사라지지 않게 한다.
 set -eu
 
-install -d -m 0700 /var/lib/ai-cctv-edge/repair
+install -d -o root -g root -m 0700 /var/lib/ai-cctv-edge/repair
 exec 9>/var/lib/ai-cctv-edge/repair/repair.lock
+chown root:root /var/lib/ai-cctv-edge/repair/repair.lock
+chmod 0600 /var/lib/ai-cctv-edge/repair/repair.lock
 flock -n 9 || {
     echo "An Edge Repair or configuration operation is in progress." >&2
     exit 1

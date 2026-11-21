@@ -159,6 +159,8 @@ sudo ai-cctv-edge status
 
 재부팅 뒤 촬영·제어·복구 세 서비스가 복귀하고 저장된 송출·녹화 의도가 유지되어야 한다. 녹화가 시작된 상태였다면 중앙 영상과 녹화도 복귀해야 한다. 로그 조회와 재시작은 각각 `sudo ai-cctv-edge logs`, `sudo ai-cctv-edge restart`다. 로그 조회는 `Ctrl+C`로 끝낸다. 업데이트 전 `/etc/ai-cctv-edge/`와 `/var/lib/ai-cctv-edge/` 및 별도 백업 경로를 보존하고 새 패키지를 같은 방법으로 설치한 뒤 `sudo ai-cctv-edge restart`로 적용한다. 이미 설정된 장치에는 `pair`를 다시 실행하지 않는다. `sudo apt remove ai-cctv-edge`는 운영 데이터를 자동 삭제하지 않는다.
 
+서비스 시작 전 root 사전 검사가 설정·네트워크 정책과 미완료 Repair 상태를 확인하고, 현재 부팅 및 설정에 묶인 읽기 전용 시작 허가를 게시한다. 이 검사가 실패하면 서비스를 반복 시작하지 말고 `sudo ai-cctv-edge logs`에서 원인을 확인한 뒤 Repair 복구를 완료한다. Repair journal과 백업은 root 전용으로 유지한다.
+
 구형 설정에 `network.interface`가 없으면 업데이트만으로 Edge–Server 통신이 시작되지 않는다. 기존 설정을 백업하고 `ip -br -4 addr`로 현재 서버와 통신하는 NIC를 확인한 뒤 `sudoedit /etc/ai-cctv-edge/config.toml`에서 다음 항목을 추가한다. 이미 `[network]`가 있다면 그 안에 `interface`를 추가·수정하며 같은 테이블을 중복 작성하지 않는다. `eth0`는 실제 사용할 인터페이스명으로 바꾼다.
 
 ```toml

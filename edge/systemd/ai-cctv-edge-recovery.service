@@ -15,7 +15,7 @@ Type=simple
 User=ai-cctv-edge
 Group=ai-cctv-edge
 ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml serve-recovery
-ExecStartPre=+/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml verify-network-policy
+ExecStartPre=+/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml verify-startup --entrypoint serve-recovery
 # 종료된 API를 재시작한다. 관리자의 systemctl stop 요청에는 적용하지 않는다.
 Restart=always
 RestartSec=3
@@ -25,6 +25,7 @@ RuntimeDirectoryPreserve=yes
 StateDirectory=ai-cctv-edge
 LogsDirectory=ai-cctv-edge
 ConfigurationDirectory=ai-cctv-edge
+ConfigurationDirectoryMode=0750
 # 서비스 전용 계정과 제한된 기본 파일 권한을 사용하고 시스템·사용자 홈 접근을 보호한다.
 UMask=0027
 NoNewPrivileges=true

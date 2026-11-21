@@ -35,9 +35,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl tar dpkg coreutils nftables util-linux
           python3 -m pip install --upgrade pip
+          python3 -m pip install -e 'edge[test]'
 
-      - name: Check network policy transactions in isolated namespace
-        run: sudo env PYTHONPATH=edge/src "$(command -v python3)" -m unittest discover -s edge/tests -p test_network_policy.py -v
+      - name: Run Edge regression and Linux permission tests
+        run: sudo env PYTHONPATH=edge/src "$(command -v python3)" -m unittest discover -s edge/tests -v
 
       - name: Check environment
         run: |

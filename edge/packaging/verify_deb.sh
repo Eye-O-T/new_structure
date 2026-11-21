@@ -61,6 +61,21 @@ for unit in ai-cctv-edge-network.service ai-cctv-edge-repair-recovery.service; d
         fail "$unit would remove shared network state on stop"
 done
 
+for pair in \
+    'ai-cctv-edge.service:run' \
+    'ai-cctv-edge-control.service:serve-control' \
+    'ai-cctv-edge-recovery.service:serve-recovery'; do
+    unit=${pair%%:*}
+    entrypoint=${pair#*:}
+    unit_path="$work/root/lib/systemd/system/$unit"
+    grep -Fq "verify-startup --entrypoint $entrypoint" "$unit_path" || \
+        fail "$unit does not use the root startup preflight"
+    grep -Fxq 'User=ai-cctv-edge' "$unit_path" || \
+        fail "$unit does not retain the restricted service account"
+    grep -Fxq 'ConfigurationDirectoryMode=0750' "$unit_path" || \
+        fail "$unit configuration directory mode is inconsistent"
+done
+
 # 0755는 소유자에게 쓰기, 나머지 사용자에게 읽기·실행을 허용하는 실행 파일 권한이다.
 [ "$(stat -c '%a' "$work/root/usr/bin/ai-cctv-edge")" = 755 ] || \
     fail "Edge CLI launcher is not mode 0755"

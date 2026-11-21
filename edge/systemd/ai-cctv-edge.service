@@ -15,7 +15,7 @@ Type=simple
 User=ai-cctv-edge
 Group=ai-cctv-edge
 ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml run
-ExecStartPre=+/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml verify-network-policy
+ExecStartPre=+/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml verify-startup --entrypoint run
 # 비정상 종료 시 다시 시작하되 정상 종료 요청은 그대로 유지한다.
 Restart=on-failure
 RestartSec=3
@@ -25,6 +25,7 @@ RuntimeDirectoryPreserve=yes
 StateDirectory=ai-cctv-edge
 LogsDirectory=ai-cctv-edge
 ConfigurationDirectory=ai-cctv-edge
+ConfigurationDirectoryMode=0750
 # 새 파일에 일반 사용자 접근 권한이 생기지 않도록 기본 권한을 제한한다.
 UMask=0027
 NoNewPrivileges=true

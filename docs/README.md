@@ -3,6 +3,7 @@
 - [사용자 안내](user-guide.md): 최초 설치, 카메라 등록, 데스크톱·모바일 사용
 - [배포 안내](deployment-guide.md): Windows Server, Edge, Android 준비와 설정
 - [운영·복원 안내](operations.md): 상태 점검, 백업, 복구와 장애 대응
+- [Edge Repair 시작 검사 권한 오류 수정 계획](edge-repair-startup-permission-fix-plan-2026-11-21.md): 일반 서비스의 기동 실패 원인, root 검사와 읽기 전용 기동 상태 분리, Repair 복원·Linux 권한·Pi 검증 기준
 - [Edge 단일 네트워크 인터페이스 강제 작업 계획](edge-single-interface-implementation-plan-2026-11-20.md): Pairing·관리·복구·RTSP의 NIC 제한, 설정 이관, systemd·패키지 적용과 인수시험
 - [Edge Repair 구현 작업 계획](edge-repair-implementation-plan-2026-11-21.md): 기존 Pairing 재사용, 설정·상태 복원, 정책·서비스 전환, 재부팅 복구와 서버 등록 충돌 검증
 - [CPU·메모리 사용량 감소 작업 계획](system-resource-optimization-plan-2026-11-16.md): 조사·개선 검증 결과에 따른 배포 통합, 메모리 시험, 코드 개선 순서와 인수 기준

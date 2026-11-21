@@ -75,12 +75,12 @@ class RepairSnapshotTests(unittest.TestCase):
         repair_root = self.root / "repair"
         repair_root.mkdir()
         journal_path = repair_root / "journal.json"
-        for phase, expected in (("LOCAL_CONFIGURED", False), ("COMMITTED", False)):
+        for phase, expected in (("COMMITTED", False),):
             journal_path.write_text(json.dumps({"phase": phase}), encoding="utf-8")
-            with patch.object(repair, "repair_lock", side_effect=RuntimeError("busy")):
+            with patch.object(repair, "repair_lock", side_effect=repair.RepairLockBusy("busy")):
                 self.assertIs(repair.recover_pending(self.config_path, repair_root, start_services=False), expected)
         journal_path.write_text(json.dumps({"phase": "PAIRING"}), encoding="utf-8")
-        with patch.object(repair, "repair_lock", side_effect=RuntimeError("busy")):
+        with patch.object(repair, "repair_lock", side_effect=repair.RepairLockBusy("busy")):
             with self.assertRaisesRegex(RuntimeError, "busy"):
                 repair.recover_pending(self.config_path, repair_root, start_services=False)
 
