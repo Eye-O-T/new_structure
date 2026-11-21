@@ -48,9 +48,11 @@ fi
 chown root:ai-cctv-edge /etc/ai-cctv-edge/recovery.token
 chmod 0640 /etc/ai-cctv-edge/recovery.token
 
-# 구형 장치의 설정은 유지하되 예제 설정뿐인 새 장치는 초기 설정 완료로 취급하지 않는다.
+# 구형 장치의 설정은 유지하되 네트워크 인터페이스가 없는 장치는 자동 완료 처리하지 않는다.
 configured_marker=/etc/ai-cctv-edge/.configured
 if [ -n "${2:-}" ] && [ -s /etc/ai-cctv-edge/publish.password ] && \
+    grep -q '^\[network\]$' /etc/ai-cctv-edge/config.toml && \
+    grep -q '^interface = ' /etc/ai-cctv-edge/config.toml && \
     [ ! -e "$configured_marker" ]; then
     marker_temp=$(mktemp /etc/ai-cctv-edge/.configured.XXXXXX)
     trap 'rm -f "$marker_temp"' EXIT INT TERM
@@ -64,7 +66,28 @@ fi
 # systemd가 갱신된 서비스 정의를 다시 읽게 한다. 새 장치의 자동 시작 활성화는 초기 설정에서 한다.
 systemctl daemon-reload
 if [ -n "${2:-}" ]; then
-    # 교체한 코드를 적용하도록 실행 중이던 서비스만 재시작한다. 꺼 둔 서비스는 유지한다.
-    systemctl try-restart ai-cctv-edge.service \
-        ai-cctv-edge-control.service ai-cctv-edge-recovery.service
+    # 구형 설정은 관리자가 NIC를 이관할 때까지 기존 프로세스를 건드리지 않는다.
+    if grep -q '^\[network\]$' /etc/ai-cctv-edge/config.toml && \
+        grep -q '^interface = ' /etc/ai-cctv-edge/config.toml; then
+        active_file=/run/ai-cctv-edge-network/upgrade-active-units
+        if [ -f "$active_file" ]; then
+            systemctl start ai-cctv-edge-network.service
+            while IFS= read -r unit; do
+                case "$unit" in
+                    ai-cctv-edge.service|ai-cctv-edge-control.service|ai-cctv-edge-recovery.service)
+                        systemctl start "$unit" ;;
+                esac
+            done < "$active_file"
+            rm -f "$active_file"
+        elif systemctl is-active --quiet ai-cctv-edge-network.service; then
+            systemctl restart ai-cctv-edge-network.service
+            systemctl try-restart ai-cctv-edge.service \
+                ai-cctv-edge-control.service ai-cctv-edge-recovery.service
+        fi
+    else
+        echo "AI CCTV Edge network.interface must be configured before the services can be restarted." >&2
+    fi
 fi
+
+# A matching postinst removes the upgrade guard only after package and service work succeeds.
+rm -f /var/lib/ai-cctv-edge/repair/package-transition

@@ -9,7 +9,7 @@ import socket
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -24,6 +24,8 @@ from .config import (
     RecoveryConfig,
     RtspConfig,
     VideoConfig,
+    NetworkConfig,
+    MonitoringConfig,
     render_toml,
     write_atomic,
 )
@@ -119,6 +121,7 @@ def advertise_until_stopped(
     interval_seconds: float = 1.0,
     destination: str = "255.255.255.255",
     interface: str | None = None,
+    failures: list[Exception] | None = None,
 ) -> None:
     if not 1 <= discovery_port <= 65535:
         raise ValueError("discovery port must be in range 1..65535")
@@ -136,6 +139,13 @@ def advertise_until_stopped(
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         udp_socket.bind((source, 0))
         while not stop.is_set():
+            current = interface_ipv4(interface)
+            if current.address != source or current.broadcast != destination:
+                error = ValueError("selected interface IPv4 changed during pairing")
+                if failures is not None:
+                    failures.append(error)
+                stop.set()
+                raise error
             payload = build_advertisement(
                 device_id=device_id,
                 camera_id=camera_id,
@@ -147,8 +157,11 @@ def advertise_until_stopped(
             )
             try:
                 udp_socket.sendto(payload, (destination, discovery_port))
-            except OSError:
-                pass
+            except OSError as exc:
+                if failures is not None:
+                    failures.append(exc)
+                stop.set()
+                raise
             stop.wait(interval_seconds)
 
 
@@ -179,9 +192,12 @@ class PairingSession:
     token_file: Path
     device_id: str
     camera_id: str
+    interface: str
+    existing_config: EdgeConfig | None = None
     management_port: int = 8003
     recovery_port: int = 8002
     completed: threading.Event = field(default_factory=threading.Event)
+    completed_request: PairingCompletion | None = field(default=None, repr=False)
     apply_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
@@ -193,10 +209,7 @@ class PairingSession:
         if self.marker_path.exists():
             if self.completed.is_set():
                 existing = EdgeConfig.load(self.config_path)
-                if (
-                    existing.device_id == request.device_id
-                    and existing.camera_id == request.camera_id
-                ):
+                if self.completed_request == request:
                     return existing
             raise HTTPException(status_code=409, detail="Edge is already configured")
         if request.device_id != self.device_id or request.camera_id != self.camera_id:
@@ -228,9 +241,22 @@ class PairingSession:
         if not request.backup_root.startswith("/") or "\x00" in request.backup_root:
             raise HTTPException(status_code=422, detail="backup root must be absolute")
 
-        password_file = self.config_path.parent / "publish.password"
+        password_file = (
+            self.existing_config.rtsp.password_file
+            if self.existing_config is not None
+            else self.config_path.parent / "publish.password"
+        )
         operational_token = request.edge_auth_token
-        operational_token_file = self.config_path.parent / "recovery.token"
+        operational_token_file = (
+            self.existing_config.recovery.token_file
+            if self.existing_config is not None
+            else self.config_path.parent / "recovery.token"
+        )
+        control_token_file = (
+            self.existing_config.control.token_file
+            if self.existing_config is not None
+            else operational_token_file
+        )
         config = EdgeConfig(
             schema_version=1,
             device_id=self.device_id,
@@ -240,29 +266,45 @@ class PairingSession:
                 supported_profiles=profiles,
             ),
             rtsp=RtspConfig(
-                mode="central_publish",
+                mode=(self.existing_config.rtsp.mode if self.existing_config else "central_publish"),
                 central_host=request.central_host,
                 central_port=request.central_port,
                 username=request.publish_username,
                 password_file=password_file,
+                edge_port=(self.existing_config.rtsp.edge_port if self.existing_config else 8554),
+                mediamtx_binary=(self.existing_config.rtsp.mediamtx_binary if self.existing_config else Path("/usr/lib/ai-cctv-edge/mediamtx")),
             ),
-            backup=BackupConfig(root=backup_root),
+            backup=(replace(self.existing_config.backup, root=backup_root) if self.existing_config else BackupConfig(root=backup_root)),
             recovery=RecoveryConfig(
+                bind_host=(self.existing_config.recovery.bind_host if self.existing_config else "0.0.0.0"),
                 port=self.recovery_port,
                 token_file=operational_token_file,
             ),
             control=ControlConfig(
+                bind_host=(self.existing_config.control.bind_host if self.existing_config else "0.0.0.0"),
                 port=self.management_port,
-                token_file=operational_token_file,
+                token_file=control_token_file,
+                apply_timeout_seconds=(self.existing_config.control.apply_timeout_seconds if self.existing_config else 30.0),
+                preflight_timeout_seconds=(self.existing_config.control.preflight_timeout_seconds if self.existing_config else 10.0),
             ),
+            monitoring=(self.existing_config.monitoring if self.existing_config else MonitoringConfig()),
+            network=NetworkConfig(interface=self.interface),
         )
         config.validate()
+        if config.rtsp.mode != "central_publish":
+            raise HTTPException(status_code=422, detail="Repair supports central_publish only")
         # 완료 표시를 마지막에 남겨, 설정이 모두 기록되기 전에 서비스가 시작되지 않게 한다.
         write_atomic(password_file, request.publish_password + "\n", mode=0o640)
         write_atomic(operational_token_file, operational_token + "\n", mode=0o600)
+        if control_token_file != operational_token_file:
+            write_atomic(control_token_file, operational_token + "\n", mode=0o600)
         write_atomic(self.config_path, render_toml(config), mode=0o640)
+        self._set_edge_ownership(password_file, operational_token_file, control_token_file, self.config_path)
+        from .network_policy import apply_persistent
+
+        apply_persistent(config)
         write_atomic(self.marker_path, "configured\n", mode=0o644)
-        self._set_edge_ownership(password_file, operational_token_file, self.config_path)
+        self.completed_request = request
         self.completed.set()
         return config
 

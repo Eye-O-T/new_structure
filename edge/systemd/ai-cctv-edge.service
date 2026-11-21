@@ -2,6 +2,10 @@
 [Unit]
 Description=AI_CCTV Raspberry Pi edge camera
 After=network.target
+Requires=ai-cctv-edge-network.service
+After=ai-cctv-edge-network.service
+Requires=ai-cctv-edge-repair-recovery.service
+After=ai-cctv-edge-repair-recovery.service
 Wants=ai-cctv-edge-control.service ai-cctv-edge-recovery.service
 # 초기 설정이 완료된 장치에서만 실행해 예제 주소·인증 값으로 송출하지 않게 한다.
 ConditionPathExists=/etc/ai-cctv-edge/.configured
@@ -11,6 +15,7 @@ Type=simple
 User=ai-cctv-edge
 Group=ai-cctv-edge
 ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml run
+ExecStartPre=+/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml verify-network-policy
 # 비정상 종료 시 다시 시작하되 정상 종료 요청은 그대로 유지한다.
 Restart=on-failure
 RestartSec=3

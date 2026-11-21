@@ -1,0 +1,19 @@
+[Unit]
+Description=Recover an interrupted AI_CCTV Edge Repair before starting Edge services
+DefaultDependencies=no
+After=local-fs.target
+Before=ai-cctv-edge-network.service ai-cctv-edge.service ai-cctv-edge-control.service ai-cctv-edge-recovery.service
+ConditionPathExists=/var/lib/ai-cctv-edge/repair/journal.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml recover-repair --defer-services
+User=root
+Group=root
+UMask=0077
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/ai-cctv-edge/repair /var/lib/ai-cctv-edge/state /etc/ai-cctv-edge /run/ai-cctv-edge-network
+
+[Install]
+WantedBy=multi-user.target

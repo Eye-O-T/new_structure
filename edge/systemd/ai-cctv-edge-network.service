@@ -1,0 +1,20 @@
+[Unit]
+Description=AI_CCTV Edge network interface policy
+After=local-fs.target
+Requires=ai-cctv-edge-repair-recovery.service
+After=ai-cctv-edge-repair-recovery.service
+ConditionPathExists=/etc/ai-cctv-edge/.configured
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml apply-network-policy
+User=root
+Group=root
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/run/ai-cctv-edge-network
+
+[Install]
+WantedBy=multi-user.target

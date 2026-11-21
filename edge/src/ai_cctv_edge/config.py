@@ -12,6 +12,20 @@ from typing import Literal
 
 CAMERA_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 VideoProfileName = Literal["hd", "fhd"]
+NETWORK_INTERFACE = re.compile(r"^[A-Za-z0-9_.:-]{1,15}$")
+
+
+@dataclass(frozen=True)
+class NetworkConfig:
+    interface: str | None = None
+
+    def validate(self) -> None:
+        if self.interface is None:
+            return
+        if not isinstance(self.interface, str):
+            raise ValueError("network.interface must be a string")
+        if not NETWORK_INTERFACE.fullmatch(self.interface) or self.interface == "lo":
+            raise ValueError("invalid network.interface; select a non-loopback Linux interface")
 
 
 # 해상도·FPS·비트레이트를 함께 고정한 HD/FHD 품질 단위다.
@@ -130,6 +144,7 @@ class EdgeConfig:
     recovery: RecoveryConfig
     control: ControlConfig = ControlConfig()
     monitoring: MonitoringConfig = MonitoringConfig()
+    network: NetworkConfig = NetworkConfig()
 
     # TOML의 누락 가능한 항목을 기본값으로 채우고 구형 영상 설정까지 해석한 뒤 검증한다.
     @classmethod
@@ -142,6 +157,9 @@ class EdgeConfig:
         recovery = raw.get("recovery", {})
         control = raw.get("control", {})
         monitoring = raw.get("monitoring", {})
+        network = raw.get("network", {})
+        if not isinstance(network, dict):
+            raise ValueError("network must be a TOML table")
 
         requested_profile = str(video.get("profile", "")).lower()
         if requested_profile:
@@ -237,12 +255,14 @@ class EdgeConfig:
                     monitoring.get("battery_critical_percent", 10)
                 ),
             ),
+            network=NetworkConfig(interface=network.get("interface")),
         )
         config.validate()
         return config
 
     # 설정 충돌과 선택 프로필·배터리 임계값·보존 한도의 계약을 검사한다.
     def validate(self) -> None:
+        self.network.validate()
         if self.schema_version != 1:
             raise ValueError("unsupported edge config schema_version")
         if not self.device_id or len(self.device_id) > 128:
@@ -345,6 +365,13 @@ def render_toml(config: EdgeConfig) -> str:
             f"schema_version = {config.schema_version}",
             f"device_id = {_quote(config.device_id)}",
             f"camera_id = {_quote(config.camera_id)}",
+            "",
+            "[network]",
+            *(
+                [f"interface = {_quote(config.network.interface)}"]
+                if config.network.interface is not None
+                else []
+            ),
             "",
             "[video]",
             f"profile = {_quote(config.video.profile)}",

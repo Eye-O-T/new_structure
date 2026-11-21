@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -30,6 +31,8 @@ from .state import (
     default_state_root,
     utc_timestamp,
 )
+from .network import route_details, selected_interface_ipv4
+from .network_policy import verify_persistent
 
 try:  # Linux용 서비스지만 다른 OS에서도 테스트를 불러올 수 있게 한다.
     import fcntl
@@ -38,6 +41,14 @@ except ImportError:  # pragma: no cover - 비POSIX 테스트 환경용
 
 
 LOGGER = logging.getLogger("ai_cctv.edge")
+
+
+def _route_matches(destination: str, interface: str) -> bool:
+    try:
+        route_details(destination, interface=interface)
+        return True
+    except ValueError:
+        return False
 
 
 # 캡처 정지나 프레임 무응답을 일반 실행 실패와 구별하는 오류다.
@@ -234,27 +245,42 @@ class EdgeRunner:
     # 수신 방식에 맞는 보조 프로세스와 날짜별 백업 파이프라인을 준비한다.
     def _start_children(self) -> None:
         self.children = []
+        if self.config.network.interface:
+            verify_persistent(self.config)
+            selected_interface_ipv4(self.config.network.interface)
+        else:
+            LOGGER.error("NETWORK_INTERFACE_REQUIRED: network services disabled; retaining local capture")
         if self.config.rtsp.mode == "central_pull":
-            generated = self.state_root / "mediamtx.yml"
-            write_atomic(generated, render_edge_mediamtx_config(self.config))
-            self.children.append(
-                self._spawn([str(self.config.rtsp.mediamtx_binary), str(generated)])
-            )
-            time.sleep(1)
+            if self.config.network.interface:
+                generated = self.state_root / "mediamtx.yml"
+                write_atomic(generated, render_edge_mediamtx_config(self.config))
+                self.children.append(
+                    self._spawn([str(self.config.rtsp.mediamtx_binary), str(generated)])
+                )
 
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
         self.camera_watchdog.arm()
         self.capture_control = self.capture_control_store.read()
+        capture_config = self.config
+        if not self.config.network.interface and self.config.rtsp.mode == "central_pull":
+            capture_config = replace(
+                self.config,
+                rtsp=replace(self.config.rtsp, mode="central_publish"),
+            )
         self.capture = GstCapture(
-            self.config,
+            capture_config,
             timestamp,
             recording_enabled=self.capture_control["recording_enabled"],
-            stream_enabled=self.capture_control["stream_enabled"],
+            stream_enabled=(
+                self.capture_control["stream_enabled"]
+                and bool(self.config.network.interface)
+            ),
         )
         self.children.append(self.capture)
         if (
             self.config.rtsp.mode == "central_publish"
             and self.capture_control["stream_enabled"]
+            and self.config.network.interface
         ):
             self._try_start_publisher()
         self._write_status("starting")
@@ -327,6 +353,19 @@ class EdgeRunner:
         """캡처·백업을 유지하며 송출만 재시작한다."""
 
         # 재접속 간격을 최대 30초까지 늘려 장애 중 반복 접속으로 부하가 커지지 않게 한다.
+        if self.config.rtsp.mode == "central_pull":
+            if not self.config.network.interface:
+                return
+            if self.children and self.children[0].poll() is not None:
+                LOGGER.warning("edge MediaMTX exited; local capture remains active")
+                generated = self.state_root / "mediamtx.yml"
+                try:
+                    self.children[0] = self._spawn(
+                        [str(self.config.rtsp.mediamtx_binary), str(generated)]
+                    )
+                except OSError:
+                    LOGGER.exception("could not restart Edge MediaMTX")
+            return
         if self.config.rtsp.mode != "central_publish":
             return
         if not self.capture_control["stream_enabled"]:
@@ -336,6 +375,30 @@ class EdgeRunner:
             return
         now = time.monotonic()
         if self.publisher is not None and self.publisher.poll() is None:
+            try:
+                if not self.config.network.interface:
+                    raise ValueError("NETWORK_INTERFACE_REQUIRED")
+                addresses = socket.getaddrinfo(
+                    self.config.rtsp.central_host,
+                    self.config.rtsp.central_port,
+                    family=socket.AF_INET,
+                    type=socket.SOCK_STREAM,
+                )
+                reachable = False
+                for item in addresses:
+                    try:
+                        route_details(item[4][0], interface=self.config.network.interface)
+                    except ValueError:
+                        continue
+                    reachable = True
+                    break
+                if not reachable:
+                    raise ValueError("NETWORK_ROUTE_MISMATCH")
+            except (OSError, IndexError, ValueError):
+                self._stop_publisher()
+                self._set_central_status("offline")
+                self.publisher_restart_at = now + self.publisher_delay
+                return
             self.publisher_delay = 1.0
             if self._publisher_confirmed():
                 self._set_central_status("online")
@@ -350,6 +413,26 @@ class EdgeRunner:
             self.publisher_restart_at = now + self.publisher_delay
             self.publisher_delay = min(self.publisher_delay * 2, 30.0)
         if now >= self.publisher_restart_at:
+            try:
+                if not self.config.network.interface:
+                    raise ValueError("NETWORK_INTERFACE_REQUIRED")
+                addresses = socket.getaddrinfo(
+                    self.config.rtsp.central_host,
+                    self.config.rtsp.central_port,
+                    family=socket.AF_INET,
+                    type=socket.SOCK_STREAM,
+                )
+                if not any(
+                    _route_matches(item[4][0], self.config.network.interface)
+                    for item in addresses
+                ):
+                    raise ValueError("NETWORK_ROUTE_MISMATCH")
+            except (OSError, IndexError, ValueError) as exc:
+                LOGGER.warning("central route is unavailable; keeping local capture: %s", type(exc).__name__)
+                self.publisher_restart_at = now + self.publisher_delay
+                self.publisher_delay = min(self.publisher_delay * 2, 30.0)
+                self._set_central_status("offline")
+                return
             self._try_start_publisher(now)
 
     def _stop_publisher(self) -> None:
@@ -369,6 +452,8 @@ class EdgeRunner:
 
     def _sync_capture_control(self) -> None:
         desired = self.capture_control_store.read()
+        if not self.config.network.interface:
+            desired = {**desired, "stream_enabled": False}
         if desired == self.capture_control:
             return
         if self.capture is not None:

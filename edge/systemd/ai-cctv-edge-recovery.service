@@ -1,7 +1,12 @@
 # 영상 수집의 재시작에 영향을 받지 않도록 녹화 복구 API를 별도 서비스로 실행한다.
 [Unit]
 Description=AI_CCTV edge recording recovery API
+StartLimitIntervalSec=0
 After=network.target
+Requires=ai-cctv-edge-network.service
+After=ai-cctv-edge-network.service
+Requires=ai-cctv-edge-repair-recovery.service
+After=ai-cctv-edge-repair-recovery.service
 # 실제 장치 설정이 끝나기 전에는 API를 시작하지 않는다.
 ConditionPathExists=/etc/ai-cctv-edge/.configured
 
@@ -10,6 +15,7 @@ Type=simple
 User=ai-cctv-edge
 Group=ai-cctv-edge
 ExecStart=/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml serve-recovery
+ExecStartPre=+/usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml verify-network-policy
 # 종료된 API를 재시작한다. 관리자의 systemctl stop 요청에는 적용하지 않는다.
 Restart=always
 RestartSec=3

@@ -45,8 +45,10 @@ for path in \
     "$work/root/usr/lib/ai-cctv-edge/mediamtx" \
     "$work/root/usr/share/doc/ai-cctv-edge/build-info" \
     "$work/root/lib/systemd/system/ai-cctv-edge.service" \
+    "$work/root/lib/systemd/system/ai-cctv-edge-network.service" \
     "$work/root/lib/systemd/system/ai-cctv-edge-control.service" \
-    "$work/root/lib/systemd/system/ai-cctv-edge-recovery.service"; do
+    "$work/root/lib/systemd/system/ai-cctv-edge-recovery.service" \
+    "$work/root/lib/systemd/system/ai-cctv-edge-repair-recovery.service"; do
     [ -f "$path" ] || fail "required package payload is missing: $path"
 done
 

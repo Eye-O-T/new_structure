@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import shutil
-import socket
 import subprocess
 import tempfile
 from dataclasses import dataclass
 
 from .config import EdgeConfig
-from .network import interface_ipv4, route_interface
+from .network import selected_interface_ipv4, route_details
 
 
 @dataclass(frozen=True)
@@ -46,7 +45,7 @@ def _plugin(name: str) -> Check:
 # 송수신 모드에 필요한 도구·저장소 쓰기·TCP 연결·비밀 파일의 존재를 차례로 진단한다.
 def _network_checks(config: EdgeConfig, interface: str) -> list[Check]:
     try:
-        network = interface_ipv4(interface)
+        network = selected_interface_ipv4(interface)
     except ValueError as exc:
         return [Check("ethernet-interface", "ERROR", str(exc))]
     checks = [
@@ -55,7 +54,7 @@ def _network_checks(config: EdgeConfig, interface: str) -> list[Check]:
         Check("ethernet-broadcast", "OK", network.broadcast),
     ]
     try:
-        selected = route_interface(config.rtsp.central_host)
+        selected = route_details(config.rtsp.central_host, interface=interface)
     except ValueError as exc:
         checks.append(Check("central-route", "ERROR", str(exc)))
     else:
@@ -63,7 +62,7 @@ def _network_checks(config: EdgeConfig, interface: str) -> list[Check]:
             Check(
                 "central-route",
                 "OK" if selected == interface else "ERROR",
-                f"{config.rtsp.central_host} via {selected}",
+                f"{config.rtsp.central_host} via {selected['interface']} from {selected['source']}",
             )
         )
     return checks
@@ -71,8 +70,11 @@ def _network_checks(config: EdgeConfig, interface: str) -> list[Check]:
 
 def run_checks(config: EdgeConfig, interface: str | None = None) -> list[Check]:
     checks = [_command("gst-launch-1.0"), _command("gst-inspect-1.0")]
-    if interface:
-        checks.extend(_network_checks(config, interface))
+    selected = interface or config.network.interface
+    if selected:
+        checks.extend(_network_checks(config, selected))
+    else:
+        checks.append(Check("edge-network-interface", "ERROR", "configure network.interface"))
     for plugin in (
         "libcamerasrc",
         "watchdog",
@@ -130,25 +132,13 @@ def run_checks(config: EdgeConfig, interface: str | None = None) -> list[Check]:
     except OSError as exc:
         checks.append(Check("Backup storage", "ERROR", str(exc)))
 
-    network_name = (
-        "Central RTSP" if config.rtsp.mode == "central_publish" else "Edge RTSP"
+    checks.append(
+        Check(
+            "Edge network probe",
+            "WARN",
+            "active probes are disabled; route and policy checks do not prove server reachability",
+        )
     )
-    network_host = (
-        config.rtsp.central_host
-        if config.rtsp.mode == "central_publish"
-        else "127.0.0.1"
-    )
-    network_port = (
-        config.rtsp.central_port
-        if config.rtsp.mode == "central_publish"
-        else config.rtsp.edge_port
-    )
-    try:
-        with socket.create_connection((network_host, network_port), timeout=3):
-            pass
-        checks.append(Check(network_name, "OK", "TCP connection succeeded"))
-    except OSError as exc:
-        checks.append(Check(network_name, "WARN", str(exc)))
 
     secret_paths = [("Edge auth token", config.control.token_file)]
     if config.recovery.token_file != config.control.token_file:

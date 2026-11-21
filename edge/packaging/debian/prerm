@@ -3,7 +3,33 @@
 # 녹화·상태·사용자 설정을 직접 삭제하지 않아 운영 데이터가 제거 과정에서 사라지지 않게 한다.
 set -eu
 
+install -d -m 0700 /var/lib/ai-cctv-edge/repair
+exec 9>/var/lib/ai-cctv-edge/repair/repair.lock
+flock -n 9 || {
+    echo "An Edge Repair or configuration operation is in progress." >&2
+    exit 1
+}
+
+if [ "${1:-}" = "upgrade" ]; then
+    : > /var/lib/ai-cctv-edge/repair/package-transition
+    chmod 0600 /var/lib/ai-cctv-edge/repair/package-transition
+    install -d -m 0700 /run/ai-cctv-edge-network
+    active_file=/run/ai-cctv-edge-network/upgrade-active-units
+    : > "$active_file"
+    for unit in ai-cctv-edge-network.service ai-cctv-edge.service \
+        ai-cctv-edge-control.service ai-cctv-edge-recovery.service \
+        ai-cctv-edge-repair-recovery.service; do
+        if systemctl is-active --quiet "$unit"; then
+            printf '%s\n' "$unit" >> "$active_file"
+            systemctl stop "$unit"
+        fi
+    done
+fi
+
 if [ "${1:-}" = "remove" ]; then
     systemctl disable --now ai-cctv-edge.service \
         ai-cctv-edge-control.service ai-cctv-edge-recovery.service || true
+    systemctl disable --now ai-cctv-edge-repair-recovery.service || true
+    systemctl disable --now ai-cctv-edge-network.service || true
+    /usr/bin/ai-cctv-edge --config /etc/ai-cctv-edge/config.toml remove-network-policy || true
 fi

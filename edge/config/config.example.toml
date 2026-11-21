@@ -2,6 +2,10 @@ schema_version = 1
 device_id = "edge-001"
 camera_id = "cam-001"
 
+[network]
+# Set to the Edge–Server interface before enabling operation.
+interface = "eth0"
+
 [video]
 profile = "hd"
 width = 1280

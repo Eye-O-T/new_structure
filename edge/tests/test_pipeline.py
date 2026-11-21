@@ -8,6 +8,7 @@ from ai_cctv_edge.pipeline import (
     build_gstreamer_command,
     build_gstreamer_description,
     redacted_command,
+    render_edge_mediamtx_config,
 )
 
 
@@ -96,6 +97,20 @@ class GStreamerDescriptionTests(unittest.TestCase):
 
         self.assertIn("user:***@host", redacted_command(command))
         self.assertNotIn("secret", redacted_command(command))
+
+    def test_central_pull_listener_uses_selected_ipv4_and_tcp_only(self):
+        from unittest.mock import patch
+        from ai_cctv_edge.network import InterfaceIPv4
+
+        config = replace(self.config, rtsp=replace(self.config.rtsp, mode="central_pull"))
+        with patch(
+            "ai_cctv_edge.network.selected_interface_ipv4",
+            return_value=InterfaceIPv4("eth0", "192.168.50.2", 24, "192.168.50.255"),
+        ):
+            generated = render_edge_mediamtx_config(config)
+
+        self.assertIn("rtspAddress: 192.168.50.2:8554", generated)
+        self.assertIn("protocols: [tcp]", generated)
 
     def test_synthetic_pipeline_parses_when_gstreamer_is_installed(self):
         try:

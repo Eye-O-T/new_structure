@@ -7,6 +7,7 @@ import getpass
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import stat
@@ -22,6 +23,7 @@ from .config import (
     RecoveryConfig,
     RtspConfig,
     VideoConfig,
+    NetworkConfig,
     render_toml,
     write_atomic,
 )
@@ -36,7 +38,9 @@ from .pairing import (
 from .recovery import create_app
 from .runner import EdgeRunner
 from .state import ProfileSelectionStore, default_state_root
-from .network import interface_ipv4, interface_mac
+from .network import interface_mac, selected_interface_ipv4
+from .network_policy import apply_pairing, apply_persistent, verify_persistent
+from .repair import PACKAGE_TRANSITION, REPAIR_ROOT, repair_lock, repair_pairing
 
 try:  # Windows에서도 설정 검증을 사용할 수 있게 한다.
     import pwd
@@ -46,6 +50,7 @@ except ImportError:  # pragma: no cover - Windows 개발 환경용
 DEFAULT_CONFIG = Path("/etc/ai-cctv-edge/config.toml")
 CONFIGURED_MARKER_NAME = ".configured"
 SYSTEMD_UNITS = (
+    "ai-cctv-edge-network.service",
     "ai-cctv-edge.service",
     "ai-cctv-edge-control.service",
     "ai-cctv-edge-recovery.service",
@@ -132,7 +137,17 @@ def export_auth_token(config_path: Path, output_path: Path) -> int:
 
 
 # 대화형 입력과 전달 파일을 검증한 뒤 설정·인증 파일·설치 완료 표식을 순서대로 기록한다.
-def setup(path: Path, publish_credentials_file: Path | None = None) -> int:
+def setup(
+    path: Path,
+    publish_credentials_file: Path | None = None,
+    interface: str | None = None,
+) -> int:
+    selected = interface or _prompt("Network interface", "")
+    if not selected:
+        raise ValueError("NETWORK_INTERFACE_REQUIRED: select the Edge–Server interface")
+    selected_interface_ipv4(selected)
+    if pwd is None or os.geteuid() != 0:
+        raise PermissionError("setup requires root on Linux to install the network policy")
     device_id = _prompt("Device ID", "edge-001")
     camera_id = _prompt("Camera ID", "cam-001")
     mode = _prompt("RTSP mode (central_pull/central_publish)", "central_publish")
@@ -163,6 +178,7 @@ def setup(path: Path, publish_credentials_file: Path | None = None) -> int:
         backup=BackupConfig(root=backup_root),
         recovery=RecoveryConfig(token_file=recovery_token_file),
         control=ControlConfig(token_file=recovery_token_file),
+        network=NetworkConfig(interface=selected),
     )
     config.validate()
 
@@ -199,6 +215,7 @@ def setup(path: Path, publish_credentials_file: Path | None = None) -> int:
         write_atomic(password_file, publish_password + "\n", mode=0o600)
     if recovery_token is not None:
         write_atomic(recovery_token_file, recovery_token + "\n", mode=0o600)
+    apply_persistent(config)
     write_atomic(path, render_toml(config))
     if path == DEFAULT_CONFIG or "AI_CCTV_EDGE_STATE_ROOT" in os.environ:
         selection_store = ProfileSelectionStore()
@@ -223,7 +240,43 @@ def systemctl(action: str) -> int:
     return subprocess.run(["systemctl", action, *SYSTEMD_UNITS], check=False).returncode
 
 
-def pair(
+def serve_http_on_interface(app, config, *, recovery: bool) -> None:
+    import uvicorn
+
+    interface = config.network.interface
+    address = selected_interface_ipv4(interface).address
+    settings = config.recovery if recovery else config.control
+    if settings.bind_host not in {"0.0.0.0", address}:
+        raise ValueError("HTTP bind_host must be 0.0.0.0 or the selected interface IPv4")
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=address, port=settings.port, log_config=None)
+    )
+    changed = threading.Event()
+    stopped = threading.Event()
+
+    def watch_address() -> None:
+        while not stopped.wait(1):
+            try:
+                current = selected_interface_ipv4(interface).address
+            except ValueError:
+                current = None
+            if current != address:
+                changed.set()
+                server.should_exit = True
+                return
+
+    watcher = threading.Thread(target=watch_address, name="edge-http-address-watch", daemon=True)
+    watcher.start()
+    try:
+        server.run()
+    finally:
+        stopped.set()
+        watcher.join(timeout=2)
+    if changed.is_set():
+        raise RuntimeError("selected interface IPv4 changed; restarting HTTP service")
+
+
+def _run_pairing(
     path: Path,
     *,
     device_id: str,
@@ -235,58 +288,92 @@ def pair(
     discovery_port: int,
     supported_profiles: tuple[str, ...],
     interface: str | None = None,
+    existing_config: EdgeConfig | None = None,
+    repair_timeout: float | None = None,
 ) -> int:
     """미설정 Edge를 광고하고 인증된 초기 설정을 한 번 수락한다."""
 
     if not interface:
         raise ValueError("an IPv4 interface is required for pairing")
+    if pwd is None or os.geteuid() != 0:
+        raise PermissionError("pairing requires root on Linux to install the network policy")
 
     session = PairingSession(
         config_path=path.expanduser().resolve(),
         token_file=(token_file or path.parent / "recovery.token").expanduser().resolve(),
         device_id=device_id,
         camera_id=camera_id,
+        interface=interface,
+        existing_config=existing_config,
         management_port=management_port,
         recovery_port=recovery_port,
     )
-    if session.marker_path.exists():
+    if session.marker_path.exists() and existing_config is None:
         raise ValueError("Edge is already configured; pairing mode is first-setup only")
     # Fail before starting uvicorn or the advertiser if interface details are invalid.
-    interface_ipv4(interface)
+    selected_network = selected_interface_ipv4(interface)
+    if bind_host not in {"0.0.0.0", selected_network.address}:
+        raise ValueError("pairing bind host must be 0.0.0.0 or the selected interface IPv4")
     interface_mac(interface)
+    apply_pairing(interface, selected_network.address, management_port)
     import uvicorn
 
     stopped = threading.Event()
+    advertiser_failures: list[Exception] = []
+
+    def run_advertiser() -> None:
+        while not server.started and not server.should_exit:
+            if stopped.wait(0.05):
+                return
+        if not server.started:
+            return
+        try:
+            advertise_until_stopped(
+                stop=stopped,
+                device_id=device_id,
+                camera_id=camera_id,
+                management_port=management_port,
+                recovery_port=recovery_port,
+                supported_profiles=supported_profiles,
+                discovery_port=discovery_port,
+                interface=interface,
+                failures=advertiser_failures,
+            )
+        except Exception:
+            server.should_exit = True
+
     advertiser = threading.Thread(
-        target=advertise_until_stopped,
-        kwargs={
-            "stop": stopped,
-            "device_id": device_id,
-            "camera_id": camera_id,
-            "management_port": management_port,
-            "recovery_port": recovery_port,
-            "supported_profiles": supported_profiles,
-            "discovery_port": discovery_port,
-            "interface": interface,
-        },
+        target=run_advertiser,
         name="edge-pairing-advertiser",
         daemon=True,
     )
     server = uvicorn.Server(
         uvicorn.Config(
             create_pairing_app(session),
-            host=bind_host,
+            host=(
+                selected_network.address
+                if bind_host == "0.0.0.0"
+                else bind_host
+            ),
             port=management_port,
             log_config=None,
         )
     )
 
-    # 완료 HTTP 응답이 전송될 여유를 둔 뒤 최초 연결용 서버를 종료한다.
+    completion_watch_stop = threading.Event()
+    timed_out = threading.Event()
+
+    # HTTP 핸들러가 완료를 표시하면 Uvicorn이 해당 응답을 마친 다음 종료한다.
     def stop_after_completion() -> None:
-        session.completed.wait()
-        if session.completed.is_set():
-            time.sleep(0.25)
-            server.should_exit = True
+        deadline = None if repair_timeout is None else time.monotonic() + repair_timeout
+        while not completion_watch_stop.wait(0.1):
+            if session.completed.is_set():
+                server.should_exit = True
+                return
+            if deadline is not None and time.monotonic() >= deadline:
+                timed_out.set()
+                server.should_exit = True
+                return
 
     watcher = threading.Thread(
         target=stop_after_completion,
@@ -297,18 +384,33 @@ def pair(
     watcher.start()
     print(
         f"Pairing mode: device={device_id} camera={camera_id} "
-        f"discovery=UDP/{discovery_port} management={bind_host}:{management_port}"
+        f"discovery=UDP/{discovery_port} management={selected_network.address}:{management_port}"
     )
     print("Open the central server Install Helper and scan the same LAN for this Edge.")
+    if repair_timeout is not None:
+        print(f"Repair pairing expires after {int(repair_timeout)} seconds.")
     try:
         server.run()
     finally:
         stopped.set()
         advertiser.join(timeout=2)
+        completion_watch_stop.set()
+        watcher.join(timeout=1)
     if not session.completed.is_set():
+        if advertiser_failures:
+            raise RuntimeError("pairing discovery stopped because the selected interface failed") from advertiser_failures[0]
+        if timed_out.is_set():
+            raise TimeoutError("Repair pairing timed out")
         return 1
     print(f"Pairing complete: {session.config_path}")
     return 0
+
+
+def pair(*args, **kwargs) -> int:
+    with repair_lock():
+        if PACKAGE_TRANSITION.exists():
+            raise RuntimeError("Edge package upgrade is in progress")
+        return _run_pairing(*args, **kwargs)
 
 
 # systemd 서비스 상태와 마지막 캡처 스냅샷을 함께 출력해 제어·영상 문제를 구분하게 한다.
@@ -340,6 +442,9 @@ def main(argv: list[str] | None = None) -> int:
         "run",
         "serve-control",
         "serve-recovery",
+        "apply-network-policy",
+        "remove-network-policy",
+        "verify-network-policy",
     ):
         sub.add_parser(command)
     sub.choices["doctor"].add_argument(
@@ -353,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
             type=Path,
             help="server install helper JSON handoff file for this camera",
         )
+        configure.add_argument("--interface", help="Linux interface used for all Edge networking")
     export_token = sub.add_parser(
         "export-auth-token",
         help="copy the Edge bearer token to a new mode-0600 handoff file",
@@ -374,6 +480,12 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="IPv4 interface used for directed discovery broadcast, e.g. eth0",
     )
+    repair = sub.add_parser("repair", help="re-pair a configured Edge while preserving local state")
+    repair.add_argument("--device-id")
+    repair.add_argument("--camera-id")
+    repair.add_argument("--interface")
+    recover_repair = sub.add_parser("recover-repair", help=argparse.SUPPRESS)
+    recover_repair.add_argument("--defer-services", action="store_true")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -381,8 +493,13 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s service=edge %(message)s",
     )
     if args.command in {"setup", "configure"}:
-        result = setup(args.config, args.publish_credentials_file)
+        with repair_lock():
+            if PACKAGE_TRANSITION.exists():
+                raise RuntimeError("Edge package upgrade is in progress")
+            result = setup(args.config, args.publish_credentials_file, args.interface)
         if result == 0 and args.config == DEFAULT_CONFIG:
+            if PACKAGE_TRANSITION.exists():
+                raise RuntimeError("Edge package upgrade is in progress")
             systemctl("enable")
             return systemctl("restart")
         return result
@@ -406,10 +523,66 @@ def main(argv: list[str] | None = None) -> int:
             interface=args.interface,
         )
         if result == 0 and args.config == DEFAULT_CONFIG:
+            if PACKAGE_TRANSITION.exists():
+                raise RuntimeError("Edge package upgrade is in progress")
             systemctl("enable")
             return systemctl("restart")
         return result
+    if args.command == "repair":
+        if args.config != DEFAULT_CONFIG:
+            parser.error("repair requires the standard system configuration")
+        try:
+            config = EdgeConfig.load(args.config)
+            device_id = config.device_id if args.device_id is None else args.device_id
+            camera_id = config.camera_id if args.camera_id is None else args.camera_id
+            interface = config.network.interface if args.interface is None else args.interface
+            if not interface:
+                raise ValueError("NETWORK_INTERFACE_REQUIRED: specify --interface")
+            if not device_id or len(device_id) > 128 or any(ord(c) < 32 or ord(c) == 127 for c in device_id):
+                raise ValueError("invalid device_id")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", camera_id):
+                raise ValueError("invalid camera_id")
+
+            def run_repair_pairing(old, selected_device, selected_camera, selected_interface):
+                return _run_pairing(
+                    args.config,
+                    device_id=selected_device,
+                    camera_id=selected_camera,
+                    bind_host="0.0.0.0",
+                    management_port=old.control.port,
+                    recovery_port=old.recovery.port,
+                    discovery_port=DISCOVERY_PORT,
+                    supported_profiles=old.video.supported_profiles,
+                    interface=selected_interface,
+                    existing_config=old,
+                    repair_timeout=600,
+                )
+
+            return repair_pairing(
+                args.config,
+                device_id=device_id,
+                camera_id=camera_id,
+                interface=interface,
+                run_pairing=run_repair_pairing,
+            )
+        except KeyboardInterrupt:
+            print("Repair interrupted; restoring the previous local configuration.")
+            try:
+                from .repair import recover_pending
+
+                recover_pending(args.config)
+            except Exception as exc:
+                print(f"Repair recovery is incomplete: {exc}")
+                return 1
+            return 130
+        except Exception as exc:
+            print(f"Repair failed: {exc}")
+            return 1
     if args.command in {"start", "stop", "restart"}:
+        if PACKAGE_TRANSITION.exists() and args.command != "stop":
+            raise RuntimeError("Edge package upgrade is in progress")
+        if args.command in {"start", "restart"} and (REPAIR_ROOT / "journal.json").exists():
+            raise RuntimeError("Repair recovery must finish before Edge services can start")
         return systemctl(args.command)
     if args.command == "logs":
         return subprocess.run(
@@ -425,32 +598,53 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         config = EdgeConfig.load(args.config)
         checks = run_checks(config, args.interface)
+        try:
+            verify_persistent(config)
+        except (OSError, RuntimeError, ValueError) as exc:
+            from .doctor import Check
+
+            checks.append(Check("edge-network-policy", "ERROR", str(exc)))
         for check in checks:
             print(f"[{check.status}] {check.name}: {check.message}")
         return 1 if any(check.status == "ERROR" for check in checks) else 0
     if args.command == "run":
+        if (REPAIR_ROOT / "journal.json").exists():
+            raise RuntimeError("Repair recovery must finish before Edge services can start")
         return EdgeRunner(args.config).run()
-    if args.command == "serve-control":
-        import uvicorn
+    if args.command == "recover-repair":
+        from .repair import recover_pending
 
+        recover_pending(args.config, start_services=not args.defer_services)
+        return 0
+    if args.command == "apply-network-policy":
+        if os.name != "posix" or os.geteuid() != 0:
+            raise PermissionError("network policy command requires root")
+        apply_persistent(EdgeConfig.load(args.config))
+        return 0
+    if args.command == "remove-network-policy":
+        from .network_policy import remove_policy
+
+        remove_policy()
+        return 0
+    if args.command == "verify-network-policy":
+        if os.name != "posix" or os.geteuid() != 0:
+            raise PermissionError("network policy verification requires root")
         config = EdgeConfig.load(args.config)
-        uvicorn.run(
-            create_control_app(args.config),
-            host=config.control.bind_host,
-            port=config.control.port,
-            log_config=None,
-        )
+        verify_persistent(config)
+        return 0
+    if args.command == "serve-control":
+        if (REPAIR_ROOT / "journal.json").exists():
+            raise RuntimeError("Repair recovery must finish before Edge services can start")
+        config = EdgeConfig.load(args.config)
+        verify_persistent(config)
+        serve_http_on_interface(create_control_app(args.config), config, recovery=False)
         return 0
     if args.command == "serve-recovery":
-        import uvicorn
-
+        if (REPAIR_ROOT / "journal.json").exists():
+            raise RuntimeError("Repair recovery must finish before Edge services can start")
         config = EdgeConfig.load(args.config)
-        uvicorn.run(
-            create_app(args.config),
-            host=config.recovery.bind_host,
-            port=config.recovery.port,
-            log_config=None,
-        )
+        verify_persistent(config)
+        serve_http_on_interface(create_app(args.config), config, recovery=True)
         return 0
     parser.error("unsupported command")
     return 2

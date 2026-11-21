@@ -7,12 +7,19 @@ import json
 import logging
 import os
 import signal
+import socket
 import threading
 from pathlib import Path
 
 from .config import EdgeConfig
 from .config import write_atomic
 from .state import default_state_root, utc_timestamp
+from .network import route_details, selected_interface_ipv4
+from .network_policy import verify_persistent
+try:
+    import pwd
+except ImportError:  # pragma: no cover - Windows development environment
+    pwd = None  # type: ignore[assignment]
 
 LOGGER = logging.getLogger("ai_cctv.edge.publisher")
 
@@ -39,6 +46,26 @@ def _write_status(camera_id: str, status: str, error: str | None = None) -> None
 # 공유 메모리 입력을 인증된 중앙 RTSP로 전달하며 종료·오류를 감독 프로세스에 알린다.
 def publish(config_path: str | Path) -> int:
     config = EdgeConfig.load(config_path)
+    if not config.network.interface:
+        raise ValueError("NETWORK_INTERFACE_REQUIRED: configure network.interface")
+    verify_persistent(config)
+    selected_interface_ipv4(config.network.interface)
+    if pwd is None or not hasattr(os, "geteuid") or os.geteuid() != pwd.getpwnam("ai-cctv-edge").pw_uid:
+        raise PermissionError("publisher must run as the ai-cctv-edge service user")
+    try:
+        resolved = socket.getaddrinfo(
+            config.rtsp.central_host, config.rtsp.central_port,
+            family=socket.AF_INET, type=socket.SOCK_STREAM,
+        )
+        destinations = tuple(dict.fromkeys(item[4][0] for item in resolved))
+    except socket.gaierror as exc:
+        raise ValueError("NETWORK_ROUTE_MISMATCH: central host has no IPv4 address") from exc
+    destination = next(
+        (address for address in destinations if _has_selected_route(address, config.network.interface)),
+        None,
+    )
+    if destination is None:
+        raise ValueError("NETWORK_ROUTE_MISMATCH: no central address routes over the selected interface")
     if config.rtsp.mode != "central_publish":
         raise ValueError("publisher is only valid in central_publish mode")
     password = config.rtsp.password_file.read_text(encoding="utf-8").strip()
@@ -56,7 +83,7 @@ def publish(config_path: str | Path) -> int:
     Gst.init(None)
     socket_path = f"/run/ai-cctv-edge/{config.camera_id}.h264.sock"
     location = (
-        f"rtsp://{config.rtsp.central_host}:{config.rtsp.central_port}/"
+        f"rtsp://{destination}:{config.rtsp.central_port}/"
         f"{config.camera_id}"
     )
     # 이 URI에는 인증값이 없으며 실제 사용자명과 암호는 아래의 요소 속성으로 전달한다.
@@ -115,6 +142,14 @@ def publish(config_path: str | Path) -> int:
         # 정상 종료와 예외 모두에서 파이프라인을 해제해야 소켓과 영상 자원이 반환된다.
         pipeline.set_state(Gst.State.NULL)
     return result
+
+
+def _has_selected_route(destination: str, interface: str) -> bool:
+    try:
+        route_details(destination, interface=interface)
+        return True
+    except ValueError:
+        return False
 
 
 # 송출 전용 프로세스의 설정 경로와 로그를 준비한 뒤 실행 결과를 종료 코드로 전달한다.

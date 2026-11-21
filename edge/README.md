@@ -127,6 +127,22 @@ sudo ai-cctv-edge pair --device-id edge-001 --camera-id cam-001 --interface wlan
 
 기본 포트의 통신 방향은 다음과 같다. 중앙의 `RTSP_BIND_ADDRESS`도 Pi가 접근할 LAN 주소에 바인딩되어 있어야 한다.
 
+#### 기존 Edge Repair
+
+설정된 Edge를 다시 연결할 때 config 파일이나 `.configured`를 직접 지우지 않는다. 다음 명령은 기존 ID와 네트워크 설정을 기본값으로 사용하며 입력한 옵션만 바꾼다.
+
+```bash
+sudo ai-cctv-edge repair
+sudo ai-cctv-edge repair --interface wlan0
+sudo ai-cctv-edge repair --device-id edge-002 --camera-id cam-002
+```
+
+Repair는 최대 10분 동안 기존 「Edge 찾기」·「선택한 Edge 연결」 절차를 기다린다. 작업 중 캡처와 Edge API가 중지되어 녹화 공백이 생길 수 있다. 기존 녹화 파일과 이벤트 기록은 유지되지만 Camera ID를 바꾸면 이후 기록은 새 ID 경로에 저장되고 기존 이력은 자동 연결되지 않는다.
+
+NIC를 바꾸면 광고 MAC 주소도 바뀐다. Server는 Device ID와 MAC의 기존 관계를 검사하므로, ID를 유지한 채 인터페이스만 바꾸면 등록이 거부될 수 있다. 등록 충돌 해결을 위해 Server 기록을 자동 삭제·이전하지 않는다. GUI 오류를 확인하고 Server의 지원 절차로 충돌을 해결한 뒤 기존 등록 응답이 있으면 Edge 설정 전달 재시도를 사용한다.
+
+Repair가 실패하면 이전 로컬 설정과 서비스를 복원한다. 복원에 실패하면 보호된 백업 경로를 안내하며, 재부팅 시 미완료 작업을 감지해 복원을 시도한다. 토큰·게시 비밀번호를 로그에 공유하지 않는다. 성공 메시지는 Edge 로컬 설정과 기존에 실행 중이던 서비스가 복구됐다는 뜻이며, Server 등록·실제 영상 수신은 GUI와 영상 화면에서 따로 확인한다.
+
 | 출발지 → 목적지 | 프로토콜·포트 | 용도 |
 |---|---|---|
 | Pi → 설치 도우미 PC | UDP 37020 | 장치 검색 광고 |

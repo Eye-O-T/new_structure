@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import shlex
+import ipaddress
 from pathlib import Path
 
 from .config import EdgeConfig
@@ -185,9 +186,15 @@ def redacted_command(command: list[str]) -> str:
 def render_edge_mediamtx_config(config: EdgeConfig) -> str:
     if config.rtsp.mode != "central_pull":
         raise ValueError("edge MediaMTX config is only used in central_pull mode")
+    if not config.network.interface:
+        raise ValueError("NETWORK_INTERFACE_REQUIRED: configure network.interface")
+    from .network import selected_interface_ipv4
+
+    interface_address = selected_interface_ipv4(config.network.interface).address
     return f"""logLevel: info
-rtspAddress: :{config.rtsp.edge_port}
+rtspAddress: {interface_address}:{config.rtsp.edge_port}
 rtmpAddress: 127.0.0.1:1935
+protocols: [tcp]
 hls: no
 webrtc: no
 srt: no
