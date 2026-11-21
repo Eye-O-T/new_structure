@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:app/core/network/api_client.dart';
 import 'package:app/core/network/providers.dart';
 import '../domain/event.dart';
 import 'event_history_view_model.dart';
@@ -173,7 +174,7 @@ class _EventImage extends ConsumerWidget {
         ],
       ),
       data: (bytes) => Image.memory(bytes, fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => const Text('이미지 형식이 올바르지 않습니다.')),
+          errorBuilder: (_, _, _) => const Text('이미지 형식이 올바르지 않습니다.')),
     );
   }
 
